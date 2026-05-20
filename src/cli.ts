@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { HttpRegistryClient, packageName, parseRootSpecs, resolveRootRequirements } from './index.js';
+import {
+  createBundleDocuments,
+  createFetchReport,
+  downloadResolvedPackage,
+  HttpRegistryClient,
+  packageName,
+  parseRootSpecs,
+  resolveRootRequirements,
+  writeBundleDocuments,
+  writeFetchReport,
+} from './index.js';
 
 interface FetchOptions {
   dryRun?: boolean;
@@ -70,8 +80,67 @@ program
     const resolution = await resolveRootRequirements(parsedSpecs.requirements, registry);
     const success = resolution.errors.length === 0;
 
-    console.log('fetch download is not implemented yet');
-    console.log(JSON.stringify({ options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) }, null, 2));
+    if (options.dryRun) {
+      console.log(
+        JSON.stringify(
+          { options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) },
+          null,
+          2
+        )
+      );
+    } else if (success) {
+      let downloaded = 0;
+      let skipped = 0;
+
+      for (const pkg of resolution.resolved) {
+        const result = await downloadResolvedPackage(pkg, options.output);
+        if (result.skipped) {
+          skipped++;
+        } else {
+          downloaded++;
+        }
+      }
+
+      const documents = createBundleDocuments({
+        outputDir: options.output,
+        resolved: resolution.resolved,
+        sourceRegistry: options.registry,
+        tagRequirements: resolution.tagRequirements,
+      });
+      await writeBundleDocuments(options.output, documents);
+      await writeFetchReport(
+        options.output,
+        createFetchReport({
+          downloaded,
+          errors: resolution.errors,
+          resolved: resolution.resolved.length,
+          skipped,
+          unsupported: parsedSpecs.unsupported,
+        })
+      );
+
+      console.log(
+        JSON.stringify(
+          {
+            output: options.output,
+            downloaded,
+            skipped,
+            resolved: resolution.resolved.length,
+            tagRequirements: resolution.tagRequirements.length,
+          },
+          null,
+          2
+        )
+      );
+    } else {
+      console.log(
+        JSON.stringify(
+          { options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) },
+          null,
+          2
+        )
+      );
+    }
 
     if (!success) {
       process.exitCode = 1;

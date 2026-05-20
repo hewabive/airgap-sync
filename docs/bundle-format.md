@@ -27,9 +27,11 @@ Describes every tarball in the bundle and why it was included.
       "name": "foo",
       "version": "1.0.0",
       "file": "packages/foo-1.0.0.tgz",
+      "tarball": "https://registry.npmjs.org/foo/-/foo-1.0.0.tgz",
       "resolvedFrom": [
         {
           "type": "range",
+          "raw": "foo@^1.0.0",
           "specifier": "^1.0.0",
           "requiredBy": "root"
         }

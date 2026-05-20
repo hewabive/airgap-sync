@@ -28,6 +28,7 @@ export interface ParseRootSpecsResult {
 
 export interface ResolutionReason {
   requiredBy: string;
+  raw: string;
   specifier: string;
   type: SupportedSpecType;
 }
@@ -77,7 +78,17 @@ export interface ResolveRootRequirementsResult {
 
 export interface ResolvedPackage extends PackageIdentity {
   file: string;
+  tarball: string;
   resolvedFrom: ResolutionReason[];
+}
+
+export interface FetchReport {
+  downloaded: number;
+  errors: ResolutionError[];
+  generatedAt: string;
+  resolved: number;
+  skipped: number;
+  unsupported: UnsupportedRootPackageRequirement[];
 }
 
 export interface BundleManifest {
