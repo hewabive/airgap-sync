@@ -22,8 +22,11 @@ but resolver and publisher behavior is still being implemented.
 ## Intended CLI
 
 ```bash
-# Online machine: resolve dependencies and build a transfer bundle.
-npm-registry-seed fetch ./package.json -o ./seed
+# Online machine: resolve package specs and build a transfer bundle.
+npm-registry-seed fetch react@latest @types/node@^22 -o ./seed
+
+# Or seed from a project manifest.
+npm-registry-seed fetch --manifest ./package.json -o ./seed
 
 # Offline machine: publish tarballs and restore required dist-tags.
 npm-registry-seed publish ./seed -r http://192.168.0.10:4873
@@ -36,6 +39,7 @@ npm-registry-seed publish ./seed -r http://192.168.0.10:4873
 - Download only the dependency graph needed by the input manifests, not the entire npm registry.
 - Restore only tags that are required for dependency resolution.
 - Keep generated reports explicit enough to audit what was fetched and why.
+- Support both package specs (`react@latest`) and project manifests (`package.json`).
 
 ## Development
 

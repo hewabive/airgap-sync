@@ -8,11 +8,17 @@
 
 ## Milestone 2: Resolver MVP
 
-- Read one root `package.json`.
+- Resolve one or more package specs from CLI arguments.
 - Resolve `version`, `range`, `tag`, and `alias` specs.
 - Download tarballs into `packages/`.
 - Traverse `dependencies` and `optionalDependencies`.
 - Write `seed-manifest.json` and `dist-tags.json`.
+
+## Milestone 2.1: Manifest Input
+
+- Read one root `package.json`.
+- Include production dependencies by default.
+- Optionally include root `devDependencies`.
 
 ## Milestone 3: Publish MVP
 

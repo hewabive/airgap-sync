@@ -23,7 +23,7 @@ resolution.
 ## Data Flow
 
 ```text
-package.json / package list
+package specs / package.json / package list
   -> resolve specs through source registry metadata
   -> download tarballs
   -> inspect package manifests from tarballs
@@ -54,6 +54,29 @@ By default, recursive traversal should include:
 `peerDependencies` are not installed automatically by all historical npm clients, but
 modern npm and pnpm may auto-install peers depending on settings. Peer handling should
 therefore be an explicit option before the first stable release.
+
+## Input Modes
+
+The first implementation target is direct package specs:
+
+```bash
+npm-registry-seed fetch react@latest @types/node@^22
+```
+
+This is the smallest useful workflow: it lets an operator seed a registry with one or
+more packages and their transitive dependencies without creating a temporary project.
+
+Manifest input is the second target:
+
+```bash
+npm-registry-seed fetch --manifest ./package.json
+```
+
+Both modes should produce the same internal root requirements:
+
+```text
+package name + npm specifier + requiredBy=root
+```
 
 ## Tag Policy
 

@@ -6,7 +6,7 @@ are auditable.
 ## fetch
 
 ```bash
-npm-registry-seed fetch ./package.json \
+npm-registry-seed fetch react@latest @types/node@^22 \
   --output ./seed \
   --registry https://registry.npmjs.org
 ```
@@ -14,14 +14,18 @@ npm-registry-seed fetch ./package.json \
 Planned options:
 
 ```text
+<spec...>                  Package specs to seed, e.g. react@latest
 -o, --output <dir>        Bundle output directory
 -r, --registry <url>      Source registry URL
+--manifest <path>         Read root dependencies from a package.json
 --include-dev             Include root devDependencies
 --include-peer            Traverse peerDependencies
 --concurrency <number>    Concurrent registry and download operations
 --dry-run                 Resolve and report without downloading
 --debug                   Verbose diagnostics
 ```
+
+At least one package spec or `--manifest` is required.
 
 ## publish
 

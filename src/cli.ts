@@ -13,15 +13,16 @@ program
 program
   .command('fetch')
   .description('Resolve dependencies and build a seed bundle')
-  .argument('<manifest>', 'Path to package.json')
+  .argument('[specs...]', 'Package specs to seed, e.g. react@latest')
   .option('-o, --output <dir>', 'Bundle output directory', './seed')
   .option('-r, --registry <url>', 'Source registry URL', 'https://registry.npmjs.org')
+  .option('--manifest <path>', 'Read root dependencies from a package.json')
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option('--dry-run', 'Resolve and report without downloading')
-  .action((manifest: string, options: Record<string, unknown>) => {
+  .action((specs: string[], options: Record<string, unknown>) => {
     console.log('fetch is not implemented yet');
-    console.log(JSON.stringify({ manifest, options }, null, 2));
+    console.log(JSON.stringify({ specs, options }, null, 2));
   });
 
 program
