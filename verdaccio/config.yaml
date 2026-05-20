@@ -1,0 +1,34 @@
+storage: ./storage
+
+web:
+  title: npm-registry-seed local registry
+
+auth:
+  htpasswd:
+    file: ./htpasswd
+    max_users: 1000
+
+# No uplinks and no package-level "proxy" rules: this registry is populated only
+# by npm publish. Missing packages should fail instead of being fetched upstream.
+uplinks: {}
+
+packages:
+  '@*/*':
+    access: $all
+    publish: $authenticated
+    unpublish: $authenticated
+
+  '**':
+    access: $all
+    publish: $authenticated
+    unpublish: $authenticated
+
+server:
+  keepAliveTimeout: 60
+
+listen: 0.0.0.0:4873
+
+log:
+  type: stdout
+  format: pretty
+  level: http

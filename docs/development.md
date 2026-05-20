@@ -14,6 +14,23 @@ pnpm check
 pnpm format:check
 ```
 
+## Local Verdaccio
+
+The repository includes a Verdaccio config for integration testing:
+
+```bash
+pnpm registry:start
+```
+
+This config has no uplinks and no package `proxy` rules. The registry is populated only
+through `npm publish`, which matches the offline target environment.
+
+Before publishing test bundles, create a local user:
+
+```bash
+npm adduser --registry http://localhost:4873
+```
+
 ## Build Output
 
 The library entrypoint is ESM:

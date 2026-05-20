@@ -9,4 +9,6 @@ coverage/
 !.env.example
 seed/
 airgap-packages/
-
+verdaccio/storage/
+verdaccio/htpasswd
+verdaccio/verdaccio/
