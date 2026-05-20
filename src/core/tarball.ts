@@ -62,7 +62,8 @@ export async function readPackageManifest(tarballPath: string): Promise<PackageM
   await tar.t({
     file: tarballPath,
     onentry: (entry) => {
-      if (entry.path !== 'package/package.json') {
+      const pathParts = entry.path.split('/');
+      if (pathParts.length !== 2 || pathParts[1] !== 'package.json') {
         return;
       }
 
@@ -77,7 +78,7 @@ export async function readPackageManifest(tarballPath: string): Promise<PackageM
   });
 
   if (!manifest?.name || !manifest.version) {
-    throw new Error(`Could not read package/package.json from ${tarballPath}`);
+    throw new Error(`Could not read package.json from ${tarballPath}`);
   }
 
   return manifest;
