@@ -72,6 +72,9 @@ Reports are operational logs. They are allowed to change between minor versions 
 the project is pre-1.0. Stable machine-readable contracts belong in `seed-manifest.json`
 and `dist-tags.json`.
 
+Unsupported specs in `fetch-report.json` include `requiredBy`, so Git, file, link, and
+other non-registry specs can be traced back to the package that declared them.
+
 ## Audit
 
 Use `npm-registry-seed info ./seed` to print a JSON summary of package counts, tags,

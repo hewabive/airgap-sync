@@ -18,6 +18,7 @@ export interface RootPackageRequirement {
 export interface UnsupportedRootPackageRequirement {
   raw: string;
   reason: string;
+  requiredBy: string;
   type: string;
 }
 

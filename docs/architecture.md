@@ -1,7 +1,11 @@
 # Architecture
 
-`npm-registry-seed` builds a transfer bundle that can populate Verdaccio through
-normal npm publishing commands.
+`npm-registry-seed` currently builds a transfer bundle that can populate Verdaccio
+through normal npm publishing commands.
+
+The product direction is broader: a portable airgap dependency sync tool for projects
+that combine Git repositories, npm registry dependencies, and npm Git dependencies.
+The npm/Verdaccio bundle is the first implemented subsystem.
 
 ## Problem
 
@@ -9,9 +13,11 @@ Offline installs fail when the target registry lacks either:
 
 - package versions required by dependency resolution;
 - `dist-tags` such as `latest`, `beta`, or custom tags used as dependency specs.
+- Git repositories referenced directly from package specs.
 
 Tarballs alone are not enough because npm registry metadata is part of dependency
-resolution.
+resolution. Registry population alone is not enough because npm package graphs can
+contain Git dependencies such as `github:owner/repo#sha` or `git+https://...#sha`.
 
 ## Non-Goals
 
@@ -19,6 +25,7 @@ resolution.
 - Rewriting or updating project lockfiles.
 - Acting as a live proxy registry.
 - Mutating Verdaccio storage files directly.
+- Replacing Git with npm registry packages by repacking third-party tarballs by default.
 
 ## Data Flow
 
@@ -35,6 +42,35 @@ seed bundle
   -> npm dist-tag add required tags
 ```
 
+## Target Airgap Flow
+
+```text
+online removable media
+  -> refresh Git repositories
+  -> scan package manifests and lockfiles
+  -> resolve npm registry package closure
+  -> resolve Git dependency closure
+  -> download npm tarballs
+  -> mirror Git repositories or create Git bundles
+  -> write transfer bundle
+
+closed network
+  -> push Git mirrors into Gitea
+  -> publish npm tarballs into Verdaccio
+  -> restore npm dist-tags
+  -> generate install configuration
+  -> verify install without external network access
+```
+
+The Git side should use standard Git primitives where possible:
+
+- `git clone --mirror` / `git fetch --all` for local mirrors;
+- `git push --mirror` or safer per-ref pushes into Gitea;
+- `git bundle` for auditable file-based transfer when a Git server is not available.
+
+The npm side should continue to populate Verdaccio through `npm publish` and
+`npm dist-tag`, not by mutating Verdaccio storage.
+
 ## Resolver Policy
 
 The resolver should use npm-compatible rules:
@@ -45,6 +81,10 @@ The resolver should use npm-compatible rules:
 - `alias`: resolve the underlying package spec.
 - `file`, `link`, `workspace`, `git`, and remote tarball specs are reported and skipped
   unless explicitly supported later.
+
+Unsupported specs must retain their `requiredBy` package so operators can decide
+whether they are root project concerns, transitive registry package concerns, or Git
+dependency closure work.
 
 By default, recursive traversal should include:
 
@@ -118,3 +158,23 @@ npm dist-tag add foo@1.0.0 latest --registry http://verdaccio:4873
 Temporary publish tags avoid accidental `latest` assignment while all versions are being
 published. Before publishing a package name that is absent from the target registry, the
 publish step verifies that the bundle contains a `latest` tag requirement for that name.
+
+## Git Dependency Policy
+
+Git dependencies are not registry packages. If a package manifest contains:
+
+```text
+github:owner/repo#commit
+git+https://github.com/owner/repo.git#commit
+```
+
+the package manager may attempt to access GitHub during install. Publishing npm
+tarballs into Verdaccio does not make those Git URLs resolvable.
+
+The preferred strategy is to mirror the referenced Git repository into the closed
+network and make the original spec resolve to that mirror. Possible mechanisms:
+
+- generate `git config url.<gitea-url>.insteadOf <public-url>` rules;
+- rewrite root project specs when the operator owns the repository;
+- as a last resort, patch/repack third-party tarballs only with explicit operator
+  approval because that changes package contents and may invalidate lockfile integrity.

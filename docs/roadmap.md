@@ -1,5 +1,10 @@
 # Roadmap
 
+The current implementation started as a Verdaccio seed tool. The direction is now a
+larger airgap sync workflow that coordinates Git repository transfer, npm registry
+package transfer, Git dependencies found inside npm package graphs, and offline
+verification.
+
 ## Milestone 1: Repository Skeleton
 
 - TypeScript CLI scaffold.
@@ -41,3 +46,26 @@
 - Auth token discovery.
 - Deterministic reports.
 - Integration tests with Verdaccio.
+
+## Milestone 6: Git Repository Orchestration
+
+- Scan a removable-media directory for Git repositories.
+- Refresh repositories on the online side using safe fetch/pull policies.
+- Mirror or bundle repositories for transfer into a closed network.
+- Push mirrors into Gitea without accidentally deleting protected refs.
+- Generate `insteadOf` rules for closed-network installs.
+
+## Milestone 7: Git Dependencies in Node Graphs
+
+- Preserve `requiredBy` for unsupported Git specs in fetch reports.
+- Parse npm Git specs into canonical repository URL and commit/tag selectors.
+- Mirror Git dependencies discovered in transitive npm package manifests.
+- Recursively inspect package manifests from Git dependencies.
+- Decide when URL rewriting is enough and when package/lockfile patching is required.
+
+## Milestone 8: End-to-End Verification
+
+- Create a closed-network install sandbox.
+- Force npm registry access through Verdaccio.
+- Force Git access through Gitea rewrite rules.
+- Fail if install attempts to reach public npm, GitHub, or other external hosts.

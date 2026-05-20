@@ -40,6 +40,7 @@ function toRegistryRequirement(
     return {
       raw,
       reason: 'Package name could not be inferred from spec',
+      requiredBy,
       type: parsed.type,
     };
   }
@@ -48,6 +49,7 @@ function toRegistryRequirement(
     return {
       raw,
       reason: `Unsupported package spec type: ${parsed.type}`,
+      requiredBy,
       type: parsed.type,
     };
   }
@@ -93,6 +95,7 @@ function parseParsedSpec(
       return {
         raw,
         reason: `Unsupported alias target: ${target.reason}`,
+        requiredBy,
         type: parsed.subSpec.type,
       };
     }
@@ -130,6 +133,7 @@ function parseOneRootSpec(raw: string): RootPackageRequirement | UnsupportedRoot
     return {
       raw,
       reason: (error as Error).message,
+      requiredBy: 'root',
       type: 'invalid',
     };
   }
@@ -169,6 +173,7 @@ export function parseDependencySpec(
     return {
       raw,
       reason: (error as Error).message,
+      requiredBy,
       type: 'invalid',
     };
   }

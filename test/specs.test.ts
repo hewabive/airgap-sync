@@ -67,11 +67,13 @@ describe('parseRootSpecs', () => {
       {
         raw: 'git+https://github.com/user/project.git',
         reason: 'Package name could not be inferred from spec',
+        requiredBy: 'root',
         type: 'git',
       },
       {
         raw: 'file:../local-package',
         reason: 'Package name could not be inferred from spec',
+        requiredBy: 'root',
         type: 'directory',
       },
     ]);
@@ -120,6 +122,7 @@ describe('parseDependencySpec', () => {
     expect(parseDependencySpec('local-package', 'file:../local-package', 'root@1.0.0')).toEqual({
       raw: 'local-package@file:../local-package',
       reason: 'Unsupported package spec type: directory',
+      requiredBy: 'root@1.0.0',
       type: 'directory',
     });
   });

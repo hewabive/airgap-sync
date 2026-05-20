@@ -14,11 +14,20 @@ This project is intentionally not a lockfile copier. It resolves dependencies th
 npm registry metadata, downloads the required tarballs, records the `dist-tags` needed
 for safe registry behavior, and later restores those tags after publishing.
 
+The broader target is an airgap sync workflow for portable media:
+
+- refresh one or more Git repositories on an online machine;
+- discover Node dependency graphs across those repositories;
+- collect npm registry packages for Verdaccio;
+- collect Git dependencies for a local Gitea mirror;
+- apply both sides in the closed network and verify installs do not reach outside.
+
 ## Status
 
-This repository is an early implementation. The package-spec, recursive dependency
-fetch, manifest input, and Verdaccio publish paths are implemented, but the CLI is not
-stable yet.
+This repository is an early implementation. The npm registry package path is usable:
+package-spec input, recursive dependency fetch, manifest input, bundle validation,
+metadata caching, bundle inspection, and Verdaccio publish are implemented. Git
+repository orchestration and Git dependency mirroring are still design work.
 
 ## Intended CLI
 
@@ -36,6 +45,21 @@ npm-registry-seed fetch --manifest ./package.json --include-dev -o ./seed
 npm-registry-seed publish ./seed -r http://192.168.0.10:4873
 ```
 
+Future commands are expected to cover a larger workflow:
+
+```bash
+# Online machine: refresh Git repositories on removable media.
+npm-registry-seed git fetch ./repos
+
+# Online machine: collect npm and Git dependency closure.
+npm-registry-seed collect ./repos -o ./airgap-bundle
+
+# Closed network: push mirrored Git repositories and publish npm packages.
+npm-registry-seed apply ./airgap-bundle \
+  --gitea http://gitea.local \
+  --registry http://verdaccio.local:4873
+```
+
 ## Design Principles
 
 - Publish into the target registry with standard npm operations.
@@ -44,6 +68,7 @@ npm-registry-seed publish ./seed -r http://192.168.0.10:4873
 - Restore required tags and the upstream `latest` tag for each published package name.
 - Keep generated reports explicit enough to audit what was fetched and why.
 - Support both package specs (`react@latest`) and project manifests (`package.json`).
+- Treat Git dependencies as first-class external dependencies, not as registry packages.
 
 ## Development
 
