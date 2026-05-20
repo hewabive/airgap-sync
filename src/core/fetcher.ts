@@ -41,13 +41,29 @@ function requirementId(requirement: RootPackageRequirement): string {
   ].join('\0');
 }
 
+function tagRequirementId(requirement: { name: string; tag: string; version: string }): string {
+  return [requirement.name, requirement.tag, requirement.version].join('\0');
+}
+
+function publishLatestRequirement(name: string): RootPackageRequirement {
+  return {
+    name,
+    raw: `${name}@latest`,
+    requiredBy: 'npm-registry-seed:publish-latest',
+    specifier: 'latest',
+    type: 'tag',
+  };
+}
+
 export async function fetchSeedBundle(
   options: FetchSeedBundleOptions
 ): Promise<FetchSeedBundleResult> {
   const queue = [...options.requirements];
+  const latestRequirements = new Set<string>();
   const processedRequirements = new Set<string>();
   const scannedPackages = new Set<string>();
   const resolvedById = new Map<string, ResolvedRootPackage>();
+  const tagRequirements = new Set<string>();
   const result: FetchSeedBundleResult = {
     downloaded: 0,
     skipped: 0,
@@ -69,9 +85,24 @@ export async function fetchSeedBundle(
 
     const resolution = await resolveRootRequirements([requirement], options.registry);
     result.errors.push(...resolution.errors);
-    result.tagRequirements.push(...resolution.tagRequirements);
+
+    for (const tagRequirement of resolution.tagRequirements) {
+      const id = tagRequirementId(tagRequirement);
+      if (!tagRequirements.has(id)) {
+        tagRequirements.add(id);
+        result.tagRequirements.push(tagRequirement);
+      }
+    }
 
     for (const resolved of resolution.resolved) {
+      if (!latestRequirements.has(resolved.name)) {
+        latestRequirements.add(resolved.name);
+
+        if (!(resolved.resolvedVia === 'tag' && resolved.specifier === 'latest')) {
+          queue.push(publishLatestRequirement(resolved.name));
+        }
+      }
+
       const id = packageId(resolved);
       if (resolvedById.has(id)) {
         continue;

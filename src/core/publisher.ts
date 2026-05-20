@@ -76,6 +76,29 @@ async function npmDistTagAdd(requirement: TagRequirement, registryUrl: string): 
   );
 }
 
+async function npmDistTagRemove(
+  packageName: string,
+  tag: string,
+  registryUrl: string
+): Promise<void> {
+  await execFileAsync('npm', ['dist-tag', 'rm', packageName, tag, '--registry', registryUrl], {
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 60_000,
+  });
+}
+
+async function npmPackageNameExists(packageName: string, registryUrl: string): Promise<boolean> {
+  try {
+    await execFileAsync('npm', ['view', packageName, 'version', '--registry', registryUrl], {
+      maxBuffer: 1024 * 1024,
+      timeout: 30_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createPublishPlan(
   manifest: BundleManifest,
   distTags: DistTagsManifest
@@ -108,6 +131,14 @@ export async function publishBundle(
   let published = 0;
   let skipped = 0;
   let restoredTags = 0;
+  const existingPackageNames = new Set<string>();
+  const desiredTagsByPackage = new Map<string, Set<string>>();
+
+  for (const requirement of distTags.requirements) {
+    const tags = desiredTagsByPackage.get(requirement.name) ?? new Set<string>();
+    tags.add(requirement.tag);
+    desiredTagsByPackage.set(requirement.name, tags);
+  }
 
   if (options.dryRun) {
     const plan = createPublishPlan(manifest, distTags);
@@ -121,6 +152,34 @@ export async function publishBundle(
       skipped: 0,
       totalPackages: manifest.packages.length,
     };
+  }
+
+  for (const pkg of manifest.packages) {
+    if (existingPackageNames.has(pkg.name)) {
+      continue;
+    }
+
+    if (await npmPackageNameExists(pkg.name, options.registryUrl)) {
+      existingPackageNames.add(pkg.name);
+    }
+  }
+
+  const missingLatest = new Set<string>();
+  for (const pkg of manifest.packages) {
+    const desiredTags = desiredTagsByPackage.get(pkg.name) ?? new Set<string>();
+    if (!existingPackageNames.has(pkg.name) && !desiredTags.has('latest')) {
+      missingLatest.add(pkg.name);
+    }
+  }
+
+  if (missingLatest.size > 0) {
+    throw new Error(
+      [
+        'Bundle is missing upstream latest tags for packages that do not exist in the target registry.',
+        'Regenerate the bundle with a current npm-registry-seed fetch command.',
+        `Packages: ${[...missingLatest].join(', ')}`,
+      ].join(' ')
+    );
   }
 
   for (const pkg of manifest.packages) {
@@ -155,6 +214,14 @@ export async function publishBundle(
           tag: requirement.tag,
           error: errorSummary(error),
         });
+      }
+    }
+
+    for (const pkg of manifest.packages) {
+      try {
+        await npmDistTagRemove(pkg.name, tempPublishTag, options.registryUrl);
+      } catch {
+        // The temp tag may already be absent if the package existed before this run.
       }
     }
   }

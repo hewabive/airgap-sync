@@ -86,7 +86,14 @@ The tool must not assign `latest` to a lockfile version simply because that vers
 downloaded. That would make one project's seed corrupt another project's dependency
 resolution in the same Verdaccio instance.
 
-Only tags that are required by discovered dependency specs should be restored.
+Tags that are required by discovered dependency specs should be restored.
+
+`latest` is a special case. Verdaccio may create or keep `latest` during `npm publish`
+even when publishing with a custom temporary tag, and deleting the last `latest` tag is
+not reliable enough to use as a safety mechanism. Therefore, when any package name is
+included in a bundle, the fetch step also includes the source registry's `latest` target
+for that package name and records a `latest` tag requirement. If that pulls in an
+additional version, its dependencies are traversed too.
 
 ## Publish Policy
 
@@ -98,4 +105,5 @@ npm dist-tag add foo@1.0.0 latest --registry http://verdaccio:4873
 ```
 
 Temporary publish tags avoid accidental `latest` assignment while all versions are being
-published.
+published. Before publishing a package name that is absent from the target registry, the
+publish step verifies that the bundle contains a `latest` tag requirement for that name.

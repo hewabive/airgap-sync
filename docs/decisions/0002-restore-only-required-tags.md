@@ -4,7 +4,7 @@ Date: 2026-05-20
 
 ## Status
 
-Accepted
+Superseded by [0003](./0003-include-latest-for-published-packages.md)
 
 ## Context
 
