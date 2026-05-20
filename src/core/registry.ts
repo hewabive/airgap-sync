@@ -17,6 +17,29 @@ export interface HttpRegistryClientOptions {
   timeoutMs?: number;
 }
 
+export class CachedRegistryClient implements RegistryClient {
+  readonly #cache = new Map<string, Promise<PackageMetadata>>();
+  readonly #inner: RegistryClient;
+
+  constructor(inner: RegistryClient) {
+    this.#inner = inner;
+  }
+
+  getPackageMetadata(name: string): Promise<PackageMetadata> {
+    const cached = this.#cache.get(name);
+    if (cached) {
+      return cached;
+    }
+
+    const request = this.#inner.getPackageMetadata(name).catch((error: unknown) => {
+      this.#cache.delete(name);
+      throw error;
+    });
+    this.#cache.set(name, request);
+    return request;
+  }
+}
+
 function encodePackageName(name: string): string {
   return name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name);
 }

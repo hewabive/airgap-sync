@@ -13,7 +13,11 @@ export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { readBundleInfo } from './core/info.js';
 export { readManifestRequirements } from './core/manifests.js';
-export { HttpRegistryClient, isBlockedPublishRegistry } from './core/registry.js';
+export {
+  CachedRegistryClient,
+  HttpRegistryClient,
+  isBlockedPublishRegistry,
+} from './core/registry.js';
 export { createPublishPlan, publishBundle } from './core/publisher.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
@@ -42,7 +46,7 @@ export type {
 
 export type { DownloadedTarball } from './core/tarball.js';
 
-export type { RegistryClient, HttpRegistryClientOptions } from './core/registry.js';
+export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
 
 export type {
   BundleManifest,

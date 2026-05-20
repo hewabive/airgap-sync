@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import {
+  CachedRegistryClient,
   createBundleDocuments,
   createFetchReport,
   fetchSeedBundle,
@@ -102,7 +103,7 @@ program
       return;
     }
 
-    const registry = new HttpRegistryClient(options.registry);
+    const registry = new CachedRegistryClient(new HttpRegistryClient(options.registry));
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
