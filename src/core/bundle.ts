@@ -4,6 +4,7 @@ import type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
+  PublishReport,
   ResolvedPackage,
   ResolvedRootPackage,
   ResolutionError,
@@ -99,4 +100,23 @@ export async function writeBundleDocuments(
 export async function writeFetchReport(outputDir: string, report: FetchReport): Promise<void> {
   await fs.ensureDir(outputDir);
   await fs.writeJson(path.join(outputDir, 'fetch-report.json'), report, { spaces: 2 });
+}
+
+export async function readBundleManifest(bundleDir: string): Promise<BundleManifest> {
+  return (await fs.readJson(path.join(bundleDir, 'seed-manifest.json'))) as BundleManifest;
+}
+
+export async function readDistTagsManifest(bundleDir: string): Promise<DistTagsManifest> {
+  return (await fs.readJson(path.join(bundleDir, 'dist-tags.json'))) as DistTagsManifest;
+}
+
+export async function writePublishReport(bundleDir: string, report: PublishReport): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(
+    path.join(bundleDir, report.dryRun ? 'publish-dry-run-report.json' : 'publish-report.json'),
+    report,
+    {
+      spaces: 2,
+    }
+  );
 }

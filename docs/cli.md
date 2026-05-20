@@ -44,6 +44,9 @@ Planned options:
 --debug                   Verbose diagnostics
 ```
 
+Current MVP behavior publishes tarballs sequentially with a temporary tag, then restores
+the required tags from `dist-tags.json`.
+
 ## info
 
 ```bash

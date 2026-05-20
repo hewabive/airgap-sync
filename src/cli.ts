@@ -8,9 +8,13 @@ import {
   HttpRegistryClient,
   packageName,
   parseRootSpecs,
+  publishBundle,
+  readBundleManifest,
+  readDistTagsManifest,
   resolveRootRequirements,
   writeBundleDocuments,
   writeFetchReport,
+  writePublishReport,
 } from './index.js';
 
 interface FetchOptions {
@@ -20,6 +24,12 @@ interface FetchOptions {
   manifest?: string;
   output: string;
   registry: string;
+}
+
+interface PublishOptions {
+  dryRun?: boolean;
+  registry: string;
+  skipExisting?: boolean;
 }
 
 const program = new Command();
@@ -156,9 +166,27 @@ program
   .requiredOption('-r, --registry <url>', 'Target registry URL')
   .option('--no-skip-existing', 'Attempt to publish versions that already exist')
   .option('--dry-run', 'Print planned operations without publishing')
-  .action((bundle: string, options: Record<string, unknown>) => {
-    console.log('publish is not implemented yet');
-    console.log(JSON.stringify({ bundle, options }, null, 2));
+  .action(async (bundle: string, options: PublishOptions) => {
+    try {
+      const manifest = await readBundleManifest(bundle);
+      const distTags = await readDistTagsManifest(bundle);
+      const report = await publishBundle(manifest, distTags, {
+        bundleDir: bundle,
+        dryRun: options.dryRun === true,
+        registryUrl: options.registry,
+        skipExisting: options.skipExisting !== false,
+      });
+
+      await writePublishReport(bundle, report);
+      console.log(JSON.stringify(report, null, 2));
+
+      if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
   });
 
 program

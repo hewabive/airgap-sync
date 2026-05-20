@@ -26,6 +26,7 @@
 - Use a temporary publish tag.
 - Restore tags from `dist-tags.json`.
 - Write `publish-report.json`.
+- Add package existence pre-checks and concurrency.
 
 ## Milestone 4: Project-Scale Inputs
 

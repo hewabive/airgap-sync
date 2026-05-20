@@ -118,3 +118,24 @@ export interface DistTagsManifest {
   tags: Record<string, Record<string, string>>;
   requirements: TagRequirement[];
 }
+
+export type PublishActionStatus = 'planned' | 'published' | 'skipped' | 'tagged' | 'error';
+
+export interface PublishActionResult {
+  action: 'publish' | 'dist-tag';
+  package: string;
+  status: PublishActionStatus;
+  error?: string;
+  tag?: string;
+}
+
+export interface PublishReport {
+  dryRun: boolean;
+  errors: PublishActionResult[];
+  generatedAt: string;
+  published: number;
+  registry: string;
+  restoredTags: number;
+  skipped: number;
+  totalPackages: number;
+}

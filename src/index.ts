@@ -3,12 +3,16 @@ export const packageName = 'npm-registry-seed';
 export {
   createBundleDocuments,
   createFetchReport,
+  readBundleManifest,
+  readDistTagsManifest,
   writeBundleDocuments,
   writeFetchReport,
+  writePublishReport,
 } from './core/bundle.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
-export { HttpRegistryClient } from './core/registry.js';
+export { HttpRegistryClient, isBlockedPublishRegistry } from './core/registry.js';
+export { createPublishPlan, publishBundle } from './core/publisher.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
 export {
@@ -19,6 +23,7 @@ export {
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
+export type { PublishBundleOptions } from './core/publisher.js';
 
 export type { DownloadedTarball } from './core/tarball.js';
 
@@ -33,6 +38,9 @@ export type {
   PackageVersionMetadata,
   ParseRootSpecsResult,
   PackageIdentity,
+  PublishActionResult,
+  PublishActionStatus,
+  PublishReport,
   ResolutionError,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,

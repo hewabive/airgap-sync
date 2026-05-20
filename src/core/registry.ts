@@ -1,6 +1,13 @@
 import axios from 'axios';
 import type { PackageMetadata } from '../types.js';
 
+const blockedRegistries = new Set([
+  'registry.npmjs.org',
+  'registry.yarnpkg.com',
+  'registry.npmmirror.com',
+  'npm.pkg.github.com',
+]);
+
 export interface RegistryClient {
   getPackageMetadata(name: string): Promise<PackageMetadata>;
 }
@@ -12,6 +19,15 @@ export interface HttpRegistryClientOptions {
 
 function encodePackageName(name: string): string {
   return name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name);
+}
+
+export function isBlockedPublishRegistry(registryUrl: string): boolean {
+  try {
+    const url = new URL(registryUrl);
+    return blockedRegistries.has(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 export class HttpRegistryClient implements RegistryClient {
