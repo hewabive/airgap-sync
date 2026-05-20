@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { packageName } from './index.js';
+import { packageName, parseRootSpecs } from './index.js';
+
+interface FetchOptions {
+  dryRun?: boolean;
+  includeDev?: boolean;
+  includePeer?: boolean;
+  manifest?: string;
+  output: string;
+  registry: string;
+}
 
 const program = new Command();
 
@@ -20,9 +29,20 @@ program
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option('--dry-run', 'Resolve and report without downloading')
-  .action((specs: string[], options: Record<string, unknown>) => {
-    console.log('fetch is not implemented yet');
-    console.log(JSON.stringify({ specs, options }, null, 2));
+  .action((specs: string[], options: FetchOptions) => {
+    if (specs.length === 0 && !options.manifest) {
+      console.error('Error: provide at least one package spec or --manifest <path>');
+      process.exitCode = 1;
+      return;
+    }
+
+    if (options.manifest) {
+      console.log('manifest input is not implemented yet');
+    }
+
+    const parsedSpecs = parseRootSpecs(specs);
+    console.log('fetch resolver is not implemented yet');
+    console.log(JSON.stringify({ options, ...parsedSpecs }, null, 2));
   });
 
 program

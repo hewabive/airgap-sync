@@ -3,10 +3,33 @@ export interface PackageIdentity {
   version: string;
 }
 
+export type SupportedSpecType = 'version' | 'range' | 'tag' | 'alias';
+
+export interface RootPackageRequirement {
+  name: string;
+  raw: string;
+  requiredBy: 'root';
+  specifier: string;
+  type: SupportedSpecType;
+  alias?: string;
+  aliasTargetType?: Exclude<SupportedSpecType, 'alias'>;
+}
+
+export interface UnsupportedRootPackageRequirement {
+  raw: string;
+  reason: string;
+  type: string;
+}
+
+export interface ParseRootSpecsResult {
+  requirements: RootPackageRequirement[];
+  unsupported: UnsupportedRootPackageRequirement[];
+}
+
 export interface ResolutionReason {
   requiredBy: string;
   specifier: string;
-  type: 'version' | 'range' | 'tag' | 'alias';
+  type: SupportedSpecType;
 }
 
 export interface ResolvedPackage extends PackageIdentity {
