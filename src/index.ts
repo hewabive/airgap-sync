@@ -6,13 +6,19 @@ export {
   writeBundleDocuments,
   writeFetchReport,
 } from './core/bundle.js';
+export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { HttpRegistryClient } from './core/registry.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
-export { parseRootSpecs } from './core/specs.js';
-export { downloadResolvedPackage } from './core/tarball.js';
+export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
+export {
+  dependencySpecsFromManifest,
+  downloadResolvedPackage,
+  readPackageManifest,
+} from './core/tarball.js';
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
+export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
 
 export type { DownloadedTarball } from './core/tarball.js';
 
@@ -23,6 +29,7 @@ export type {
   DistTagsManifest,
   FetchReport,
   PackageMetadata,
+  PackageManifest,
   PackageVersionMetadata,
   ParseRootSpecsResult,
   PackageIdentity,

@@ -8,7 +8,7 @@ export type SupportedSpecType = 'version' | 'range' | 'tag' | 'alias';
 export interface RootPackageRequirement {
   name: string;
   raw: string;
-  requiredBy: 'root';
+  requiredBy: string;
   specifier: string;
   type: SupportedSpecType;
   alias?: string;
@@ -56,7 +56,7 @@ export interface ResolvedRootPackage extends PackageIdentity {
   alias?: string;
   dist: PackageVersionMetadata['dist'];
   raw: string;
-  requiredBy: 'root';
+  requiredBy: string;
   resolvedVia: Exclude<SupportedSpecType, 'alias'>;
   specifier: string;
   type: SupportedSpecType;
@@ -89,6 +89,14 @@ export interface FetchReport {
   resolved: number;
   skipped: number;
   unsupported: UnsupportedRootPackageRequirement[];
+}
+
+export interface PackageManifest {
+  dependencies?: Record<string, string>;
+  name: string;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  version: string;
 }
 
 export interface BundleManifest {

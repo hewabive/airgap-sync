@@ -80,7 +80,7 @@ export function resolveRootRequirementFromMetadata(
     version: selected.version,
     dist: versionMetadata.dist,
     raw: requirement.raw,
-    requiredBy: 'root',
+    requiredBy: requirement.requiredBy,
     resolvedVia: selected.resolvedVia,
     specifier: requirement.specifier,
     type: requirement.type,
@@ -96,7 +96,7 @@ export function resolveRootRequirementFromMetadata(
       tagRequirement: {
         name: requirement.name,
         version: selected.version,
-        requiredBy: 'root',
+        requiredBy: requirement.requiredBy,
         tag: requirement.specifier,
       },
     };

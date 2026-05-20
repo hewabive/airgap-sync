@@ -2,7 +2,8 @@ import path from 'node:path';
 import type { Readable } from 'node:stream';
 import axios from 'axios';
 import fs from 'fs-extra';
-import type { ResolvedRootPackage } from '../types.js';
+import * as tar from 'tar';
+import type { PackageManifest, ResolvedRootPackage } from '../types.js';
 import { packageFileName } from './files.js';
 
 export interface DownloadedTarball {
@@ -52,5 +53,43 @@ export async function downloadResolvedPackage(
     path: outputPath,
     skipped: false,
     version: pkg.version,
+  };
+}
+
+export async function readPackageManifest(tarballPath: string): Promise<PackageManifest> {
+  let manifest: PackageManifest | undefined;
+
+  await tar.t({
+    file: tarballPath,
+    onentry: (entry) => {
+      if (entry.path !== 'package/package.json') {
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      entry.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      entry.on('end', () => {
+        manifest = JSON.parse(Buffer.concat(chunks).toString('utf8')) as PackageManifest;
+      });
+    },
+  });
+
+  if (!manifest?.name || !manifest.version) {
+    throw new Error(`Could not read package/package.json from ${tarballPath}`);
+  }
+
+  return manifest;
+}
+
+export function dependencySpecsFromManifest(
+  manifest: PackageManifest,
+  options: { includePeer?: boolean } = {}
+): Record<string, string> {
+  return {
+    ...manifest.dependencies,
+    ...manifest.optionalDependencies,
+    ...(options.includePeer ? manifest.peerDependencies : {}),
   };
 }

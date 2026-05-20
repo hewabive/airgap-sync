@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import {
   createBundleDocuments,
   createFetchReport,
-  downloadResolvedPackage,
+  fetchSeedBundle,
   HttpRegistryClient,
   packageName,
   parseRootSpecs,
@@ -77,10 +77,9 @@ program
     }
 
     const registry = new HttpRegistryClient(options.registry);
-    const resolution = await resolveRootRequirements(parsedSpecs.requirements, registry);
-    const success = resolution.errors.length === 0;
 
     if (options.dryRun) {
+      const resolution = await resolveRootRequirements(parsedSpecs.requirements, registry);
       console.log(
         JSON.stringify(
           { options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) },
@@ -88,19 +87,22 @@ program
           2
         )
       );
-    } else if (success) {
-      let downloaded = 0;
-      let skipped = 0;
-
-      for (const pkg of resolution.resolved) {
-        const result = await downloadResolvedPackage(pkg, options.output);
-        if (result.skipped) {
-          skipped++;
-        } else {
-          downloaded++;
-        }
+      if (resolution.errors.length > 0) {
+        process.exitCode = 1;
       }
+      return;
+    }
 
+    const resolution = await fetchSeedBundle({
+      includePeer: options.includePeer === true,
+      outputDir: options.output,
+      registry,
+      requirements: parsedSpecs.requirements,
+      unsupported: parsedSpecs.unsupported,
+    });
+    const success = resolution.errors.length === 0;
+
+    if (success) {
       const documents = createBundleDocuments({
         outputDir: options.output,
         resolved: resolution.resolved,
@@ -111,11 +113,11 @@ program
       await writeFetchReport(
         options.output,
         createFetchReport({
-          downloaded,
+          downloaded: resolution.downloaded,
           errors: resolution.errors,
           resolved: resolution.resolved.length,
-          skipped,
-          unsupported: parsedSpecs.unsupported,
+          skipped: resolution.skipped,
+          unsupported: resolution.unsupported,
         })
       );
 
@@ -123,8 +125,8 @@ program
         JSON.stringify(
           {
             output: options.output,
-            downloaded,
-            skipped,
+            downloaded: resolution.downloaded,
+            skipped: resolution.skipped,
             resolved: resolution.resolved.length,
             tagRequirements: resolution.tagRequirements.length,
           },

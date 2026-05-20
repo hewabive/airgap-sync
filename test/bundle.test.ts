@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createBundleDocuments, createFetchReport, packageFileName } from '../src/index.js';
-import type { ResolvedRootPackage } from '../src/types.js';
+import {
+  createBundleDocuments,
+  createFetchReport,
+  dependencySpecsFromManifest,
+  packageFileName,
+} from '../src/index.js';
+import type { PackageManifest, ResolvedRootPackage } from '../src/types.js';
 
 const resolvedPackage: ResolvedRootPackage = {
   name: '@scope/demo',
@@ -87,6 +92,37 @@ describe('createFetchReport', () => {
       resolved: 1,
       skipped: 0,
       unsupported: [],
+    });
+  });
+});
+
+describe('dependencySpecsFromManifest', () => {
+  const manifest: PackageManifest = {
+    name: 'demo',
+    version: '1.0.0',
+    dependencies: {
+      a: '^1.0.0',
+    },
+    optionalDependencies: {
+      b: 'latest',
+    },
+    peerDependencies: {
+      c: '^3.0.0',
+    },
+  };
+
+  it('includes dependencies and optionalDependencies by default', () => {
+    expect(dependencySpecsFromManifest(manifest)).toEqual({
+      a: '^1.0.0',
+      b: 'latest',
+    });
+  });
+
+  it('can include peerDependencies', () => {
+    expect(dependencySpecsFromManifest(manifest, { includePeer: true })).toEqual({
+      a: '^1.0.0',
+      b: 'latest',
+      c: '^3.0.0',
     });
   });
 });

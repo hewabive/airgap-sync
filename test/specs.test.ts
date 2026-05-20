@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRootSpecs } from '../src/core/specs.js';
+import { parseDependencySpec, parseRootSpecs } from '../src/core/specs.js';
 
 describe('parseRootSpecs', () => {
   it('treats a bare package name as the latest tag', () => {
@@ -81,6 +81,36 @@ describe('parseRootSpecs', () => {
     expect(parseRootSpecs(['', '   '])).toEqual({
       requirements: [],
       unsupported: [],
+    });
+  });
+});
+
+describe('parseDependencySpec', () => {
+  it('parses dependency specs with a non-root requiredBy value', () => {
+    expect(parseDependencySpec('is-number', '^7.0.0', 'kind-of@6.0.3')).toEqual({
+      name: 'is-number',
+      raw: 'is-number@^7.0.0',
+      requiredBy: 'kind-of@6.0.3',
+      specifier: '^7.0.0',
+      type: 'range',
+    });
+  });
+
+  it('parses dependency tag specs', () => {
+    expect(parseDependencySpec('demo', 'latest', 'root-package@1.0.0')).toEqual({
+      name: 'demo',
+      raw: 'demo@latest',
+      requiredBy: 'root-package@1.0.0',
+      specifier: 'latest',
+      type: 'tag',
+    });
+  });
+
+  it('reports unsupported dependency specs', () => {
+    expect(parseDependencySpec('local-package', 'file:../local-package', 'root@1.0.0')).toEqual({
+      raw: 'local-package@file:../local-package',
+      reason: 'Unsupported package spec type: directory',
+      type: 'directory',
     });
   });
 });

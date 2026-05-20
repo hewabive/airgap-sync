@@ -32,6 +32,7 @@ function hasExplicitSpecifier(raw: string, name: string): boolean {
 function toRegistryRequirement(
   parsed: NpaResult,
   raw: string,
+  requiredBy: string,
   forcedSpecifier?: string,
   forcedType?: RegistrySpecType
 ): RootPackageRequirement | UnsupportedRootPackageRequirement {
@@ -57,7 +58,7 @@ function toRegistryRequirement(
   return {
     name: parsed.name,
     raw,
-    requiredBy: 'root',
+    requiredBy,
     specifier,
     type,
   };
@@ -74,22 +75,15 @@ function normalizeBarePackage(parsed: NpaResult): { specifier?: string; type?: R
   };
 }
 
-function parseOneRootSpec(raw: string): RootPackageRequirement | UnsupportedRootPackageRequirement {
-  let parsed: NpaResult;
-
-  try {
-    parsed = npa(raw);
-  } catch (error) {
-    return {
-      raw,
-      reason: (error as Error).message,
-      type: 'invalid',
-    };
-  }
-
+function parseParsedSpec(
+  parsed: NpaResult,
+  raw: string,
+  requiredBy: string,
+  normalizeBare: boolean
+): RootPackageRequirement | UnsupportedRootPackageRequirement {
   if (isAliasResult(parsed)) {
     const alias = parsed.name;
-    const target = toRegistryRequirement(parsed.subSpec, raw);
+    const target = toRegistryRequirement(parsed.subSpec, raw, requiredBy);
 
     if ('reason' in target) {
       return {
@@ -107,8 +101,24 @@ function parseOneRootSpec(raw: string): RootPackageRequirement | UnsupportedRoot
     };
   }
 
-  const bare = normalizeBarePackage(parsed);
-  return toRegistryRequirement(parsed, raw, bare.specifier, bare.type);
+  const bare = normalizeBare ? normalizeBarePackage(parsed) : {};
+  return toRegistryRequirement(parsed, raw, requiredBy, bare.specifier, bare.type);
+}
+
+function parseOneRootSpec(raw: string): RootPackageRequirement | UnsupportedRootPackageRequirement {
+  let parsed: NpaResult;
+
+  try {
+    parsed = npa(raw);
+  } catch (error) {
+    return {
+      raw,
+      reason: (error as Error).message,
+      type: 'invalid',
+    };
+  }
+
+  return parseParsedSpec(parsed, raw, 'root', true);
 }
 
 export function parseRootSpecs(specs: string[]): ParseRootSpecsResult {
@@ -128,4 +138,22 @@ export function parseRootSpecs(specs: string[]): ParseRootSpecsResult {
   }
 
   return { requirements, unsupported };
+}
+
+export function parseDependencySpec(
+  name: string,
+  specifier: string,
+  requiredBy: string
+): RootPackageRequirement | UnsupportedRootPackageRequirement {
+  const raw = `${name}@${specifier}`;
+
+  try {
+    return parseParsedSpec(npa.resolve(name, specifier), raw, requiredBy, false);
+  } catch (error) {
+    return {
+      raw,
+      reason: (error as Error).message,
+      type: 'invalid',
+    };
+  }
 }
