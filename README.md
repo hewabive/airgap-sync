@@ -1,0 +1,75 @@
+# npm-registry-seed
+
+Build a publishable npm registry seed from package manifests, then publish it into
+Verdaccio or another npm-compatible registry.
+
+The goal is to make a normal package-manager install work against an offline registry:
+
+```bash
+npm ci --registry http://verdaccio.local:4873
+pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
+```
+
+This project is intentionally not a lockfile copier. It resolves dependencies through
+npm registry metadata, downloads the required tarballs, records the `dist-tags` that
+were used during resolution, and later restores those tags after publishing.
+
+## Status
+
+This repository is a development scaffold. The CLI shape and documentation are present,
+but resolver and publisher behavior is still being implemented.
+
+## Intended CLI
+
+```bash
+# Online machine: resolve dependencies and build a transfer bundle.
+npm-registry-seed fetch ./package.json -o ./seed
+
+# Offline machine: publish tarballs and restore required dist-tags.
+npm-registry-seed publish ./seed -r http://192.168.0.10:4873
+```
+
+## Design Principles
+
+- Publish into the target registry with standard npm operations.
+- Resolve `version`, `range`, `tag`, and `alias` specs using npm registry metadata.
+- Download only the dependency graph needed by the input manifests, not the entire npm registry.
+- Restore only tags that are required for dependency resolution.
+- Keep generated reports explicit enough to audit what was fetched and why.
+
+## Development
+
+Requirements:
+
+- Node.js 22 or newer
+- pnpm 10 or newer
+
+Setup:
+
+```bash
+corepack enable
+pnpm install
+pnpm check
+```
+
+Useful commands:
+
+```bash
+pnpm build       # Type-check and build dist/
+pnpm test        # Run tests
+pnpm lint        # Run ESLint
+pnpm format      # Format source and docs
+pnpm check       # Lint, type-check, and test
+```
+
+## Documentation
+
+- [Architecture](./docs/architecture.md)
+- [CLI Contract](./docs/cli.md)
+- [Bundle Format](./docs/bundle-format.md)
+- [Development Guide](./docs/development.md)
+- [Roadmap](./docs/roadmap.md)
+
+## License
+
+MIT
