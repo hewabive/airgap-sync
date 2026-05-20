@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { packageName, parseRootSpecs } from './index.js';
+import { HttpRegistryClient, packageName, parseRootSpecs, resolveRootRequirements } from './index.js';
 
 interface FetchOptions {
   dryRun?: boolean;
@@ -13,6 +13,23 @@ interface FetchOptions {
 }
 
 const program = new Command();
+
+function toFetchPreview(result: Awaited<ReturnType<typeof resolveRootRequirements>>) {
+  return {
+    resolved: result.resolved.map((pkg) => ({
+      name: pkg.name,
+      version: pkg.version,
+      raw: pkg.raw,
+      specifier: pkg.specifier,
+      type: pkg.type,
+      resolvedVia: pkg.resolvedVia,
+      alias: pkg.alias,
+      tarball: pkg.dist.tarball,
+    })),
+    errors: result.errors,
+    tagRequirements: result.tagRequirements,
+  };
+}
 
 program
   .name(packageName)
@@ -29,7 +46,7 @@ program
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option('--dry-run', 'Resolve and report without downloading')
-  .action((specs: string[], options: FetchOptions) => {
+  .action(async (specs: string[], options: FetchOptions) => {
     if (specs.length === 0 && !options.manifest) {
       console.error('Error: provide at least one package spec or --manifest <path>');
       process.exitCode = 1;
@@ -41,8 +58,24 @@ program
     }
 
     const parsedSpecs = parseRootSpecs(specs);
-    console.log('fetch resolver is not implemented yet');
-    console.log(JSON.stringify({ options, ...parsedSpecs }, null, 2));
+
+    if (parsedSpecs.requirements.length === 0) {
+      console.error('Error: no supported package specs to resolve');
+      console.error(JSON.stringify({ unsupported: parsedSpecs.unsupported }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+
+    const registry = new HttpRegistryClient(options.registry);
+    const resolution = await resolveRootRequirements(parsedSpecs.requirements, registry);
+    const success = resolution.errors.length === 0;
+
+    console.log('fetch download is not implemented yet');
+    console.log(JSON.stringify({ options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) }, null, 2));
+
+    if (!success) {
+      process.exitCode = 1;
+    }
   });
 
 program

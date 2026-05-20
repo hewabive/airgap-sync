@@ -32,6 +32,49 @@ export interface ResolutionReason {
   type: SupportedSpecType;
 }
 
+export interface PackageVersionMetadata {
+  dependencies?: Record<string, string>;
+  dist: {
+    integrity?: string;
+    shasum?: string;
+    tarball: string;
+  };
+  name: string;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  version: string;
+}
+
+export interface PackageMetadata {
+  'dist-tags'?: Record<string, string>;
+  name: string;
+  versions: Record<string, PackageVersionMetadata>;
+}
+
+export interface ResolvedRootPackage extends PackageIdentity {
+  alias?: string;
+  dist: PackageVersionMetadata['dist'];
+  raw: string;
+  requiredBy: 'root';
+  resolvedVia: Exclude<SupportedSpecType, 'alias'>;
+  specifier: string;
+  type: SupportedSpecType;
+}
+
+export interface ResolutionError {
+  name: string;
+  raw: string;
+  reason: string;
+  specifier: string;
+  type: SupportedSpecType;
+}
+
+export interface ResolveRootRequirementsResult {
+  resolved: ResolvedRootPackage[];
+  errors: ResolutionError[];
+  tagRequirements: TagRequirement[];
+}
+
 export interface ResolvedPackage extends PackageIdentity {
   file: string;
   resolvedFrom: ResolutionReason[];
