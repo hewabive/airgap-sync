@@ -13,11 +13,11 @@ import {
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
-  resolveRootRequirements,
   writeBundleDocuments,
   writeFetchReport,
   writePublishReport,
 } from './index.js';
+import type { FetchSeedBundleResult, ResolveRootRequirementsResult } from './index.js';
 
 interface FetchOptions {
   dryRun?: boolean;
@@ -36,7 +36,7 @@ interface PublishOptions {
 
 const program = new Command();
 
-function toFetchPreview(result: Awaited<ReturnType<typeof resolveRootRequirements>>) {
+function toFetchPreview(result: ResolveRootRequirementsResult) {
   return {
     resolved: result.resolved.map((pkg) => ({
       name: pkg.name,
@@ -50,6 +50,16 @@ function toFetchPreview(result: Awaited<ReturnType<typeof resolveRootRequirement
     })),
     errors: result.errors,
     tagRequirements: result.tagRequirements,
+  };
+}
+
+function toFetchDryRun(result: FetchSeedBundleResult) {
+  return {
+    downloaded: result.downloaded,
+    skipped: result.skipped,
+    wouldDownload: result.wouldDownload,
+    ...toFetchPreview(result),
+    unsupported: result.unsupported,
   };
 }
 
@@ -95,8 +105,15 @@ program
     const registry = new HttpRegistryClient(options.registry);
 
     if (options.dryRun) {
-      const resolution = await resolveRootRequirements(requirements, registry);
-      console.log(JSON.stringify({ options, unsupported, ...toFetchPreview(resolution) }, null, 2));
+      const resolution = await fetchSeedBundle({
+        download: false,
+        includePeer: options.includePeer === true,
+        outputDir: options.output,
+        registry,
+        requirements,
+        unsupported,
+      });
+      console.log(JSON.stringify({ options, ...toFetchDryRun(resolution) }, null, 2));
       if (resolution.errors.length > 0) {
         process.exitCode = 1;
       }

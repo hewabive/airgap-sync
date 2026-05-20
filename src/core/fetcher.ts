@@ -1,4 +1,5 @@
 import type {
+  PackageManifest,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
   RootPackageRequirement,
@@ -14,6 +15,7 @@ import {
 } from './tarball.js';
 
 export interface FetchSeedBundleOptions {
+  download?: boolean;
   includePeer?: boolean;
   outputDir: string;
   registry: RegistryClient;
@@ -25,6 +27,7 @@ export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
   downloaded: number;
   skipped: number;
   unsupported: UnsupportedRootPackageRequirement[];
+  wouldDownload: number;
 }
 
 function packageId(pkg: { name: string; version: string }): string {
@@ -55,9 +58,34 @@ function publishLatestRequirement(name: string): RootPackageRequirement {
   };
 }
 
+async function manifestFromRegistry(
+  pkg: ResolvedRootPackage,
+  registry: RegistryClient
+): Promise<PackageManifest> {
+  const metadata = await registry.getPackageMetadata(pkg.name);
+  const versionMetadata = metadata.versions[pkg.version];
+
+  if (!versionMetadata) {
+    throw new Error(`${packageId(pkg)} is missing from registry metadata`);
+  }
+
+  return {
+    name: versionMetadata.name,
+    version: versionMetadata.version,
+    ...(versionMetadata.dependencies ? { dependencies: versionMetadata.dependencies } : {}),
+    ...(versionMetadata.optionalDependencies
+      ? { optionalDependencies: versionMetadata.optionalDependencies }
+      : {}),
+    ...(versionMetadata.peerDependencies
+      ? { peerDependencies: versionMetadata.peerDependencies }
+      : {}),
+  };
+}
+
 export async function fetchSeedBundle(
   options: FetchSeedBundleOptions
 ): Promise<FetchSeedBundleResult> {
+  const shouldDownload = options.download !== false;
   const queue = [...options.requirements];
   const latestRequirements = new Set<string>();
   const processedRequirements = new Set<string>();
@@ -71,6 +99,7 @@ export async function fetchSeedBundle(
     errors: [],
     tagRequirements: [],
     unsupported: [...(options.unsupported ?? [])],
+    wouldDownload: 0,
   };
 
   while (queue.length > 0) {
@@ -111,11 +140,19 @@ export async function fetchSeedBundle(
       resolvedById.set(id, resolved);
       result.resolved.push(resolved);
 
-      const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
-      if (downloaded.skipped) {
-        result.skipped++;
+      let manifest: PackageManifest;
+
+      if (shouldDownload) {
+        const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
+        if (downloaded.skipped) {
+          result.skipped++;
+        } else {
+          result.downloaded++;
+        }
+        manifest = await readPackageManifest(downloaded.path);
       } else {
-        result.downloaded++;
+        result.wouldDownload++;
+        manifest = await manifestFromRegistry(resolved, options.registry);
       }
 
       if (scannedPackages.has(id)) {
@@ -123,7 +160,6 @@ export async function fetchSeedBundle(
       }
       scannedPackages.add(id);
 
-      const manifest = await readPackageManifest(downloaded.path);
       const requiredBy = packageId(manifest);
       const dependencies = dependencySpecsFromManifest(manifest, {
         includePeer: options.includePeer === true,

@@ -85,6 +85,10 @@ package.json files are included so monorepositories can be seeded from the root.
 match local packages discovered in the same scan root are skipped for local
 `workspace:`, `file:`, and `link:` specs.
 
+Dry-run fetch uses the same traversal policy as a normal fetch, but reads dependency
+metadata from the source registry instead of downloading tarballs and extracting
+package.json files.
+
 ## Tag Policy
 
 For shared registries, tags must match the source registry targets at fetch time.

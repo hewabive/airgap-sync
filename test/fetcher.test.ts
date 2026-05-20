@@ -126,4 +126,81 @@ describe('fetchSeedBundle', () => {
     expect(result.tagRequirements).toHaveLength(1);
     expect(tarballMocks.downloadResolvedPackage).toHaveBeenCalledOnce();
   });
+
+  it('can traverse dependencies without downloading tarballs', async () => {
+    const registryWithDependencies: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            'dist-tags': {
+              latest: '2.0.0',
+            },
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  dep: 'latest',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+              '2.0.0': {
+                name: 'demo',
+                version: '2.0.0',
+                dist: { tarball: 'https://registry.example/demo/-/demo-2.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('dep');
+        return Promise.resolve({
+          name: 'dep',
+          'dist-tags': {
+            latest: '1.0.0',
+          },
+          versions: {
+            '1.0.0': {
+              name: 'dep',
+              version: '1.0.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.0.0.tgz' },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithDependencies,
+      requirements: [requirement({})],
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'demo@2.0.0',
+      'dep@1.0.0',
+    ]);
+    expect(result.downloaded).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(result.wouldDownload).toBe(3);
+    expect(result.tagRequirements).toEqual([
+      {
+        name: 'demo',
+        requiredBy: 'npm-registry-seed:publish-latest',
+        tag: 'latest',
+        version: '2.0.0',
+      },
+      {
+        name: 'dep',
+        requiredBy: 'demo@1.0.0',
+        tag: 'latest',
+        version: '1.0.0',
+      },
+    ]);
+    expect(tarballMocks.downloadResolvedPackage).not.toHaveBeenCalled();
+    expect(tarballMocks.readPackageManifest).not.toHaveBeenCalled();
+  });
 });

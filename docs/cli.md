@@ -32,6 +32,10 @@ Planned options:
 
 At least one package spec or `--manifest` is required.
 
+`--dry-run` performs the same dependency traversal as a normal fetch, including
+transitive dependencies and publish-time `latest` targets, but reads package manifests
+from registry metadata instead of downloading tarballs.
+
 When `--manifest` points at a package.json, the containing directory is treated as the
 scan root. When it points at a directory, that directory is the scan root. Nested
 package.json files are included so monorepositories can be seeded from the repository
