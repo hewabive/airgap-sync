@@ -9,6 +9,11 @@ are auditable.
 npm-registry-seed fetch react@latest @types/node@^22 \
   --output ./seed \
   --registry https://registry.npmjs.org
+
+# Or from a project manifest. The manifest directory is scanned recursively for nested
+# package.json files, excluding node_modules and build/cache directories.
+npm-registry-seed fetch --manifest ./package.json \
+  --output ./seed
 ```
 
 Planned options:
@@ -17,8 +22,8 @@ Planned options:
 <spec...>                  Package specs to seed, e.g. react@latest
 -o, --output <dir>        Bundle output directory
 -r, --registry <url>      Source registry URL
---manifest <path>         Read root dependencies from a package.json
---include-dev             Include root devDependencies
+--manifest <path>         Read dependencies from a package.json or directory
+--include-dev             Include devDependencies from discovered manifests
 --include-peer            Traverse peerDependencies
 --concurrency <number>    Concurrent registry and download operations
 --dry-run                 Resolve and report without downloading
@@ -26,6 +31,12 @@ Planned options:
 ```
 
 At least one package spec or `--manifest` is required.
+
+When `--manifest` points at a package.json, the containing directory is treated as the
+scan root. When it points at a directory, that directory is the scan root. Nested
+package.json files are included so monorepositories can be seeded from the repository
+root. Local workspace dependencies are skipped when their package names are discovered
+inside the same scan root.
 
 ## publish
 

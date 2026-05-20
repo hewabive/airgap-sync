@@ -11,13 +11,14 @@ pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
 This project is intentionally not a lockfile copier. It resolves dependencies through
-npm registry metadata, downloads the required tarballs, records the `dist-tags` that
-were used during resolution, and later restores those tags after publishing.
+npm registry metadata, downloads the required tarballs, records the `dist-tags` needed
+for safe registry behavior, and later restores those tags after publishing.
 
 ## Status
 
-This repository is a development scaffold. The CLI shape and documentation are present,
-but resolver and publisher behavior is still being implemented.
+This repository is an early implementation. The package-spec, recursive dependency
+fetch, manifest input, and Verdaccio publish paths are implemented, but the CLI is not
+stable yet.
 
 ## Intended CLI
 
@@ -28,6 +29,9 @@ npm-registry-seed fetch react@latest @types/node@^22 -o ./seed
 # Or seed from a project manifest.
 npm-registry-seed fetch --manifest ./package.json -o ./seed
 
+# Monorepos are scanned recursively from the manifest directory.
+npm-registry-seed fetch --manifest ./package.json --include-dev -o ./seed
+
 # Offline machine: publish tarballs and restore required dist-tags.
 npm-registry-seed publish ./seed -r http://192.168.0.10:4873
 ```
@@ -37,7 +41,7 @@ npm-registry-seed publish ./seed -r http://192.168.0.10:4873
 - Publish into the target registry with standard npm operations.
 - Resolve `version`, `range`, `tag`, and `alias` specs using npm registry metadata.
 - Download only the dependency graph needed by the input manifests, not the entire npm registry.
-- Restore only tags that are required for dependency resolution.
+- Restore required tags and the upstream `latest` tag for each published package name.
 - Keep generated reports explicit enough to audit what was fetched and why.
 - Support both package specs (`react@latest`) and project manifests (`package.json`).
 

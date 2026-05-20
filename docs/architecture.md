@@ -78,6 +78,13 @@ Both modes should produce the same internal root requirements:
 package name + npm specifier + requiredBy=root
 ```
 
+For manifest input, `--manifest` accepts either a package.json file or a directory. The
+scan root is the manifest's containing directory or the directory itself, and nested
+package.json files are included so monorepositories can be seeded from the root.
+`node_modules` and common generated directories are skipped. Dependencies whose names
+match local packages discovered in the same scan root are skipped for local
+`workspace:`, `file:`, and `link:` specs.
+
 ## Tag Policy
 
 For shared registries, tags must match the source registry targets at fetch time.

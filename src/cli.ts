@@ -9,6 +9,7 @@ import {
   packageName,
   parseRootSpecs,
   publishBundle,
+  readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
   resolveRootRequirements,
@@ -73,15 +74,19 @@ program
       return;
     }
 
-    if (options.manifest) {
-      console.log('manifest input is not implemented yet');
-    }
-
     const parsedSpecs = parseRootSpecs(specs);
+    const parsedManifest = options.manifest
+      ? await readManifestRequirements(options.manifest, {
+          includeDev: options.includeDev === true,
+          includePeer: options.includePeer === true,
+        })
+      : { requirements: [], unsupported: [] };
+    const requirements = [...parsedSpecs.requirements, ...parsedManifest.requirements];
+    const unsupported = [...parsedSpecs.unsupported, ...parsedManifest.unsupported];
 
-    if (parsedSpecs.requirements.length === 0) {
+    if (requirements.length === 0) {
       console.error('Error: no supported package specs to resolve');
-      console.error(JSON.stringify({ unsupported: parsedSpecs.unsupported }, null, 2));
+      console.error(JSON.stringify({ unsupported }, null, 2));
       process.exitCode = 1;
       return;
     }
@@ -89,14 +94,8 @@ program
     const registry = new HttpRegistryClient(options.registry);
 
     if (options.dryRun) {
-      const resolution = await resolveRootRequirements(parsedSpecs.requirements, registry);
-      console.log(
-        JSON.stringify(
-          { options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) },
-          null,
-          2
-        )
-      );
+      const resolution = await resolveRootRequirements(requirements, registry);
+      console.log(JSON.stringify({ options, unsupported, ...toFetchPreview(resolution) }, null, 2));
       if (resolution.errors.length > 0) {
         process.exitCode = 1;
       }
@@ -107,8 +106,8 @@ program
       includePeer: options.includePeer === true,
       outputDir: options.output,
       registry,
-      requirements: parsedSpecs.requirements,
-      unsupported: parsedSpecs.unsupported,
+      requirements,
+      unsupported,
     });
     const success = resolution.errors.length === 0;
 
@@ -145,13 +144,7 @@ program
         )
       );
     } else {
-      console.log(
-        JSON.stringify(
-          { options, unsupported: parsedSpecs.unsupported, ...toFetchPreview(resolution) },
-          null,
-          2
-        )
-      );
+      console.log(JSON.stringify({ options, unsupported, ...toFetchPreview(resolution) }, null, 2));
     }
 
     if (!success) {

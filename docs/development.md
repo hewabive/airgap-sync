@@ -56,6 +56,7 @@ Suggested test groups:
 - spec parsing with `npm-package-arg`;
 - range and tag resolution against fixture metadata;
 - alias handling;
+- manifest and nested package.json input;
 - dependency graph traversal and cycle prevention;
 - bundle manifest generation;
 - publish command construction.
@@ -63,6 +64,6 @@ Suggested test groups:
 ## Safety Rules
 
 - Never publish to public npm registries from `publish`.
-- Avoid assigning `latest` during tarball publish; use a temporary tag and restore tags
-  afterwards.
+- Publish tarballs with a temporary tag, then restore source registry tags recorded in
+  the bundle.
 - Generated bundle files should be deterministic where practical.

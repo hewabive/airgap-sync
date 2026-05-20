@@ -93,10 +93,22 @@ export interface FetchReport {
 
 export interface PackageManifest {
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   name: string;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   version: string;
+}
+
+export interface ProjectPackageManifest {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  name?: string;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  private?: boolean;
+  version?: string;
+  workspaces?: string[] | { packages?: string[] };
 }
 
 export interface BundleManifest {
