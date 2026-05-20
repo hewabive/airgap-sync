@@ -106,6 +106,16 @@ describe('parseDependencySpec', () => {
     });
   });
 
+  it('normalizes npm exact version specs with a leading equals sign', () => {
+    expect(parseDependencySpec('demo', '=1.2.3', 'root-package@1.0.0')).toEqual({
+      name: 'demo',
+      raw: 'demo@=1.2.3',
+      requiredBy: 'root-package@1.0.0',
+      specifier: '1.2.3',
+      type: 'version',
+    });
+  });
+
   it('reports unsupported dependency specs', () => {
     expect(parseDependencySpec('local-package', 'file:../local-package', 'root@1.0.0')).toEqual({
       raw: 'local-package@file:../local-package',

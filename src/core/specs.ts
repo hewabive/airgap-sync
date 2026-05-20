@@ -75,6 +75,10 @@ function normalizeBarePackage(parsed: NpaResult): { specifier?: string; type?: R
   };
 }
 
+function normalizeVersionSpecifier(specifier: string, type: RegistrySpecType): string {
+  return type === 'version' && specifier.startsWith('=') ? specifier.slice(1) : specifier;
+}
+
 function parseParsedSpec(
   parsed: NpaResult,
   raw: string,
@@ -102,7 +106,19 @@ function parseParsedSpec(
   }
 
   const bare = normalizeBare ? normalizeBarePackage(parsed) : {};
-  return toRegistryRequirement(parsed, raw, requiredBy, bare.specifier, bare.type);
+  const requirement = toRegistryRequirement(parsed, raw, requiredBy, bare.specifier, bare.type);
+
+  if ('reason' in requirement) {
+    return requirement;
+  }
+
+  const specifierType =
+    requirement.type === 'alias' ? requirement.aliasTargetType : requirement.type;
+
+  return {
+    ...requirement,
+    specifier: normalizeVersionSpecifier(requirement.specifier, specifierType ?? 'tag'),
+  };
 }
 
 function parseOneRootSpec(raw: string): RootPackageRequirement | UnsupportedRootPackageRequirement {
