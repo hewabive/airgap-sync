@@ -9,6 +9,7 @@ import type {
   TagRequirement,
 } from '../types.js';
 import { isBlockedPublishRegistry } from './registry.js';
+import { throwIfInvalidBundle, validateBundle } from './validation.js';
 
 const execFileAsync = promisify(execFile);
 const tempPublishTag = 'npm-registry-seed-temp';
@@ -126,6 +127,8 @@ export async function publishBundle(
   if (isBlockedPublishRegistry(options.registryUrl)) {
     throw new Error(`Refusing to publish to public registry: ${options.registryUrl}`);
   }
+
+  throwIfInvalidBundle(await validateBundle(options.bundleDir, manifest, distTags));
 
   const errors: PublishActionResult[] = [];
   let published = 0;

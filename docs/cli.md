@@ -56,7 +56,9 @@ Planned options:
 ```
 
 Current MVP behavior publishes tarballs sequentially with a temporary tag, then restores
-the required tags from `dist-tags.json`.
+the required tags from `dist-tags.json`. Before running npm publish commands, it
+validates that bundle manifests are internally consistent and every referenced tarball
+exists.
 
 ## info
 
@@ -65,4 +67,4 @@ npm-registry-seed info ./seed
 ```
 
 Prints a JSON summary with package counts, package names, restored tags, report status,
-and missing tarball files.
+missing tarball files, and bundle validation issues.

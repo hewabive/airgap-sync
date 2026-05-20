@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import type { BundleManifest, DistTagsManifest, FetchReport, PublishReport } from '../types.js';
 import { readBundleManifest, readDistTagsManifest } from './bundle.js';
+import { validateBundle, type BundleValidationIssue } from './validation.js';
 
 export interface BundleInfoPackage {
   file: string;
@@ -34,6 +35,8 @@ export interface BundleInfo {
   sourceRegistry: string;
   tagCount: number;
   tags: BundleInfoTag[];
+  validationIssues: BundleValidationIssue[];
+  valid: boolean;
 }
 
 async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
@@ -108,6 +111,7 @@ export async function readBundleInfo(bundleDir: string): Promise<BundleInfo> {
 
   const packageNames = new Set(manifest.packages.map((pkg) => pkg.name));
   const tags = tagsFromManifest(distTags);
+  const validation = await validateBundle(bundleDir, manifest, distTags);
 
   return {
     bundle: path.resolve(bundleDir),
@@ -121,5 +125,7 @@ export async function readBundleInfo(bundleDir: string): Promise<BundleInfo> {
     sourceRegistry: manifest.sourceRegistry,
     tagCount: tags.length,
     tags,
+    validationIssues: validation.issues,
+    valid: validation.valid,
   };
 }

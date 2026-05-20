@@ -1,3 +1,6 @@
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'fs-extra';
 import { describe, expect, it } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
@@ -75,21 +78,30 @@ describe('createPublishPlan', () => {
 
 describe('publishBundle', () => {
   it('returns a dry-run report without executing npm commands', async () => {
-    await expect(
-      publishBundle(manifest, distTags, {
-        bundleDir: './seed',
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'npm-registry-seed-publish-'));
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+
+      await expect(
+        publishBundle(manifest, distTags, {
+          bundleDir,
+          dryRun: true,
+          registryUrl: 'http://localhost:4873',
+        })
+      ).resolves.toMatchObject({
         dryRun: true,
-        registryUrl: 'http://localhost:4873',
-      })
-    ).resolves.toMatchObject({
-      dryRun: true,
-      errors: [],
-      published: 1,
-      registry: 'http://localhost:4873',
-      restoredTags: 1,
-      skipped: 0,
-      totalPackages: 1,
-    });
+        errors: [],
+        published: 1,
+        registry: 'http://localhost:4873',
+        restoredTags: 1,
+        skipped: 0,
+        totalPackages: 1,
+      });
+    } finally {
+      await fs.remove(bundleDir);
+    }
   });
 
   it('refuses to publish to public registries even in dry-run mode', async () => {

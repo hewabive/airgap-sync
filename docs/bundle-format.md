@@ -75,4 +75,8 @@ and `dist-tags.json`.
 ## Audit
 
 Use `npm-registry-seed info ./seed` to print a JSON summary of package counts, tags,
-report status, and missing tarball files before transferring or publishing a bundle.
+report status, missing tarball files, and validation issues before transferring or
+publishing a bundle.
+
+`npm-registry-seed publish` runs the same validation before it starts npm publish
+commands.

@@ -17,6 +17,7 @@ export { HttpRegistryClient, isBlockedPublishRegistry } from './core/registry.js
 export { createPublishPlan, publishBundle } from './core/publisher.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
+export { throwIfInvalidBundle, validateBundle } from './core/validation.js';
 export {
   dependencySpecsFromManifest,
   downloadResolvedPackage,
@@ -33,6 +34,11 @@ export type {
 } from './core/info.js';
 export type { ReadManifestRequirementsOptions } from './core/manifests.js';
 export type { PublishBundleOptions } from './core/publisher.js';
+export type {
+  BundleValidationIssue,
+  BundleValidationResult,
+  BundleValidationSeverity,
+} from './core/validation.js';
 
 export type { DownloadedTarball } from './core/tarball.js';
 
