@@ -71,3 +71,8 @@ Records tags required by dependency specs.
 Reports are operational logs. They are allowed to change between minor versions while
 the project is pre-1.0. Stable machine-readable contracts belong in `seed-manifest.json`
 and `dist-tags.json`.
+
+## Audit
+
+Use `npm-registry-seed info ./seed` to print a JSON summary of package counts, tags,
+report status, and missing tarball files before transferring or publishing a bundle.

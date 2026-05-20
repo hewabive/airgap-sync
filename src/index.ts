@@ -11,6 +11,7 @@ export {
 } from './core/bundle.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
+export { readBundleInfo } from './core/info.js';
 export { readManifestRequirements } from './core/manifests.js';
 export { HttpRegistryClient, isBlockedPublishRegistry } from './core/registry.js';
 export { createPublishPlan, publishBundle } from './core/publisher.js';
@@ -24,6 +25,12 @@ export {
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
+export type {
+  BundleInfo,
+  BundleInfoPackage,
+  BundleInfoReportStatus,
+  BundleInfoTag,
+} from './core/info.js';
 export type { ReadManifestRequirementsOptions } from './core/manifests.js';
 export type { PublishBundleOptions } from './core/publisher.js';
 

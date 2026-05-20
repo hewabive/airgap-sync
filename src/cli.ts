@@ -9,6 +9,7 @@ import {
   packageName,
   parseRootSpecs,
   publishBundle,
+  readBundleInfo,
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
@@ -186,9 +187,14 @@ program
   .command('info')
   .description('Show information about a seed bundle')
   .argument('<bundle>', 'Path to seed bundle directory')
-  .action((bundle: string) => {
-    console.log('info is not implemented yet');
-    console.log(JSON.stringify({ bundle }, null, 2));
+  .action(async (bundle: string) => {
+    try {
+      const info = await readBundleInfo(bundle);
+      console.log(JSON.stringify(info, null, 2));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
   });
 
 program.parse();

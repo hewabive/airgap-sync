@@ -64,4 +64,5 @@ the required tags from `dist-tags.json`.
 npm-registry-seed info ./seed
 ```
 
-Prints bundle contents, package counts, tag counts, and unresolved specs.
+Prints a JSON summary with package counts, package names, restored tags, report status,
+and missing tarball files.
