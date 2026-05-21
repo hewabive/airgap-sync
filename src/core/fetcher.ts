@@ -18,6 +18,7 @@ import {
 } from './tarball.js';
 
 export interface FetchSeedBundleOptions {
+  concurrency?: number;
   download?: boolean;
   includePeer?: boolean;
   outputDir: string;
@@ -40,6 +41,13 @@ function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
 }
 
+function comparePackageIdentity(
+  left: { name: string; version: string },
+  right: { name: string; version: string }
+): number {
+  return left.name.localeCompare(right.name) || left.version.localeCompare(right.version);
+}
+
 function requirementId(requirement: RootPackageRequirement): string {
   return [
     requirement.requiredBy,
@@ -52,6 +60,37 @@ function requirementId(requirement: RootPackageRequirement): string {
 
 function tagRequirementId(requirement: { name: string; tag: string; version: string }): string {
   return [requirement.name, requirement.tag, requirement.version].join('\0');
+}
+
+function compareTagRequirement(
+  left: { name: string; requiredBy: string; tag: string; version: string },
+  right: { name: string; requiredBy: string; tag: string; version: string }
+): number {
+  return (
+    left.name.localeCompare(right.name) ||
+    left.tag.localeCompare(right.tag) ||
+    left.version.localeCompare(right.version) ||
+    left.requiredBy.localeCompare(right.requiredBy)
+  );
+}
+
+function compareUnsupportedRequirement(
+  left: UnsupportedRootPackageRequirement,
+  right: UnsupportedRootPackageRequirement
+): number {
+  return unsupportedId(left).localeCompare(unsupportedId(right));
+}
+
+function unsupportedId(requirement: UnsupportedRootPackageRequirement): string {
+  return [requirement.requiredBy, requirement.raw, requirement.type, requirement.reason].join('\0');
+}
+
+function compareGitRequirement(left: GitRequirement, right: GitRequirement): number {
+  return gitRequirementId(left).localeCompare(gitRequirementId(right));
+}
+
+function gitRequirementId(requirement: GitRequirement): string {
+  return [requirement.requiredBy, requirement.raw, requirement.rawSpec].join('\0');
 }
 
 function publishLatestRequirement(name: string): RootPackageRequirement {
@@ -107,6 +146,7 @@ export async function fetchSeedBundle(
 ): Promise<FetchSeedBundleResult> {
   const totalStart = performance.now();
   const shouldDownload = options.download !== false;
+  const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
   const queue = [...options.requirements];
   const latestRequirements = new Set<string>();
   const processedRequirements = new Set<string>();
@@ -125,17 +165,125 @@ export async function fetchSeedBundle(
     unsupported: [...(options.unsupported ?? [])],
     wouldDownload: 0,
   };
+  let activeWorkers = 0;
+  let drainResolved = false;
+  let resolveDrain: (() => void) | undefined;
 
-  while (queue.length > 0) {
-    const requirement = queue.shift();
-    if (!requirement) continue;
-
-    const reqId = requirementId(requirement);
-    if (processedRequirements.has(reqId)) {
-      continue;
+  function maybeResolveDrain(): void {
+    if (!drainResolved && activeWorkers === 0 && queue.length === 0) {
+      drainResolved = true;
+      resolveDrain?.();
     }
-    processedRequirements.add(reqId);
+  }
 
+  function enqueueRequirement(requirement: RootPackageRequirement): void {
+    queue.push(requirement);
+    scheduleWorkers();
+  }
+
+  function dequeueUnprocessedRequirement(): RootPackageRequirement | undefined {
+    for (;;) {
+      const requirement = queue.shift();
+      if (!requirement) {
+        return undefined;
+      }
+
+      const reqId = requirementId(requirement);
+      if (processedRequirements.has(reqId)) {
+        continue;
+      }
+      processedRequirements.add(reqId);
+      return requirement;
+    }
+  }
+
+  function scheduleWorkers(): void {
+    if (drainResolved) {
+      return;
+    }
+
+    while (activeWorkers < concurrency) {
+      const requirement = dequeueUnprocessedRequirement();
+      if (!requirement) {
+        break;
+      }
+
+      activeWorkers++;
+      void processRequirement(requirement).finally(() => {
+        activeWorkers--;
+        scheduleWorkers();
+        maybeResolveDrain();
+      });
+    }
+
+    maybeResolveDrain();
+  }
+
+  async function processResolvedPackage(resolved: ResolvedRootPackage): Promise<void> {
+    if (!latestRequirements.has(resolved.name)) {
+      latestRequirements.add(resolved.name);
+
+      if (!(resolved.resolvedVia === 'tag' && resolved.specifier === 'latest')) {
+        enqueueRequirement(publishLatestRequirement(resolved.name));
+      }
+    }
+
+    const id = packageId(resolved);
+    if (resolvedById.has(id)) {
+      return;
+    }
+
+    resolvedById.set(id, resolved);
+    result.resolved.push(resolved);
+
+    let manifest: PackageManifest;
+
+    if (shouldDownload) {
+      const downloadStart = performance.now();
+      const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
+      timings.downloadMs += elapsedMs(downloadStart);
+      if (downloaded.skipped) {
+        result.skipped++;
+      } else {
+        result.downloaded++;
+      }
+      const manifestStart = performance.now();
+      manifest = await readPackageManifest(downloaded.path);
+      timings.manifestReadMs += elapsedMs(manifestStart);
+    } else {
+      result.wouldDownload++;
+      const manifestStart = performance.now();
+      manifest = await manifestFromRegistry(resolved, options.registry);
+      timings.manifestReadMs += elapsedMs(manifestStart);
+    }
+
+    if (scannedPackages.has(id)) {
+      return;
+    }
+    scannedPackages.add(id);
+
+    const requiredBy = packageId(manifest);
+    const dependencyScanStart = performance.now();
+    const dependencies = dependencySpecsFromManifest(manifest, {
+      includePeer: options.includePeer === true,
+    });
+
+    for (const [name, specifier] of Object.entries(dependencies)) {
+      const parsed = parseDependencySpec(name, specifier, requiredBy);
+      if ('reason' in parsed) {
+        const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
+        if (gitRequirement) {
+          result.gitRequirements.push(gitRequirement);
+        }
+        result.unsupported.push(parsed);
+      } else {
+        enqueueRequirement(parsed);
+      }
+    }
+    timings.dependencyScanMs += elapsedMs(dependencyScanStart);
+  }
+
+  async function processRequirement(requirement: RootPackageRequirement): Promise<void> {
     const resolveStart = performance.now();
     const resolution = await resolveRootRequirements([requirement], options.registry);
     timings.resolveMs += elapsedMs(resolveStart);
@@ -149,70 +297,18 @@ export async function fetchSeedBundle(
       }
     }
 
-    for (const resolved of resolution.resolved) {
-      if (!latestRequirements.has(resolved.name)) {
-        latestRequirements.add(resolved.name);
-
-        if (!(resolved.resolvedVia === 'tag' && resolved.specifier === 'latest')) {
-          queue.push(publishLatestRequirement(resolved.name));
-        }
-      }
-
-      const id = packageId(resolved);
-      if (resolvedById.has(id)) {
-        continue;
-      }
-
-      resolvedById.set(id, resolved);
-      result.resolved.push(resolved);
-
-      let manifest: PackageManifest;
-
-      if (shouldDownload) {
-        const downloadStart = performance.now();
-        const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
-        timings.downloadMs += elapsedMs(downloadStart);
-        if (downloaded.skipped) {
-          result.skipped++;
-        } else {
-          result.downloaded++;
-        }
-        const manifestStart = performance.now();
-        manifest = await readPackageManifest(downloaded.path);
-        timings.manifestReadMs += elapsedMs(manifestStart);
-      } else {
-        result.wouldDownload++;
-        const manifestStart = performance.now();
-        manifest = await manifestFromRegistry(resolved, options.registry);
-        timings.manifestReadMs += elapsedMs(manifestStart);
-      }
-
-      if (scannedPackages.has(id)) {
-        continue;
-      }
-      scannedPackages.add(id);
-
-      const requiredBy = packageId(manifest);
-      const dependencyScanStart = performance.now();
-      const dependencies = dependencySpecsFromManifest(manifest, {
-        includePeer: options.includePeer === true,
-      });
-
-      for (const [name, specifier] of Object.entries(dependencies)) {
-        const parsed = parseDependencySpec(name, specifier, requiredBy);
-        if ('reason' in parsed) {
-          const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
-          if (gitRequirement) {
-            result.gitRequirements.push(gitRequirement);
-          }
-          result.unsupported.push(parsed);
-        } else {
-          queue.push(parsed);
-        }
-      }
-      timings.dependencyScanMs += elapsedMs(dependencyScanStart);
-    }
+    await Promise.all(resolution.resolved.map((resolved) => processResolvedPackage(resolved)));
   }
+
+  await new Promise<void>((resolve) => {
+    resolveDrain = resolve;
+    scheduleWorkers();
+  });
+
+  result.resolved.sort(comparePackageIdentity);
+  result.tagRequirements.sort(compareTagRequirement);
+  result.gitRequirements.sort(compareGitRequirement);
+  result.unsupported.sort(compareUnsupportedRequirement);
 
   timings.totalMs = elapsedMs(totalStart);
   return result;

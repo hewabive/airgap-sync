@@ -30,6 +30,7 @@ import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
 
 export interface CollectBundleOptions {
+  concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
   includeDev?: boolean;
@@ -257,6 +258,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     const fetchIterationStart = performance.now();
     resolution = await fetchSeedBundle({
       download: !dryRun,
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
       outputDir,
       registry: options.registry,

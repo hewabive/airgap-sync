@@ -24,6 +24,7 @@ authentication failures are reported without automatic repair.
 airgap-sync collect ./repos \
   --registry https://registry.npmjs.org \
   --include-dev \
+  --concurrency 16 \
   --output ./airgap-bundle
 ```
 
@@ -31,6 +32,8 @@ Scans package manifests from project repositories, runs safe repository refresh
 checks/pulls, resolves npm registry packages, writes portable Git source metadata,
 clones or updates Git dependency mirrors, scans package manifests from those mirrors,
 and repeats until no new npm or Git inputs are found.
+
+`--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
 The online bundle should store Git source identities and local mirrors, not
 Gitea-specific target URLs.
@@ -40,7 +43,8 @@ Gitea-specific target URLs.
 ```bash
 airgap-sync fetch react@latest @types/node@^22 \
   --output ./airgap-bundle \
-  --registry https://registry.npmjs.org
+  --registry https://registry.npmjs.org \
+  --concurrency 16
 
 # Or from a project manifest. The manifest directory is scanned recursively for nested
 # package.json files, excluding node_modules and build/cache directories.
@@ -67,6 +71,8 @@ At least one package spec or `--manifest` is required.
 `--dry-run` performs the same dependency traversal as a normal fetch, including
 transitive dependencies and publish-time `latest` targets, but reads package manifests
 from registry metadata instead of downloading tarballs.
+
+`--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
 When `--manifest` points at a package.json, the containing directory is treated as the
 scan root. When it points at a directory, that directory is the scan root. Nested

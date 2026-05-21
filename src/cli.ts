@@ -42,6 +42,7 @@ import type {
 } from './index.js';
 
 interface FetchOptions {
+  concurrency: number;
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
@@ -57,6 +58,7 @@ interface PublishOptions {
 }
 
 interface CollectOptions {
+  concurrency: number;
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
@@ -66,6 +68,14 @@ interface CollectOptions {
 
 interface GitSourcesOptions {
   write?: boolean;
+}
+
+function parsePositiveInteger(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Expected a positive integer, got: ${value}`);
+  }
+  return parsed;
 }
 
 interface GitFetchOptions {
@@ -204,12 +214,19 @@ program
   .option('-r, --registry <url>', 'Source registry URL', 'https://registry.npmjs.org')
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
+  .option(
+    '--concurrency <count>',
+    'Parallel npm resolve/download workers',
+    parsePositiveInteger,
+    16
+  )
   .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
   .action(async (root: string, options: CollectOptions) => {
     try {
       const registry = new CachedRegistryClient(new HttpRegistryClient(options.registry));
       const report = await collectBundle({
         dryRun: options.dryRun === true,
+        concurrency: options.concurrency,
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
         outputDir: options.output,
@@ -245,6 +262,12 @@ program
   .option('--manifest <path>', 'Read root dependencies from a package.json')
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
+  .option(
+    '--concurrency <count>',
+    'Parallel npm resolve/download workers',
+    parsePositiveInteger,
+    16
+  )
   .option('--dry-run', 'Resolve and report without downloading')
   .action(async (specs: string[], options: FetchOptions) => {
     if (specs.length === 0 && !options.manifest) {
@@ -275,6 +298,7 @@ program
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
+        concurrency: options.concurrency,
         download: false,
         includePeer: options.includePeer === true,
         outputDir: options.output,
@@ -291,6 +315,7 @@ program
     }
 
     const resolution = await fetchSeedBundle({
+      concurrency: options.concurrency,
       includePeer: options.includePeer === true,
       outputDir: options.output,
       registry,

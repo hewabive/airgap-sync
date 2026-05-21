@@ -75,7 +75,8 @@ and `dist-tags.json`.
 Unsupported specs in `fetch-report.json` include `requiredBy`, so Git, file, link, and
 other non-registry specs can be traced back to the package that declared them.
 The report also includes `timings` for registry resolution, tarball download,
-package-manifest reading, dependency scanning, and total fetch time.
+package-manifest reading, dependency scanning, and total fetch time. Phase timings are
+cumulative across parallel workers; `totalMs` is the wall-clock duration.
 
 Git specs are also summarized separately in `gitRequirements`. Each item records the
 declaring package, package alias/name when present, raw npm spec, hosted provider
