@@ -103,7 +103,7 @@ function errorSummary(error: unknown): string {
   return message.split('\n')[0] ?? 'Unknown error';
 }
 
-export function packageNamesMissingLatestTags(
+function packageNamesMissingLatestTags(
   manifest: BundleManifest,
   distTags: DistTagsManifest
 ): string[] {

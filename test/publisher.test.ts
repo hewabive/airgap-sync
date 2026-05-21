@@ -3,7 +3,6 @@ import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
-import { packageNamesMissingLatestTags } from '../src/core/publisher.js';
 import type { PublishProgressEvent } from '../src/core/publisher.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
@@ -89,33 +88,6 @@ describe('createPublishPlan', () => {
   });
 });
 
-describe('packageNamesMissingLatestTags', () => {
-  it('does not require registry existence checks when every package name has latest', () => {
-    expect(packageNamesMissingLatestTags(manifest, distTags)).toEqual([]);
-  });
-
-  it('returns only package names that are missing latest tags', () => {
-    expect(
-      packageNamesMissingLatestTags(
-        {
-          ...manifest,
-          packages: [
-            ...manifest.packages,
-            {
-              name: 'untagged',
-              version: '1.0.0',
-              file: 'packages/untagged-1.0.0.tgz',
-              tarball: 'https://registry.example/untagged/-/untagged-1.0.0.tgz',
-              resolvedFrom: [],
-            },
-          ],
-        },
-        distTags
-      )
-    ).toEqual(['untagged']);
-  });
-});
-
 describe('publishBundle', () => {
   it('returns a dry-run report without executing npm commands', async () => {
     const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
@@ -181,6 +153,42 @@ describe('publishBundle', () => {
         registryUrl: 'https://registry.npmjs.org',
       })
     ).rejects.toThrow('Refusing to publish to public registry');
+  });
+
+  it('requires latest tags for package names missing from the target registry', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    fetchMock.mockResolvedValue(new Response('', { status: 404 }));
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+      await fs.writeFile(path.join(bundleDir, 'packages/untagged-1.0.0.tgz'), '');
+
+      await expect(
+        publishBundle(
+          {
+            ...manifest,
+            packages: [
+              ...manifest.packages,
+              {
+                name: 'untagged',
+                version: '1.0.0',
+                file: 'packages/untagged-1.0.0.tgz',
+                tarball: 'https://registry.example/untagged/-/untagged-1.0.0.tgz',
+                resolvedFrom: [],
+              },
+            ],
+          },
+          distTags,
+          {
+            bundleDir,
+            registryUrl: 'http://localhost:4873',
+          }
+        )
+      ).rejects.toThrow('Bundle is missing upstream latest tags');
+    } finally {
+      await fs.remove(bundleDir);
+    }
   });
 
   it('uses package metadata to skip existing versions and tags', async () => {
