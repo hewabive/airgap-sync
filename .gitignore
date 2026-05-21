@@ -8,7 +8,9 @@ coverage/
 .env.*
 !.env.example
 seed/
+airgap-bundle/
 airgap-packages/
+git-mirrors/
 verdaccio/storage/
 verdaccio/htpasswd
 verdaccio/verdaccio/
