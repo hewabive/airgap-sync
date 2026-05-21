@@ -130,6 +130,23 @@ function parsePositiveInteger(value: string): number {
   return parsed;
 }
 
+function addNpmPublishOptions(command: Command): Command {
+  return command
+    .option('--no-skip-existing', 'Attempt to publish npm versions that already exist')
+    .option(
+      '--dist-tag-concurrency <count>',
+      'Concurrent npm dist-tag operations',
+      parsePositiveInteger,
+      defaultDistTagConcurrency
+    )
+    .option(
+      '--publish-concurrency <count>',
+      'Concurrent npm publish operations',
+      parsePositiveInteger,
+      defaultPublishConcurrency
+    );
+}
+
 function collectShouldFail(report: {
   fetch: { errors: unknown[] };
   gitFetch: { errors: unknown[] };
@@ -687,24 +704,13 @@ program
     }
   });
 
-program
-  .command('publish')
-  .description('Publish an airgap bundle into an npm-compatible registry')
-  .argument('<bundle>', 'Path to airgap bundle directory')
-  .requiredOption('-r, --registry <url>', 'Target registry URL')
-  .option('--no-skip-existing', 'Attempt to publish versions that already exist')
-  .option(
-    '--dist-tag-concurrency <count>',
-    'Concurrent npm dist-tag operations',
-    parsePositiveInteger,
-    defaultDistTagConcurrency
-  )
-  .option(
-    '--publish-concurrency <count>',
-    'Concurrent npm publish operations',
-    parsePositiveInteger,
-    defaultPublishConcurrency
-  )
+addNpmPublishOptions(
+  program
+    .command('publish')
+    .description('Publish an airgap bundle into an npm-compatible registry')
+    .argument('<bundle>', 'Path to airgap bundle directory')
+    .requiredOption('-r, --registry <url>', 'Target registry URL')
+)
   .option('--dry-run', 'Print planned operations without publishing')
   .action(async (bundle: string, options: PublishOptions) => {
     try {
@@ -981,28 +987,17 @@ gitCommand
     }
   });
 
-program
-  .command('apply')
-  .description('Apply an airgap bundle to Verdaccio and Gitea')
-  .argument('<bundle>', 'Path to airgap bundle directory')
-  .requiredOption('-r, --registry <url>', 'Target npm registry URL')
-  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
-  .option('--gitea-token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
-  .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
-  .option('--public', 'Create public Gitea repositories instead of private repositories')
-  .option('--no-skip-existing', 'Attempt to publish npm versions that already exist')
-  .option(
-    '--dist-tag-concurrency <count>',
-    'Concurrent npm dist-tag operations',
-    parsePositiveInteger,
-    defaultDistTagConcurrency
-  )
-  .option(
-    '--publish-concurrency <count>',
-    'Concurrent npm publish operations',
-    parsePositiveInteger,
-    defaultPublishConcurrency
-  )
+addNpmPublishOptions(
+  program
+    .command('apply')
+    .description('Apply an airgap bundle to Verdaccio and Gitea')
+    .argument('<bundle>', 'Path to airgap bundle directory')
+    .requiredOption('-r, --registry <url>', 'Target npm registry URL')
+    .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+    .option('--gitea-token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
+    .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
+    .option('--public', 'Create public Gitea repositories instead of private repositories')
+)
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
   .option('--dry-run', 'Print planned apply operations without publishing or pushing')
   .action(async (bundle: string, options: ApplyOptions) => {

@@ -1,6 +1,6 @@
 {
   "name": "airgap-sync",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Sync Git and npm dependencies for airgapped environments",
   "type": "module",
   "bin": {
@@ -8,11 +8,20 @@
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "docs",
+    "CHANGELOG.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsc --noEmit && tsup",
@@ -40,7 +49,15 @@
     "mirror",
     "seed"
   ],
-  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hewabive/airgap-sync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hewabive/airgap-sync/issues"
+  },
+  "homepage": "https://github.com/hewabive/airgap-sync#readme",
+  "author": "hewabive",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"

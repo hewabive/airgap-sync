@@ -35,6 +35,18 @@ variants, performance tuning, and operator ergonomics.
 
 ## Target Workflow
 
+Install it in the workspace on removable media:
+
+```bash
+mkdir -p /media/USB/airgap-sync
+cd /media/USB/airgap-sync
+pnpm add -D airgap-sync
+pnpm exec airgap-sync init
+```
+
+After a global install or `pnpm dlx airgap-sync`, the same commands can be run as
+`airgap-sync ...`.
+
 ```bash
 # First setup on the portable drive.
 airgap-sync init
@@ -142,6 +154,8 @@ pnpm e2e:local   # Run the local Gitea/Verdaccio integration test
 - [Development Guide](./docs/development.md)
 - [Roadmap](./docs/roadmap.md)
 - [Workflows](./docs/workflows.md)
+- [Changelog](./CHANGELOG.md)
+- [Security Policy](./SECURITY.md)
 
 ## License
 

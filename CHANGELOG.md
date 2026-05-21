@@ -1,0 +1,9 @@
+# Changelog
+
+## 0.1.0
+
+- Added workspace targets for repeatable removable-media workflows.
+- Added recursive npm package collection from package specs, manifests, and lockfiles.
+- Added Git dependency discovery, mirror fetch, Gitea repository creation, and mirror push.
+- Added Verdaccio publish with dist-tag restoration and skip-existing checks.
+- Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.
