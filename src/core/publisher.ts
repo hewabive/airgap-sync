@@ -1,19 +1,25 @@
 import path from 'node:path';
+import { Agent as HttpAgent } from 'node:http';
+import { Agent as HttpsAgent } from 'node:https';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import axios from 'axios';
 import type {
   BundleManifest,
   DistTagsManifest,
+  PackageMetadata,
   PublishActionResult,
   PublishReport,
   TagRequirement,
 } from '../types.js';
-import { isBlockedPublishRegistry } from './registry.js';
+import { encodePackageName, isBlockedPublishRegistry } from './registry.js';
 import { throwIfInvalidBundle, validateBundle } from './validation.js';
 
 const execFileAsync = promisify(execFile);
 const tempPublishTag = 'airgap-sync-temp';
 const registryLookupConcurrency = 8;
+const packageSnapshotHttpAgent = new HttpAgent({ keepAlive: true });
+const packageSnapshotHttpsAgent = new HttpsAgent({ keepAlive: true });
 
 export interface PublishBundleOptions {
   bundleDir: string;
@@ -27,8 +33,7 @@ export type PublishProgressPhase =
   | 'cleanup'
   | 'dist-tags'
   | 'dry-run'
-  | 'lookup-tags'
-  | 'lookup-versions'
+  | 'lookup-metadata'
   | 'publish'
   | 'validate';
 
@@ -50,6 +55,22 @@ export interface PublishProgressEvent {
   tag?: string;
   total?: number;
 }
+
+interface PackageRegistrySnapshot {
+  distTags: Record<string, string>;
+  versions: Set<string>;
+}
+
+interface NpmViewPackageSnapshot {
+  'dist-tags'?: unknown;
+  distTags?: unknown;
+  versions?: unknown;
+}
+
+const emptyPackageSnapshot = (): PackageRegistrySnapshot => ({
+  distTags: {},
+  versions: new Set(),
+});
 
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
@@ -132,24 +153,6 @@ async function npmDistTagRemove(
   });
 }
 
-function parseNpmJsonList(stdout: string): string[] {
-  if (!stdout.trim()) {
-    return [];
-  }
-
-  const parsed = JSON.parse(stdout) as string | string[];
-  return Array.isArray(parsed) ? parsed : [parsed];
-}
-
-function parseNpmJsonObject(stdout: string): Record<string, string> {
-  if (!stdout.trim()) {
-    return {};
-  }
-
-  const parsed = JSON.parse(stdout) as Record<string, string>;
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-}
-
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -176,90 +179,111 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function npmPackageVersions(packageName: string, registryUrl: string): Promise<string[]> {
+function packageSnapshotFromMetadata(metadata: PackageMetadata): PackageRegistrySnapshot {
+  return {
+    distTags: metadata['dist-tags'] ?? {},
+    versions: new Set(Object.keys(metadata.versions)),
+  };
+}
+
+function parseStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+
+  return typeof value === 'string' ? [value] : [];
+}
+
+function parseDistTags(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+  );
+}
+
+function parseNpmViewPackageSnapshot(stdout: string): PackageRegistrySnapshot {
+  if (!stdout.trim()) {
+    return emptyPackageSnapshot();
+  }
+
+  const parsed = JSON.parse(stdout) as NpmViewPackageSnapshot;
+  return {
+    distTags: parseDistTags(parsed['dist-tags'] ?? parsed.distTags),
+    versions: new Set(parseStringList(parsed.versions)),
+  };
+}
+
+async function fetchPackageSnapshot(
+  packageName: string,
+  registryUrl: string
+): Promise<PackageRegistrySnapshot> {
+  const response = await axios.get<PackageMetadata>(
+    `${registryUrl.replace(/\/$/, '')}/${encodePackageName(packageName)}`,
+    {
+      headers: {
+        Accept: 'application/vnd.npm.install-v1+json, application/json',
+      },
+      httpAgent: packageSnapshotHttpAgent,
+      httpsAgent: packageSnapshotHttpsAgent,
+      timeout: 30_000,
+      validateStatus: (status) => status === 200 || status === 404,
+    }
+  );
+
+  return response.status === 404
+    ? emptyPackageSnapshot()
+    : packageSnapshotFromMetadata(response.data);
+}
+
+async function npmPackageSnapshotFromCli(
+  packageName: string,
+  registryUrl: string
+): Promise<PackageRegistrySnapshot> {
   try {
     const { stdout } = await execFileAsync(
       'npm',
-      ['view', packageName, 'versions', '--json', '--registry', registryUrl],
+      ['view', packageName, 'versions', 'dist-tags', '--json', '--registry', registryUrl],
       {
         maxBuffer: 10 * 1024 * 1024,
         timeout: 30_000,
       }
     );
-    return parseNpmJsonList(stdout);
+    return parseNpmViewPackageSnapshot(stdout);
   } catch {
-    return [];
+    return emptyPackageSnapshot();
   }
 }
 
-async function npmPackageDistTags(
+async function npmPackageSnapshot(
   packageName: string,
   registryUrl: string
-): Promise<Record<string, string>> {
+): Promise<PackageRegistrySnapshot> {
   try {
-    const { stdout } = await execFileAsync(
-      'npm',
-      ['view', packageName, 'dist-tags', '--json', '--registry', registryUrl],
-      {
-        maxBuffer: 1024 * 1024,
-        timeout: 30_000,
-      }
-    );
-    return parseNpmJsonObject(stdout);
+    return await fetchPackageSnapshot(packageName, registryUrl);
   } catch {
-    return {};
+    return npmPackageSnapshotFromCli(packageName, registryUrl);
   }
 }
 
-async function lookupExistingVersions(
+async function lookupPackageSnapshots(
   manifest: BundleManifest,
-  registryUrl: string,
-  onProgress?: PublishBundleOptions['onProgress']
-): Promise<Map<string, Set<string>>> {
-  const packageNames = [...new Set(manifest.packages.map((pkg) => pkg.name))];
-  let completed = 0;
-  onProgress?.({
-    current: 0,
-    phase: 'lookup-versions',
-    status: 'start',
-    total: packageNames.length,
-  });
-  const entries = await mapWithConcurrency(
-    packageNames,
-    registryLookupConcurrency,
-    async (name) => {
-      const result = [name, new Set(await npmPackageVersions(name, registryUrl))] as const;
-      completed++;
-      onProgress?.({
-        current: completed,
-        package: name,
-        phase: 'lookup-versions',
-        status: 'progress',
-        total: packageNames.length,
-      });
-      return result;
-    }
-  );
-  onProgress?.({
-    current: packageNames.length,
-    phase: 'lookup-versions',
-    status: 'done',
-    total: packageNames.length,
-  });
-
-  return new Map(entries);
-}
-
-async function lookupCurrentDistTags(
   distTags: DistTagsManifest,
   registryUrl: string,
   onProgress?: PublishBundleOptions['onProgress']
-): Promise<Map<string, Record<string, string>>> {
-  const packageNames = [...new Set(distTags.requirements.map((requirement) => requirement.name))];
+): Promise<Map<string, PackageRegistrySnapshot>> {
+  const packageNames = [
+    ...new Set([
+      ...manifest.packages.map((pkg) => pkg.name),
+      ...distTags.requirements.map((requirement) => requirement.name),
+    ]),
+  ];
   let completed = 0;
   onProgress?.({
     current: 0,
-    phase: 'lookup-tags',
+    phase: 'lookup-metadata',
     status: 'start',
     total: packageNames.length,
   });
@@ -267,12 +291,12 @@ async function lookupCurrentDistTags(
     packageNames,
     registryLookupConcurrency,
     async (name) => {
-      const result = [name, await npmPackageDistTags(name, registryUrl)] as const;
+      const result = [name, await npmPackageSnapshot(name, registryUrl)] as const;
       completed++;
       onProgress?.({
         current: completed,
         package: name,
-        phase: 'lookup-tags',
+        phase: 'lookup-metadata',
         status: 'progress',
         total: packageNames.length,
       });
@@ -281,7 +305,7 @@ async function lookupCurrentDistTags(
   );
   onProgress?.({
     current: packageNames.length,
-    phase: 'lookup-tags',
+    phase: 'lookup-metadata',
     status: 'done',
     total: packageNames.length,
   });
@@ -290,15 +314,7 @@ async function lookupCurrentDistTags(
 }
 
 async function npmPackageNameExists(packageName: string, registryUrl: string): Promise<boolean> {
-  try {
-    await execFileAsync('npm', ['view', packageName, 'version', '--registry', registryUrl], {
-      maxBuffer: 1024 * 1024,
-      timeout: 30_000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return (await npmPackageSnapshot(packageName, registryUrl)).versions.size > 0;
 }
 
 export function createPublishPlan(
@@ -359,14 +375,16 @@ export async function publishBundle(
   }
 
   const existingPackageNames = new Set<string>();
-  const existingVersionsByPackage =
+  const packageSnapshots =
     options.skipExisting === false
-      ? new Map<string, Set<string>>()
-      : await lookupExistingVersions(manifest, options.registryUrl, options.onProgress);
-  const currentDistTags =
-    options.skipExisting === false
-      ? new Map<string, Record<string, string>>()
-      : await lookupCurrentDistTags(distTags, options.registryUrl, options.onProgress);
+      ? new Map<string, PackageRegistrySnapshot>()
+      : await lookupPackageSnapshots(manifest, distTags, options.registryUrl, options.onProgress);
+  const existingVersionsByPackage = new Map(
+    [...packageSnapshots].map(([name, snapshot]) => [name, snapshot.versions] as const)
+  );
+  const currentDistTags = new Map(
+    [...packageSnapshots].map(([name, snapshot]) => [name, snapshot.distTags] as const)
+  );
   const publishedPackageNames = new Set<string>();
 
   const packageNamesWithoutLatest = packageNamesMissingLatestTags(manifest, distTags);

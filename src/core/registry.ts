@@ -40,7 +40,7 @@ export class CachedRegistryClient implements RegistryClient {
   }
 }
 
-function encodePackageName(name: string): string {
+export function encodePackageName(name: string): string {
   return name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name);
 }
 

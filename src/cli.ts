@@ -89,8 +89,7 @@ const publishPhaseLabels: Record<PublishProgressPhase, string> = {
   cleanup: 'cleanup temp tags',
   'dist-tags': 'restore dist-tags',
   'dry-run': 'plan publish',
-  'lookup-tags': 'lookup dist-tags',
-  'lookup-versions': 'lookup existing versions',
+  'lookup-metadata': 'lookup registry metadata',
   publish: 'publish packages',
   validate: 'validate bundle',
 };
@@ -102,20 +101,22 @@ function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
     const label = publishPhaseLabels[event.phase];
 
     if (event.status === 'start') {
-      const total = event.total === undefined ? '' : ` (${event.total})`;
+      const total = event.total === undefined ? '' : ` (${String(event.total)})`;
       console.error(`[publish] ${label}: started${total}`);
       return;
     }
 
     if (event.status === 'done') {
       const total =
-        event.total === undefined ? '' : ` (${event.current ?? event.total}/${event.total})`;
+        event.total === undefined
+          ? ''
+          : ` (${String(event.current ?? event.total)}/${String(event.total)})`;
       console.error(`[publish] ${label}: done${total}`);
       return;
     }
 
     if (event.status === 'planned') {
-      console.error(`[publish] ${label}: ${event.current ?? 0} actions`);
+      console.error(`[publish] ${label}: ${String(event.current ?? 0)} actions`);
       return;
     }
 
@@ -136,7 +137,9 @@ function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
 
     lastLogged.set(event.phase, event.current);
     const subject = event.package ? ` ${event.package}${event.tag ? `#${event.tag}` : ''}` : '';
-    console.error(`[publish] ${label}: ${event.current}/${event.total} ${event.status}${subject}`);
+    console.error(
+      `[publish] ${label}: ${String(event.current)}/${String(event.total)} ${event.status}${subject}`
+    );
   };
 }
 

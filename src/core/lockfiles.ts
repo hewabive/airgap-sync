@@ -156,7 +156,7 @@ function isGitSpecifier(specifier: string | undefined): specifier is string {
   );
 }
 
-function gitSpecifierFromValues(...values: Array<string | undefined>): string | undefined {
+function gitSpecifierFromValues(...values: (string | undefined)[]): string | undefined {
   return values.find(isGitSpecifier);
 }
 
@@ -386,12 +386,12 @@ function packageNameFromResolvedTarball(resolved: unknown): string | undefined {
   return undefined;
 }
 
-function parseYarnClassicEntries(content: string): Array<{
+function parseYarnClassicEntries(content: string): {
   descriptor: string;
   resolved?: string;
   version?: string;
-}> {
-  const entries: Array<{ descriptor: string; resolved?: string; version?: string }> = [];
+}[] {
+  const entries: { descriptor: string; resolved?: string; version?: string }[] = [];
   let current: { descriptor: string; resolved?: string; version?: string } | undefined;
 
   for (const line of content.split(/\r?\n/)) {
@@ -409,13 +409,13 @@ function parseYarnClassicEntries(content: string): Array<{
       continue;
     }
 
-    const versionMatch = line.match(/^\s+version\s+"([^"]+)"/);
+    const versionMatch = /^\s+version\s+"([^"]+)"/.exec(line);
     if (versionMatch?.[1]) {
       current.version = versionMatch[1];
       continue;
     }
 
-    const resolvedMatch = line.match(/^\s+resolved\s+"([^"]+)"/);
+    const resolvedMatch = /^\s+resolved\s+"([^"]+)"/.exec(line);
     if (resolvedMatch?.[1]) {
       current.resolved = resolvedMatch[1];
     }
