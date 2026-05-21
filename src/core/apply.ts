@@ -26,6 +26,7 @@ import type {
 export interface ApplyBundleOptions {
   bundleDir: string;
   configureGitGlobal?: boolean;
+  distTagConcurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
   giteaBaseUrl: string;
@@ -85,6 +86,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
 
   const publish = await publishBundle(manifest, distTags, {
     bundleDir,
+    ...(options.distTagConcurrency === undefined
+      ? {}
+      : { distTagConcurrency: options.distTagConcurrency }),
     dryRun,
     ...(options.publishConcurrency === undefined
       ? {}

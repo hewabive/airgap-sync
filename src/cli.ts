@@ -66,6 +66,7 @@ interface FetchOptions {
 }
 
 interface PublishOptions {
+  distTagConcurrency: number;
   dryRun?: boolean;
   publishConcurrency: number;
   registry: string;
@@ -74,6 +75,7 @@ interface PublishOptions {
 
 interface ApplyOptions {
   configureGitGlobal?: boolean;
+  distTagConcurrency: number;
   dryRun?: boolean;
   gitea: string;
   giteaToken?: string;
@@ -689,6 +691,12 @@ program
   .requiredOption('-r, --registry <url>', 'Target registry URL')
   .option('--no-skip-existing', 'Attempt to publish versions that already exist')
   .option(
+    '--dist-tag-concurrency <count>',
+    'Concurrent npm dist-tag operations',
+    parsePositiveInteger,
+    4
+  )
+  .option(
     '--publish-concurrency <count>',
     'Concurrent npm publish operations',
     parsePositiveInteger,
@@ -701,6 +709,7 @@ program
       const distTags = await readDistTagsManifest(bundle);
       const report = await publishBundle(manifest, distTags, {
         bundleDir: bundle,
+        distTagConcurrency: options.distTagConcurrency,
         dryRun: options.dryRun === true,
         onProgress: createPublishProgressLogger(),
         publishConcurrency: options.publishConcurrency,
@@ -980,6 +989,12 @@ program
   .option('--public', 'Create public Gitea repositories instead of private repositories')
   .option('--no-skip-existing', 'Attempt to publish npm versions that already exist')
   .option(
+    '--dist-tag-concurrency <count>',
+    'Concurrent npm dist-tag operations',
+    parsePositiveInteger,
+    4
+  )
+  .option(
     '--publish-concurrency <count>',
     'Concurrent npm publish operations',
     parsePositiveInteger,
@@ -1003,6 +1018,7 @@ program
       const report = await applyBundle({
         bundleDir: bundle,
         configureGitGlobal: options.configureGitGlobal === true,
+        distTagConcurrency: options.distTagConcurrency,
         dryRun: options.dryRun === true,
         giteaBaseUrl: options.gitea,
         giteaClient: client,

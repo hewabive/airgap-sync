@@ -20,6 +20,7 @@ const registryLookupConcurrency = 8;
 
 export interface PublishBundleOptions {
   bundleDir: string;
+  distTagConcurrency?: number;
   dryRun?: boolean;
   onProgress?: (event: PublishProgressEvent) => void;
   publishConcurrency?: number;
@@ -67,6 +68,13 @@ interface NpmViewPackageSnapshot {
 
 type ManifestPackage = BundleManifest['packages'][number];
 
+interface DistTagResult {
+  error?: string;
+  package: string;
+  status: 'skipped' | 'tagged' | 'error';
+  tag: string;
+}
+
 interface PublishPackageResult {
   error?: string;
   package: string;
@@ -107,14 +115,14 @@ function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
 }
 
-function groupPackagesByName(packages: ManifestPackage[]): ManifestPackage[][] {
-  const groups = new Map<string, ManifestPackage[]>();
-  for (const pkg of packages) {
-    const group = groups.get(pkg.name);
+function groupByPackageName<T extends { name: string }>(items: T[]): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const group = groups.get(item.name);
     if (group) {
-      group.push(pkg);
+      group.push(item);
     } else {
-      groups.set(pkg.name, [pkg]);
+      groups.set(item.name, [item]);
     }
   }
 
@@ -563,7 +571,7 @@ export async function publishBundle(
   }
 
   const publishResultGroups = await mapWithConcurrency(
-    groupPackagesByName(manifest.packages),
+    groupByPackageName(manifest.packages),
     publishConcurrency,
     async (group) => {
       const results: PublishPackageResult[] = [];
@@ -599,6 +607,7 @@ export async function publishBundle(
 
   if (errors.length === 0) {
     const distTagsStart = performance.now();
+    const distTagConcurrency = normalizeConcurrency(options.distTagConcurrency, 4);
     let tagProgress = 0;
     options.onProgress?.({
       current: tagProgress,
@@ -606,9 +615,9 @@ export async function publishBundle(
       status: 'start',
       total: distTags.requirements.length,
     });
-    for (const requirement of distTags.requirements) {
+
+    async function restoreDistTag(requirement: TagRequirement): Promise<DistTagResult> {
       if (currentDistTags.get(requirement.name)?.[requirement.tag] === requirement.version) {
-        restoredTags++;
         tagProgress++;
         options.onProgress?.({
           current: tagProgress,
@@ -618,12 +627,18 @@ export async function publishBundle(
           tag: requirement.tag,
           total: distTags.requirements.length,
         });
-        continue;
+        return {
+          package: packageId(requirement),
+          status: 'skipped',
+          tag: requirement.tag,
+        };
       }
 
       try {
         await npmDistTagAdd(requirement, options.registryUrl);
-        restoredTags++;
+        const packageTags = currentDistTags.get(requirement.name) ?? {};
+        packageTags[requirement.tag] = requirement.version;
+        currentDistTags.set(requirement.name, packageTags);
         tagProgress++;
         options.onProgress?.({
           current: tagProgress,
@@ -633,6 +648,11 @@ export async function publishBundle(
           tag: requirement.tag,
           total: distTags.requirements.length,
         });
+        return {
+          package: packageId(requirement),
+          status: 'tagged',
+          tag: requirement.tag,
+        };
       } catch (error) {
         tagProgress++;
         options.onProgress?.({
@@ -643,12 +663,36 @@ export async function publishBundle(
           tag: requirement.tag,
           total: distTags.requirements.length,
         });
-        errors.push({
-          action: 'dist-tag',
+        return {
+          error: errorSummary(error),
           package: packageId(requirement),
           status: 'error',
           tag: requirement.tag,
-          error: errorSummary(error),
+        };
+      }
+    }
+
+    const distTagResultGroups = await mapWithConcurrency(
+      groupByPackageName(distTags.requirements),
+      distTagConcurrency,
+      async (group) => {
+        const results: DistTagResult[] = [];
+        for (const requirement of group) {
+          results.push(await restoreDistTag(requirement));
+        }
+        return results;
+      }
+    );
+    for (const result of distTagResultGroups.flat()) {
+      if (result.status === 'tagged' || result.status === 'skipped') {
+        restoredTags++;
+      } else {
+        errors.push({
+          action: 'dist-tag',
+          package: result.package,
+          status: 'error',
+          tag: result.tag,
+          error: result.error ?? 'Unknown error',
         });
       }
     }
@@ -669,21 +713,25 @@ export async function publishBundle(
       status: 'start',
       total: cleanupTotal,
     });
-    for (const packageName of publishedPackageNames) {
-      try {
-        await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
-      } catch {
-        // The temp tag may already be absent if the package existed before this run.
+    await mapWithConcurrency(
+      [...publishedPackageNames],
+      distTagConcurrency,
+      async (packageName) => {
+        try {
+          await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
+        } catch {
+          // The temp tag may already be absent if the package existed before this run.
+        }
+        cleanupProgress++;
+        options.onProgress?.({
+          current: cleanupProgress,
+          package: packageName,
+          phase: 'cleanup',
+          status: 'progress',
+          total: cleanupTotal,
+        });
       }
-      cleanupProgress++;
-      options.onProgress?.({
-        current: cleanupProgress,
-        package: packageName,
-        phase: 'cleanup',
-        status: 'progress',
-        total: cleanupTotal,
-      });
-    }
+    );
     options.onProgress?.({
       current: cleanupProgress,
       phase: 'cleanup',
