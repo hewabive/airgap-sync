@@ -1,7 +1,7 @@
 storage: ./storage
 
 web:
-  title: npm-registry-seed local registry
+  title: airgap-sync local registry
 
 auth:
   htpasswd:

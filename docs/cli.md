@@ -6,13 +6,13 @@ are auditable.
 ## fetch
 
 ```bash
-npm-registry-seed fetch react@latest @types/node@^22 \
+airgap-sync fetch react@latest @types/node@^22 \
   --output ./seed \
   --registry https://registry.npmjs.org
 
 # Or from a project manifest. The manifest directory is scanned recursively for nested
 # package.json files, excluding node_modules and build/cache directories.
-npm-registry-seed fetch --manifest ./package.json \
+airgap-sync fetch --manifest ./package.json \
   --output ./seed
 ```
 
@@ -45,7 +45,7 @@ inside the same scan root.
 ## publish
 
 ```bash
-npm-registry-seed publish ./seed \
+airgap-sync publish ./seed \
   --registry http://192.168.0.10:4873
 ```
 
@@ -67,7 +67,7 @@ exists.
 ## info
 
 ```bash
-npm-registry-seed info ./seed
+airgap-sync info ./seed
 ```
 
 Prints a JSON summary with package counts, package names, restored tags, report status,

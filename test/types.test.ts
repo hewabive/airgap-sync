@@ -4,7 +4,7 @@ import type { BundleManifest } from '../src/types.js';
 
 describe('package scaffold', () => {
   it('exports the package name', () => {
-    expect(packageName).toBe('npm-registry-seed');
+    expect(packageName).toBe('airgap-sync');
   });
 
   it('defines the bundle manifest contract', () => {

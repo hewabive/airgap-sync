@@ -1,4 +1,4 @@
-export const packageName = 'npm-registry-seed';
+export const packageName = 'airgap-sync';
 
 export {
   createBundleDocuments,

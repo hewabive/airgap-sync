@@ -52,7 +52,7 @@ function publishLatestRequirement(name: string): RootPackageRequirement {
   return {
     name,
     raw: `${name}@latest`,
-    requiredBy: 'npm-registry-seed:publish-latest',
+    requiredBy: 'airgap-sync:publish-latest',
     specifier: 'latest',
     type: 'tag',
   };

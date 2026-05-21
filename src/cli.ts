@@ -66,7 +66,7 @@ function toFetchDryRun(result: FetchSeedBundleResult) {
 
 program
   .name(packageName)
-  .description('Build and publish npm registry seed bundles')
+  .description('Sync Git and npm dependencies for airgapped environments')
   .version('0.0.0');
 
 program

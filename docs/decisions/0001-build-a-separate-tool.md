@@ -17,7 +17,7 @@ install commands can resolve dependencies through registry metadata, including
 
 ## Decision
 
-Create `npm-registry-seed` as a separate package instead of extending `pnpm-airgap`.
+Create `airgap-sync` as a separate package instead of extending `pnpm-airgap`.
 
 ## Consequences
 

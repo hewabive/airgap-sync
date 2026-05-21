@@ -1,6 +1,6 @@
 # Architecture
 
-`npm-registry-seed` currently builds a transfer bundle that can populate Verdaccio
+`airgap-sync` currently builds a transfer bundle that can populate Verdaccio
 through normal npm publishing commands.
 
 The product direction is broader: a portable airgap dependency sync tool for projects
@@ -100,7 +100,7 @@ therefore be an explicit option before the first stable release.
 The first implementation target is direct package specs:
 
 ```bash
-npm-registry-seed fetch react@latest @types/node@^22
+airgap-sync fetch react@latest @types/node@^22
 ```
 
 This is the smallest useful workflow: it lets an operator seed a registry with one or
@@ -109,7 +109,7 @@ more packages and their transitive dependencies without creating a temporary pro
 Manifest input is the second target:
 
 ```bash
-npm-registry-seed fetch --manifest ./package.json
+airgap-sync fetch --manifest ./package.json
 ```
 
 Both modes should produce the same internal root requirements:
@@ -151,7 +151,7 @@ additional version, its dependencies are traversed too.
 Publishing should use standard commands:
 
 ```bash
-npm publish ./packages/foo-1.0.0.tgz --registry http://verdaccio:4873 --tag npm-registry-seed-temp
+npm publish ./packages/foo-1.0.0.tgz --registry http://verdaccio:4873 --tag airgap-sync-temp
 npm dist-tag add foo@1.0.0 latest --registry http://verdaccio:4873
 ```
 

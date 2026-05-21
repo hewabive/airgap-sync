@@ -1,4 +1,4 @@
-# npm-registry-seed
+# airgap-sync
 
 Build a publishable npm registry seed from package manifests, then publish it into
 Verdaccio or another npm-compatible registry.
@@ -33,29 +33,29 @@ repository orchestration and Git dependency mirroring are still design work.
 
 ```bash
 # Online machine: resolve package specs and build a transfer bundle.
-npm-registry-seed fetch react@latest @types/node@^22 -o ./seed
+airgap-sync fetch react@latest @types/node@^22 -o ./seed
 
 # Or seed from a project manifest.
-npm-registry-seed fetch --manifest ./package.json -o ./seed
+airgap-sync fetch --manifest ./package.json -o ./seed
 
 # Monorepos are scanned recursively from the manifest directory.
-npm-registry-seed fetch --manifest ./package.json --include-dev -o ./seed
+airgap-sync fetch --manifest ./package.json --include-dev -o ./seed
 
 # Offline machine: publish tarballs and restore required dist-tags.
-npm-registry-seed publish ./seed -r http://192.168.0.10:4873
+airgap-sync publish ./seed -r http://192.168.0.10:4873
 ```
 
 Future commands are expected to cover a larger workflow:
 
 ```bash
 # Online machine: refresh Git repositories on removable media.
-npm-registry-seed git fetch ./repos
+airgap-sync git fetch ./repos
 
 # Online machine: collect npm and Git dependency closure.
-npm-registry-seed collect ./repos -o ./airgap-bundle
+airgap-sync collect ./repos -o ./airgap-bundle
 
 # Closed network: push mirrored Git repositories and publish npm packages.
-npm-registry-seed apply ./airgap-bundle \
+airgap-sync apply ./airgap-bundle \
   --gitea http://gitea.local \
   --registry http://verdaccio.local:4873
 ```

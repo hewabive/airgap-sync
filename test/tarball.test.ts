@@ -30,7 +30,7 @@ async function createTarball(rootDirName: string): Promise<string> {
 
 describe('readPackageManifest', () => {
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'npm-registry-seed-tarball-'));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-tarball-'));
   });
 
   afterEach(async () => {

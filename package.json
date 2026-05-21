@@ -1,10 +1,10 @@
 {
-  "name": "npm-registry-seed",
+  "name": "airgap-sync",
   "version": "0.0.0",
-  "description": "Build a publishable npm registry seed for offline Verdaccio installs",
+  "description": "Sync Git and npm dependencies for airgapped environments",
   "type": "module",
   "bin": {
-    "npm-registry-seed": "dist/cli.cjs"
+    "airgap-sync": "dist/cli.cjs"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,6 +27,8 @@
   },
   "keywords": [
     "npm",
+    "git",
+    "gitea",
     "registry",
     "verdaccio",
     "airgap",

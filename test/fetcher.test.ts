@@ -102,7 +102,7 @@ describe('fetchSeedBundle', () => {
     expect(result.tagRequirements).toEqual([
       {
         name: 'demo',
-        requiredBy: 'npm-registry-seed:publish-latest',
+        requiredBy: 'airgap-sync:publish-latest',
         tag: 'latest',
         version: '2.0.0',
       },
@@ -189,7 +189,7 @@ describe('fetchSeedBundle', () => {
     expect(result.tagRequirements).toEqual([
       {
         name: 'demo',
-        requiredBy: 'npm-registry-seed:publish-latest',
+        requiredBy: 'airgap-sync:publish-latest',
         tag: 'latest',
         version: '2.0.0',
       },

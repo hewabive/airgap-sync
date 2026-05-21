@@ -12,7 +12,7 @@ import { isBlockedPublishRegistry } from './registry.js';
 import { throwIfInvalidBundle, validateBundle } from './validation.js';
 
 const execFileAsync = promisify(execFile);
-const tempPublishTag = 'npm-registry-seed-temp';
+const tempPublishTag = 'airgap-sync-temp';
 
 export interface PublishBundleOptions {
   bundleDir: string;
@@ -179,7 +179,7 @@ export async function publishBundle(
     throw new Error(
       [
         'Bundle is missing upstream latest tags for packages that do not exist in the target registry.',
-        'Regenerate the bundle with a current npm-registry-seed fetch command.',
+        'Regenerate the bundle with a current airgap-sync fetch command.',
         `Packages: ${[...missingLatest].join(', ')}`,
       ].join(' ')
     );

@@ -84,7 +84,7 @@ const publishReport: PublishReport = {
 
 describe('readBundleInfo', () => {
   beforeEach(async () => {
-    bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'npm-registry-seed-info-'));
+    bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-info-'));
     await fs.ensureDir(path.join(bundleDir, 'packages'));
     await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), manifest);
     await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), distTags);

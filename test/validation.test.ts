@@ -50,7 +50,7 @@ const distTags: DistTagsManifest = {
 
 describe('validateBundle', () => {
   beforeEach(async () => {
-    bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'npm-registry-seed-validation-'));
+    bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-validation-'));
     await fs.ensureDir(path.join(bundleDir, 'packages'));
     await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
   });

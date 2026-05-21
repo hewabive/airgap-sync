@@ -77,9 +77,9 @@ other non-registry specs can be traced back to the package that declared them.
 
 ## Audit
 
-Use `npm-registry-seed info ./seed` to print a JSON summary of package counts, tags,
+Use `airgap-sync info ./seed` to print a JSON summary of package counts, tags,
 report status, missing tarball files, and validation issues before transferring or
 publishing a bundle.
 
-`npm-registry-seed publish` runs the same validation before it starts npm publish
+`airgap-sync publish` runs the same validation before it starts npm publish
 commands.

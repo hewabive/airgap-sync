@@ -14,7 +14,7 @@ async function writePackageJson(relativePath: string, manifest: unknown): Promis
 
 describe('readManifestRequirements', () => {
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'npm-registry-seed-manifests-'));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-manifests-'));
     await writePackageJson('package.json', {
       name: '@repo/root',
       private: true,

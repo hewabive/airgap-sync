@@ -78,7 +78,7 @@ describe('createPublishPlan', () => {
 
 describe('publishBundle', () => {
   it('returns a dry-run report without executing npm commands', async () => {
-    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'npm-registry-seed-publish-'));
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
 
     try {
       await fs.ensureDir(path.join(bundleDir, 'packages'));
