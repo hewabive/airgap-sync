@@ -49,6 +49,31 @@ export interface WorkspaceGitTargetsReport {
   totalRepositories: number;
 }
 
+interface WorkspaceGitTargetSnapshot {
+  branch?: string;
+  error?: string;
+  localPath: string;
+  status?: WorkspaceGitTargetStatus;
+  type: 'git';
+  url: string;
+}
+
+interface WorkspaceNpmTargetSnapshot {
+  spec: string;
+  type: 'npm';
+}
+
+export type WorkspaceTargetSnapshot = WorkspaceGitTargetSnapshot | WorkspaceNpmTargetSnapshot;
+
+export interface WorkspaceSnapshot {
+  createdAt: string;
+  output: string;
+  reposDir: string;
+  schemaVersion: 1;
+  sourceRegistry: string;
+  targets: WorkspaceTargetSnapshot[];
+}
+
 export interface InitWorkspaceOptions {
   force?: boolean;
   workspaceDir: string;
@@ -58,6 +83,13 @@ export interface MaterializeWorkspaceGitTargetsOptions {
   config: WorkspaceConfig;
   dryRun?: boolean;
   runner?: GitCommandRunner;
+  workspaceDir: string;
+}
+
+export interface CreateWorkspaceSnapshotOptions {
+  config: WorkspaceConfig;
+  createdAt?: string;
+  targetSync?: WorkspaceGitTargetsReport;
   workspaceDir: string;
 }
 
@@ -323,5 +355,55 @@ export async function materializeWorkspaceGitTargets(
     repositories,
     reposDir,
     totalRepositories: repositories.length,
+  };
+}
+
+function toPortablePath(filePath: string): string {
+  return filePath.split(path.sep).join(path.posix.sep);
+}
+
+function matchingGitTargetResult(
+  target: WorkspaceGitTarget,
+  report: WorkspaceGitTargetsReport | undefined
+): WorkspaceGitTargetResult | undefined {
+  return report?.repositories.find(
+    (repository) =>
+      repository.url === target.url && (repository.branch ?? '') === (target.branch ?? '')
+  );
+}
+
+export function createWorkspaceSnapshot(
+  options: CreateWorkspaceSnapshotOptions
+): WorkspaceSnapshot {
+  const workspaceDir = path.resolve(options.workspaceDir);
+
+  return {
+    createdAt: options.createdAt ?? new Date().toISOString(),
+    output: options.config.output,
+    reposDir: options.config.reposDir,
+    schemaVersion: 1,
+    sourceRegistry: options.config.sourceRegistry,
+    targets: options.config.targets.map((target) => {
+      if (target.type === 'npm') {
+        return {
+          spec: target.spec,
+          type: 'npm',
+        };
+      }
+
+      const result = matchingGitTargetResult(target, options.targetSync);
+      const targetPath =
+        result?.targetPath ?? gitTargetLocalPath(workspaceDir, options.config, target.url);
+      const localPath = toPortablePath(path.relative(workspaceDir, targetPath));
+
+      return {
+        ...(target.branch ? { branch: target.branch } : {}),
+        ...(result?.error ? { error: result.error } : {}),
+        localPath,
+        ...(result?.status ? { status: result.status } : {}),
+        type: 'git',
+        url: target.url,
+      };
+    }),
   };
 }

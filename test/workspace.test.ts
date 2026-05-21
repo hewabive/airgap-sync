@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from '../src/core/fs.js';
 import {
   addWorkspaceTarget,
+  createWorkspaceSnapshot,
   gitTargetLocalPath,
   initWorkspace,
   materializeWorkspaceGitTargets,
@@ -119,6 +120,54 @@ describe('workspace config', () => {
       cloned: 1,
       errors: [],
       totalRepositories: 1,
+    });
+  });
+
+  it('creates a portable workspace snapshot for later verification', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.targets.push(
+      {
+        branch: 'main',
+        type: 'git',
+        url: 'https://github.com/acme/app.git',
+      },
+      {
+        spec: 'eslint@latest',
+        type: 'npm',
+      }
+    );
+    const targetSync = await materializeWorkspaceGitTargets({
+      config,
+      dryRun: true,
+      workspaceDir: tempDir,
+    });
+
+    expect(
+      createWorkspaceSnapshot({
+        config,
+        createdAt: '2026-05-21T00:00:00.000Z',
+        targetSync,
+        workspaceDir: tempDir,
+      })
+    ).toEqual({
+      createdAt: '2026-05-21T00:00:00.000Z',
+      output: './bundle',
+      reposDir: './repos',
+      schemaVersion: 1,
+      sourceRegistry: 'https://registry.npmjs.org',
+      targets: [
+        {
+          branch: 'main',
+          localPath: 'repos/github.com/acme/app',
+          status: 'planned',
+          type: 'git',
+          url: 'https://github.com/acme/app.git',
+        },
+        {
+          spec: 'eslint@latest',
+          type: 'npm',
+        },
+      ],
     });
   });
 });

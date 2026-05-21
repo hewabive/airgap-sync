@@ -15,6 +15,7 @@ export {
   writeGitConfigReport,
   writeGitFetchReport,
   writePublishReport,
+  writeWorkspaceSnapshot,
 } from './core/bundle.js';
 export { applyBundle } from './core/apply.js';
 export { collectBundle } from './core/collect.js';
@@ -44,6 +45,7 @@ export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
 export { throwIfInvalidBundle, validateBundle } from './core/validation.js';
 export {
   addWorkspaceTarget,
+  createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
   defaultWorkspaceReposDir,
   defaultWorkspaceSourceRegistry,
@@ -123,7 +125,9 @@ export type {
   WorkspaceGitTargetsReport,
   WorkspaceGitTargetStatus,
   WorkspaceNpmTarget,
+  WorkspaceSnapshot,
   WorkspaceTarget,
+  WorkspaceTargetSnapshot,
 } from './core/workspace.js';
 
 export type { DownloadedTarball } from './core/tarball.js';

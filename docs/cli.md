@@ -66,6 +66,8 @@ missing configured Git targets into `repos/`, scans those repositories, includes
 configured npm targets as root package specs, resolves npm registry packages, writes
 portable Git source metadata, clones or updates Git dependency mirrors, scans package
 manifests from those mirrors, and repeats until no new npm or Git inputs are found.
+It also writes `workspace-snapshot.json` with the configured targets and portable
+relative repository paths for later verification.
 
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.

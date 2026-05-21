@@ -20,6 +20,7 @@ import type {
   UnsupportedRootPackageRequirement,
 } from '../types.js';
 import { packageFileName } from './files.js';
+import type { WorkspaceSnapshot } from './workspace.js';
 
 export interface BundleDocumentsOptions {
   createdAt?: string;
@@ -192,4 +193,12 @@ export async function writeApplyReport(
       spaces: 2,
     }
   );
+}
+
+export async function writeWorkspaceSnapshot(
+  bundleDir: string,
+  snapshot: WorkspaceSnapshot
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'workspace-snapshot.json'), snapshot, { spaces: 2 });
 }

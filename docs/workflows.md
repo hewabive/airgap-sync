@@ -88,6 +88,7 @@ The collect step writes npm metadata and Git source metadata:
 
 - `seed-manifest.json`
 - `dist-tags.json`
+- `workspace-snapshot.json`
 - `fetch-report.json`
 - package tarballs under `packages/`
 - local bare Git mirrors under `git-mirrors/`
@@ -112,6 +113,7 @@ Copy the whole `./bundle` directory to the closed network, including:
 - `git-mirrors/`
 - `seed-manifest.json`
 - `dist-tags.json`
+- `workspace-snapshot.json`
 - `fetch-report.json`
 - Git source metadata
 - Git mirror fetch reports

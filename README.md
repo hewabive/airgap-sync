@@ -76,6 +76,7 @@ The configured workspace lives on removable media:
 airgap-sync.json          Target list and defaults
 repos/                    Working clones for configured Git targets
 bundle/                   Transfer bundle for Verdaccio and Gitea
+bundle/workspace-snapshot.json  Portable target snapshot for verification
 cache/                    Reserved for local caches
 reports/                  Reserved for operator-facing reports
 ```

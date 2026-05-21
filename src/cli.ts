@@ -12,6 +12,7 @@ import {
   createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
+  createWorkspaceSnapshot,
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
   fetchSeedBundle,
@@ -39,6 +40,7 @@ import {
   writeGitFetchReport,
   writeGitSourcesManifest,
   writePublishReport,
+  writeWorkspaceSnapshot,
   provisionGiteaRepositories,
 } from './index.js';
 import type { GiteaClient } from './index.js';
@@ -440,6 +442,9 @@ program
         );
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
+        const snapshotOutput = options.output
+          ? path.relative(workspaceDir, outputDir) || '.'
+          : config.output;
         const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
         const report = await collectBundle({
           dryRun: options.dryRun === true,
@@ -454,11 +459,25 @@ program
           registryUrl,
           root: path.resolve(workspaceDir, config.reposDir),
         });
+        const workspaceSnapshot = createWorkspaceSnapshot({
+          config: {
+            ...config,
+            output: snapshotOutput,
+            sourceRegistry: registryUrl,
+          },
+          createdAt: report.generatedAt,
+          targetSync,
+          workspaceDir,
+        });
+        if (options.dryRun !== true) {
+          await writeWorkspaceSnapshot(outputDir, workspaceSnapshot);
+        }
 
         console.log(
           JSON.stringify(
             {
               targetSync,
+              workspaceSnapshot,
               ...report,
             },
             null,
