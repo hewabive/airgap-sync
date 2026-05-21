@@ -14,7 +14,7 @@ export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
-export { fetchGitMirrors, runGitCommand } from './core/git-fetch.js';
+export { fetchGitMirrors, fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export {
   createGitMirrorPlan,
   readFetchReport,
@@ -59,6 +59,7 @@ export type {
 } from './core/gitea.js';
 export type {
   FetchGitMirrorsOptions,
+  FetchGitSourcesOptions,
   GitCommandInvocation,
   GitCommandRunner,
 } from './core/git-fetch.js';

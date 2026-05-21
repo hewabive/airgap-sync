@@ -150,6 +150,10 @@ Reads `git-plan.json` and stores local bare mirror repositories. Missing mirrors
 created with `git clone --mirror`; existing mirrors run `git remote set-url origin` and
 `git remote update --prune`. The command writes `git-fetch-report.json`.
 
+When `git-sources.json` exists, it is preferred and mirrors are stored using preserved
+source paths such as `git-mirrors/github.com/antvis/G2.git`. If `git-sources.json` is
+absent, the command falls back to legacy `git-plan.json`.
+
 This is the online-side collection step only. It does not push to Gitea; that belongs
 to a later offline apply command.
 

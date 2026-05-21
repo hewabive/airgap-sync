@@ -175,8 +175,9 @@ airgap-sync git config ./airgap-bundle --global
 ```
 
 These commands are useful for testing, but they still bind the Git plan to Gitea during
-the online phase and flatten mirror names. That is the behavior the next workflow
-iteration should replace.
+the online phase for later offline steps. `git sources` and `git fetch` already support
+portable source metadata and preserved local mirror paths; the remaining work is to move
+offline apply/create/config to that metadata.
 
 ## Dry Runs
 

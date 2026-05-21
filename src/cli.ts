@@ -10,6 +10,7 @@ import {
   createBundleDocuments,
   createFetchReport,
   fetchGitMirrors,
+  fetchGitSources,
   fetchSeedBundle,
   HttpGiteaClient,
   HttpRegistryClient,
@@ -19,6 +20,7 @@ import {
   readBundleInfo,
   readFetchReport,
   readGitMirrorPlan,
+  readGitSourcesManifest,
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
@@ -368,19 +370,34 @@ gitCommand
 
 gitCommand
   .command('fetch')
-  .description('Clone or update local bare mirrors from git-plan.json')
+  .description('Clone or update local bare mirrors from Git source metadata')
   .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--mirrors-dir <dir>', 'Directory for bare Git mirrors')
   .option('--dry-run', 'Print planned mirror fetch operations without running Git')
   .action(async (bundle: string, options: GitFetchOptions) => {
     try {
-      const plan = await readGitMirrorPlan(bundle);
-      const report = await fetchGitMirrors({
-        bundleDir: bundle,
-        dryRun: options.dryRun === true,
-        plan,
-        ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
-      });
+      let report;
+      try {
+        const manifest = await readGitSourcesManifest(bundle);
+        report = await fetchGitSources({
+          bundleDir: bundle,
+          dryRun: options.dryRun === true,
+          manifest,
+          ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+        });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+
+        const plan = await readGitMirrorPlan(bundle);
+        report = await fetchGitMirrors({
+          bundleDir: bundle,
+          dryRun: options.dryRun === true,
+          plan,
+          ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+        });
+      }
 
       await writeGitFetchReport(bundle, report);
       console.log(JSON.stringify(report, null, 2));

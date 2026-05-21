@@ -6,6 +6,7 @@ import type {
   GitFetchReport,
   GitMirrorPlan,
   GitMirrorRepositoryPlan,
+  GitSourcesManifest,
 } from '../types.js';
 
 export interface GitCommandInvocation {
@@ -22,6 +23,21 @@ export interface FetchGitMirrorsOptions {
   mirrorsDir?: string;
   plan: GitMirrorPlan;
   runner?: GitCommandRunner;
+}
+
+export interface FetchGitSourcesOptions {
+  bundleDir: string;
+  dryRun?: boolean;
+  generatedAt?: string;
+  manifest: GitSourcesManifest;
+  mirrorsDir?: string;
+  runner?: GitCommandRunner;
+}
+
+interface FetchEntry {
+  id: string;
+  sourceUrl: string;
+  targetPath: string;
 }
 
 export async function runGitCommand(invocation: GitCommandInvocation): Promise<void> {
@@ -54,69 +70,69 @@ function mirrorPath(mirrorsDir: string, repository: GitMirrorRepositoryPlan): st
   return path.join(mirrorsDir, `${repository.repository}.git`);
 }
 
-async function fetchRepository(
-  repository: GitMirrorRepositoryPlan,
-  mirrorsDir: string,
+async function fetchEntry(
+  entry: FetchEntry,
   runner: GitCommandRunner
 ): Promise<GitFetchActionResult> {
-  const targetPath = mirrorPath(mirrorsDir, repository);
-
   try {
-    if (await fs.pathExists(targetPath)) {
+    if (await fs.pathExists(entry.targetPath)) {
       await runner({
-        args: ['-C', targetPath, 'remote', 'set-url', 'origin', repository.sourceUrl],
+        args: ['-C', entry.targetPath, 'remote', 'set-url', 'origin', entry.sourceUrl],
       });
       await runner({
-        args: ['-C', targetPath, 'remote', 'update', '--prune'],
+        args: ['-C', entry.targetPath, 'remote', 'update', '--prune'],
       });
       return {
-        repository: repository.repository,
-        sourceUrl: repository.sourceUrl,
+        repository: entry.id,
+        sourceUrl: entry.sourceUrl,
         status: 'updated',
-        targetPath,
+        targetPath: entry.targetPath,
       };
     }
 
-    await fs.ensureDir(mirrorsDir);
+    await fs.ensureDir(path.dirname(entry.targetPath));
     await runner({
-      args: ['clone', '--mirror', repository.sourceUrl, targetPath],
+      args: ['clone', '--mirror', entry.sourceUrl, entry.targetPath],
     });
     return {
-      repository: repository.repository,
-      sourceUrl: repository.sourceUrl,
+      repository: entry.id,
+      sourceUrl: entry.sourceUrl,
       status: 'cloned',
-      targetPath,
+      targetPath: entry.targetPath,
     };
   } catch (error) {
     return {
       error: (error as Error).message,
-      repository: repository.repository,
-      sourceUrl: repository.sourceUrl,
+      repository: entry.id,
+      sourceUrl: entry.sourceUrl,
       status: 'error',
-      targetPath,
+      targetPath: entry.targetPath,
     };
   }
 }
 
-export async function fetchGitMirrors(options: FetchGitMirrorsOptions): Promise<GitFetchReport> {
-  const mirrorsDir = path.resolve(
-    options.mirrorsDir ?? path.join(options.bundleDir, 'git-mirrors')
-  );
+async function fetchEntries(options: {
+  dryRun: boolean;
+  entries: FetchEntry[];
+  generatedAt?: string;
+  mirrorsDir: string;
+  runner?: GitCommandRunner;
+}): Promise<GitFetchReport> {
   const actions: GitFetchActionResult[] = [];
 
-  if (options.dryRun === true) {
-    for (const repository of options.plan.repositories) {
+  if (options.dryRun) {
+    for (const entry of options.entries) {
       actions.push({
-        repository: repository.repository,
-        sourceUrl: repository.sourceUrl,
+        repository: entry.id,
+        sourceUrl: entry.sourceUrl,
         status: 'planned',
-        targetPath: mirrorPath(mirrorsDir, repository),
+        targetPath: entry.targetPath,
       });
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    for (const repository of options.plan.repositories) {
-      actions.push(await fetchRepository(repository, mirrorsDir, runner));
+    for (const entry of options.entries) {
+      actions.push(await fetchEntry(entry, runner));
     }
   }
 
@@ -124,12 +140,52 @@ export async function fetchGitMirrors(options: FetchGitMirrorsOptions): Promise<
 
   return {
     cloned: actions.filter((action) => action.status === 'cloned').length,
-    dryRun: options.dryRun === true,
+    dryRun: options.dryRun,
     errors,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
-    mirrorsDir,
+    mirrorsDir: options.mirrorsDir,
     planned: actions.filter((action) => action.status === 'planned').length,
     totalRepositories: actions.length,
     updated: actions.filter((action) => action.status === 'updated').length,
   };
+}
+
+export async function fetchGitMirrors(options: FetchGitMirrorsOptions): Promise<GitFetchReport> {
+  const mirrorsDir = path.resolve(
+    options.mirrorsDir ?? path.join(options.bundleDir, 'git-mirrors')
+  );
+  const entries = options.plan.repositories.map((repository) => ({
+    id: repository.repository,
+    sourceUrl: repository.sourceUrl,
+    targetPath: mirrorPath(mirrorsDir, repository),
+  }));
+
+  return await fetchEntries({
+    dryRun: options.dryRun === true,
+    entries,
+    mirrorsDir,
+    ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
+    ...(options.runner ? { runner: options.runner } : {}),
+  });
+}
+
+export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<GitFetchReport> {
+  const bundleDir = path.resolve(options.bundleDir);
+  const defaultMirrorRoot = path.join(bundleDir, 'git-mirrors');
+  const mirrorsDir = path.resolve(options.mirrorsDir ?? defaultMirrorRoot);
+  const entries = options.manifest.sources.map((source) => ({
+    id: source.id,
+    sourceUrl: source.sourceUrl,
+    targetPath: options.mirrorsDir
+      ? path.join(mirrorsDir, path.relative('git-mirrors', source.localMirrorPath))
+      : path.join(bundleDir, source.localMirrorPath),
+  }));
+
+  return await fetchEntries({
+    dryRun: options.dryRun === true,
+    entries,
+    mirrorsDir,
+    ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
+    ...(options.runner ? { runner: options.runner } : {}),
+  });
 }
