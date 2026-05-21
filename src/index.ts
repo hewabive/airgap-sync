@@ -25,6 +25,11 @@ export {
   writeGitFetchReport,
   writeGitMirrorPlan,
 } from './core/git-plan.js';
+export {
+  createGitSourcesManifest,
+  readGitSourcesManifest,
+  writeGitSourcesManifest,
+} from './core/git-sources.js';
 export { readBundleInfo } from './core/info.js';
 export { readManifestRequirements } from './core/manifests.js';
 export { findGitRepositories, runGitOutputCommand, updateRepositories } from './core/repos.js';
@@ -58,6 +63,7 @@ export type {
   GitCommandRunner,
 } from './core/git-fetch.js';
 export type { GitMirrorPlanOptions } from './core/git-plan.js';
+export type { GitSourcesOptions } from './core/git-sources.js';
 export type {
   BundleInfo,
   BundleInfoPackage,
@@ -103,6 +109,8 @@ export type {
   GitMirrorPlan,
   GitMirrorRepositoryPlan,
   GitRequirement,
+  GitSource,
+  GitSourcesManifest,
   PackageMetadata,
   PackageManifest,
   PackageVersionMetadata,

@@ -62,6 +62,27 @@ export interface GitMirrorPlan {
   skipped: SkippedGitRequirement[];
 }
 
+export interface GitSource {
+  committish?: string;
+  fetchSpec?: string;
+  gitRange?: string;
+  gitSubdir?: string;
+  host: string;
+  id: string;
+  localMirrorPath: string;
+  owner: string;
+  repo: string;
+  requirements: GitRequirement[];
+  sourceUrl: string;
+}
+
+export interface GitSourcesManifest {
+  schemaVersion: 1;
+  createdAt: string;
+  sources: GitSource[];
+  skipped: SkippedGitRequirement[];
+}
+
 export type GitFetchActionStatus = 'planned' | 'cloned' | 'updated' | 'error';
 
 export interface GitFetchActionResult {

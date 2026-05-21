@@ -105,6 +105,18 @@ airgap-sync info ./airgap-bundle
 Prints a JSON summary with package counts, package names, restored tags, report status,
 missing tarball files, and bundle validation issues.
 
+## git sources
+
+```bash
+airgap-sync git sources ./airgap-bundle
+airgap-sync git sources ./airgap-bundle --write
+```
+
+Creates portable `git-sources.json` metadata from `fetch-report.json` without binding
+the bundle to a Gitea instance. Source records preserve upstream host and
+owner/repository paths, for example `github.com/antvis/G2`, and point at local mirror
+paths such as `git-mirrors/github.com/antvis/G2.git`.
+
 ## git plan
 
 ```bash

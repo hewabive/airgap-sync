@@ -163,6 +163,7 @@ uses lower-level commands:
 ```bash
 # Online
 airgap-sync fetch --manifest ./package.json --include-dev -o ./airgap-bundle
+airgap-sync git sources ./airgap-bundle --write
 airgap-sync git plan ./airgap-bundle --gitea http://gitea.local --owner npm-mirrors --write
 airgap-sync git fetch ./airgap-bundle
 

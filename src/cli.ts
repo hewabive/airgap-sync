@@ -6,6 +6,7 @@ import {
   CachedRegistryClient,
   configureGitRewrites,
   createGitMirrorPlan,
+  createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
   fetchGitMirrors,
@@ -29,6 +30,7 @@ import {
   writeGitConfigReport,
   writeGitFetchReport,
   writeGitMirrorPlan,
+  writeGitSourcesManifest,
   writePublishReport,
   provisionGiteaRepositories,
 } from './index.js';
@@ -53,6 +55,10 @@ interface PublishOptions {
 interface GitPlanOptions {
   gitea: string;
   owner: string;
+  write?: boolean;
+}
+
+interface GitSourcesOptions {
   write?: boolean;
 }
 
@@ -298,6 +304,34 @@ reposCommand
   });
 
 const gitCommand = program.command('git').description('Plan and operate Git mirrors');
+
+gitCommand
+  .command('sources')
+  .description('Create portable Git source metadata from bundle Git requirements')
+  .argument('<bundle>', 'Path to airgap bundle directory')
+  .option('--write', 'Write git-sources.json into the bundle')
+  .action(async (bundle: string, options: GitSourcesOptions) => {
+    try {
+      const fetchReport = await readFetchReport(bundle);
+      const gitRequirements = Array.isArray(fetchReport.gitRequirements)
+        ? fetchReport.gitRequirements
+        : [];
+      const manifest = createGitSourcesManifest(gitRequirements);
+
+      if (options.write === true) {
+        await writeGitSourcesManifest(bundle, manifest);
+      }
+
+      console.log(JSON.stringify(manifest, null, 2));
+
+      if (manifest.skipped.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
 
 gitCommand
   .command('plan')
