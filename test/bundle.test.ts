@@ -31,7 +31,7 @@ describe('createBundleDocuments', () => {
   it('creates seed and dist-tag manifests', () => {
     const documents = createBundleDocuments({
       createdAt: '2026-05-20T00:00:00.000Z',
-      outputDir: './seed',
+      outputDir: './airgap-bundle',
       resolved: [resolvedPackage],
       sourceRegistry: 'https://registry.example',
       tagRequirements: [

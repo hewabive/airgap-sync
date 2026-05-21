@@ -110,6 +110,6 @@ describe('validateBundle', () => {
           },
         ],
       });
-    }).toThrow('Invalid seed bundle');
+    }).toThrow('Invalid airgap bundle');
   });
 });

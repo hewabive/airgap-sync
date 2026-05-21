@@ -119,9 +119,9 @@ program
 
 program
   .command('fetch')
-  .description('Resolve dependencies and build a seed bundle')
+  .description('Resolve dependencies and build an airgap bundle')
   .argument('[specs...]', 'Package specs to seed, e.g. react@latest')
-  .option('-o, --output <dir>', 'Bundle output directory', './seed')
+  .option('-o, --output <dir>', 'Bundle output directory', './airgap-bundle')
   .option('-r, --registry <url>', 'Source registry URL', 'https://registry.npmjs.org')
   .option('--manifest <path>', 'Read root dependencies from a package.json')
   .option('--include-dev', 'Include root devDependencies')
@@ -225,8 +225,8 @@ program
 
 program
   .command('publish')
-  .description('Publish a seed bundle into an npm-compatible registry')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .description('Publish an airgap bundle into an npm-compatible registry')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('-r, --registry <url>', 'Target registry URL')
   .option('--no-skip-existing', 'Attempt to publish versions that already exist')
   .option('--dry-run', 'Print planned operations without publishing')
@@ -255,8 +255,8 @@ program
 
 program
   .command('info')
-  .description('Show information about a seed bundle')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .description('Show information about an airgap bundle')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .action(async (bundle: string) => {
     try {
       const info = await readBundleInfo(bundle);
@@ -272,7 +272,7 @@ const gitCommand = program.command('git').description('Plan and operate Git mirr
 gitCommand
   .command('plan')
   .description('Create a Gitea mirror plan from bundle Git requirements')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
   .requiredOption('--owner <owner>', 'Gitea user or organization that will own mirror repositories')
   .option('--write', 'Write git-plan.json into the bundle')
@@ -305,7 +305,7 @@ gitCommand
 gitCommand
   .command('fetch')
   .description('Clone or update local bare mirrors from git-plan.json')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--mirrors-dir <dir>', 'Directory for bare Git mirrors')
   .option('--dry-run', 'Print planned mirror fetch operations without running Git')
   .action(async (bundle: string, options: GitFetchOptions) => {
@@ -333,7 +333,7 @@ gitCommand
 gitCommand
   .command('apply')
   .description('Push local bare mirrors into Gitea and report Git rewrite rules')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
@@ -361,7 +361,7 @@ gitCommand
 gitCommand
   .command('config')
   .description('Configure Git URL rewrites from git-plan.json')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('--global', 'Write rewrite rules into the global Git config')
   .option('--dry-run', 'Print planned Git config operations without writing config')
   .action(async (bundle: string, options: GitConfigOptions) => {
@@ -387,7 +387,7 @@ gitCommand
 gitCommand
   .command('create-repos')
   .description('Create missing Gitea repositories from git-plan.json')
-  .argument('<bundle>', 'Path to seed bundle directory')
+  .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
   .option('--owner-type <type>', 'Gitea owner type: user or org', 'user')
   .option('--public', 'Create public repositories instead of private repositories')

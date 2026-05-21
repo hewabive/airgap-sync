@@ -34,16 +34,16 @@ orchestration and automated install verification are still design work.
 ## Current Workflow
 
 ```bash
-# Online machine: build npm bundle and collect Git mirrors.
-airgap-sync fetch --manifest ./package.json --include-dev -o ./seed
-airgap-sync git plan ./seed --gitea http://gitea.local --owner npm-mirrors --write
-airgap-sync git fetch ./seed
+# Online machine: build the transfer bundle and collect Git mirrors.
+airgap-sync fetch --manifest ./package.json --include-dev -o ./airgap-bundle
+airgap-sync git plan ./airgap-bundle --gitea http://gitea.local --owner npm-mirrors --write
+airgap-sync git fetch ./airgap-bundle
 
 # Closed network: populate Verdaccio and Gitea.
-airgap-sync publish ./seed -r http://verdaccio.local:4873
-airgap-sync git create-repos ./seed --token "$GITEA_TOKEN"
-airgap-sync git apply ./seed
-airgap-sync git config ./seed --global
+airgap-sync publish ./airgap-bundle -r http://verdaccio.local:4873
+airgap-sync git create-repos ./airgap-bundle --token "$GITEA_TOKEN"
+airgap-sync git apply ./airgap-bundle
+airgap-sync git config ./airgap-bundle --global
 ```
 
 For a Gitea organization, add `--owner-type org` to `git create-repos`.

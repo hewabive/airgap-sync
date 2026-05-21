@@ -158,5 +158,5 @@ export function throwIfInvalidBundle(validation: BundleValidationResult): void {
   }
 
   const details = validation.issues.map((item) => `${item.code}: ${item.message}`).join('\n');
-  throw new Error(`Invalid seed bundle:\n${details}`);
+  throw new Error(`Invalid airgap bundle:\n${details}`);
 }

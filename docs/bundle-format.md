@@ -1,9 +1,9 @@
 # Bundle Format
 
-A seed bundle is a directory that can be transferred to the target environment.
+An airgap bundle is a directory that can be transferred to the target environment.
 
 ```text
-seed/
+airgap-bundle/
   packages/
     foo-1.0.0.tgz
     scope__bar-2.0.0.tgz
@@ -102,9 +102,9 @@ the closed-network `insteadOf` rules were planned, configured, or failed.
 
 ## Audit
 
-Use `airgap-sync info ./seed` to print a JSON summary of package counts, tags,
-report status, missing tarball files, and validation issues before transferring or
-publishing a bundle.
+Use `airgap-sync info ./airgap-bundle` to print a JSON summary of package counts,
+tags, report status, missing tarball files, and validation issues before transferring
+or publishing a bundle.
 
 `airgap-sync publish` runs the same validation before it starts npm publish
 commands.

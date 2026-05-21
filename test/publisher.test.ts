@@ -107,7 +107,7 @@ describe('publishBundle', () => {
   it('refuses to publish to public registries even in dry-run mode', async () => {
     await expect(
       publishBundle(manifest, distTags, {
-        bundleDir: './seed',
+        bundleDir: './airgap-bundle',
         dryRun: true,
         registryUrl: 'https://registry.npmjs.org',
       })

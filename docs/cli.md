@@ -7,13 +7,13 @@ are auditable.
 
 ```bash
 airgap-sync fetch react@latest @types/node@^22 \
-  --output ./seed \
+  --output ./airgap-bundle \
   --registry https://registry.npmjs.org
 
 # Or from a project manifest. The manifest directory is scanned recursively for nested
 # package.json files, excluding node_modules and build/cache directories.
 airgap-sync fetch --manifest ./package.json \
-  --output ./seed
+  --output ./airgap-bundle
 ```
 
 Planned options:
@@ -45,7 +45,7 @@ inside the same scan root.
 ## publish
 
 ```bash
-airgap-sync publish ./seed \
+airgap-sync publish ./airgap-bundle \
   --registry http://192.168.0.10:4873
 ```
 
@@ -67,7 +67,7 @@ exists.
 ## info
 
 ```bash
-airgap-sync info ./seed
+airgap-sync info ./airgap-bundle
 ```
 
 Prints a JSON summary with package counts, package names, restored tags, report status,
@@ -76,7 +76,7 @@ missing tarball files, and bundle validation issues.
 ## git plan
 
 ```bash
-airgap-sync git plan ./seed \
+airgap-sync git plan ./airgap-bundle \
   --gitea http://gitea.local \
   --owner npm-mirrors \
   --write
@@ -94,9 +94,9 @@ for a later apply/verify phase.
 ## git fetch
 
 ```bash
-airgap-sync git fetch ./seed
-airgap-sync git fetch ./seed --dry-run
-airgap-sync git fetch ./seed --mirrors-dir ./git-mirrors
+airgap-sync git fetch ./airgap-bundle
+airgap-sync git fetch ./airgap-bundle --dry-run
+airgap-sync git fetch ./airgap-bundle --mirrors-dir ./git-mirrors
 ```
 
 Reads `git-plan.json` and stores local bare mirror repositories. Missing mirrors are
@@ -109,9 +109,9 @@ to a later offline apply command.
 ## git apply
 
 ```bash
-airgap-sync git apply ./seed
-airgap-sync git apply ./seed --dry-run
-airgap-sync git apply ./seed --mirrors-dir ./git-mirrors
+airgap-sync git apply ./airgap-bundle
+airgap-sync git apply ./airgap-bundle --dry-run
+airgap-sync git apply ./airgap-bundle --mirrors-dir ./git-mirrors
 ```
 
 Reads `git-plan.json` and pushes local bare mirrors to the planned Gitea target URLs
@@ -124,9 +124,9 @@ url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea
 ## git create-repos
 
 ```bash
-airgap-sync git create-repos ./seed --token "$GITEA_TOKEN"
-airgap-sync git create-repos ./seed --owner-type org --dry-run
-airgap-sync git create-repos ./seed --public
+airgap-sync git create-repos ./airgap-bundle --token "$GITEA_TOKEN"
+airgap-sync git create-repos ./airgap-bundle --owner-type org --dry-run
+airgap-sync git create-repos ./airgap-bundle --public
 ```
 
 Reads `git-plan.json` and creates missing repositories in Gitea before `git apply`.
@@ -140,8 +140,8 @@ private.
 ## git config
 
 ```bash
-airgap-sync git config ./seed --global
-airgap-sync git config ./seed --global --dry-run
+airgap-sync git config ./airgap-bundle --global
+airgap-sync git config ./airgap-bundle --global --dry-run
 ```
 
 Reads `git-plan.json` and writes the generated URL rewrite rules into the global Git

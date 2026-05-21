@@ -16,7 +16,7 @@ phase mutates Verdaccio, Gitea, or Git configuration.
 Example names used below:
 
 ```text
-./seed                         Transfer bundle directory
+./airgap-bundle                Transfer bundle directory
 https://registry.npmjs.org     Source npm registry
 http://verdaccio.local:4873    Closed-network npm registry
 http://gitea.local             Closed-network Gitea base URL
@@ -25,14 +25,14 @@ npm-mirrors                    Gitea user or organization for dependency mirrors
 
 ## Online Phase
 
-Build the npm seed bundle from a project manifest:
+Build the airgap bundle from a project manifest:
 
 ```bash
 airgap-sync fetch \
   --manifest ./package.json \
   --include-dev \
   --registry https://registry.npmjs.org \
-  --output ./seed
+  --output ./airgap-bundle
 ```
 
 For production-only dependency closure, omit `--include-dev`.
@@ -47,7 +47,7 @@ The fetch step writes:
 Create the Git mirror plan from Git dependencies found in npm package manifests:
 
 ```bash
-airgap-sync git plan ./seed \
+airgap-sync git plan ./airgap-bundle \
   --gitea http://gitea.local \
   --owner npm-mirrors \
   --write
@@ -59,16 +59,16 @@ type is selected later during repository creation.
 Fetch local bare mirrors for the planned Git dependencies:
 
 ```bash
-airgap-sync git fetch ./seed
+airgap-sync git fetch ./airgap-bundle
 ```
 
-This creates or updates local bare repositories under `./seed/git-mirrors/` and writes
-`git-fetch-report.json`.
+This creates or updates local bare repositories under
+`./airgap-bundle/git-mirrors/` and writes `git-fetch-report.json`.
 
 Before transfer, inspect the bundle:
 
 ```bash
-airgap-sync info ./seed
+airgap-sync info ./airgap-bundle
 ```
 
 Also check:
@@ -79,7 +79,7 @@ Also check:
 
 ## Transfer Phase
 
-Copy the whole `./seed` directory to the closed network, including:
+Copy the whole `./airgap-bundle` directory to the closed network, including:
 
 - `packages/`
 - `git-mirrors/`
@@ -97,7 +97,7 @@ commands.
 Publish npm packages and restore dist-tags into Verdaccio:
 
 ```bash
-airgap-sync publish ./seed \
+airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873
 ```
 
@@ -108,14 +108,14 @@ Create missing Gitea repositories from the plan:
 ```bash
 export GITEA_TOKEN=...
 
-airgap-sync git create-repos ./seed \
+airgap-sync git create-repos ./airgap-bundle \
   --token "$GITEA_TOKEN"
 ```
 
 For a Gitea organization:
 
 ```bash
-airgap-sync git create-repos ./seed \
+airgap-sync git create-repos ./airgap-bundle \
   --owner-type org \
   --token "$GITEA_TOKEN"
 ```
@@ -126,7 +126,7 @@ should be public inside the closed network.
 Push local bare mirrors into Gitea:
 
 ```bash
-airgap-sync git apply ./seed
+airgap-sync git apply ./airgap-bundle
 ```
 
 This writes `git-apply-report.json`.
@@ -135,7 +135,7 @@ Configure Git URL rewrites so installs that reference public Git URLs resolve th
 Gitea:
 
 ```bash
-airgap-sync git config ./seed --global
+airgap-sync git config ./airgap-bundle --global
 ```
 
 This writes `git-config-report.json` and applies rules like:
@@ -167,14 +167,14 @@ If install still tries to reach the public internet, inspect:
 Most mutating Git steps support dry-run:
 
 ```bash
-airgap-sync git fetch ./seed --dry-run
-airgap-sync git create-repos ./seed --dry-run
-airgap-sync git apply ./seed --dry-run
-airgap-sync git config ./seed --global --dry-run
+airgap-sync git fetch ./airgap-bundle --dry-run
+airgap-sync git create-repos ./airgap-bundle --dry-run
+airgap-sync git apply ./airgap-bundle --dry-run
+airgap-sync git config ./airgap-bundle --global --dry-run
 ```
 
-`airgap-sync publish ./seed --dry-run --registry http://verdaccio.local:4873` prints the
-planned npm publish and dist-tag operations without publishing.
+`airgap-sync publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873`
+prints the planned npm publish and dist-tag operations without publishing.
 
 ## Current Gaps
 

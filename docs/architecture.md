@@ -35,9 +35,9 @@ package specs / package.json / package list
   -> download tarballs
   -> inspect package manifests from tarballs
   -> recurse dependencies
-  -> write seed bundle
+  -> write airgap bundle
 
-seed bundle
+airgap bundle
   -> npm publish tarballs
   -> npm dist-tag add required tags
 ```
