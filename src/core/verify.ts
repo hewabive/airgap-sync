@@ -192,7 +192,11 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
           'ok',
           `workspace-snapshot.json records ${String(workspaceSnapshot.targets.length)} targets`
         )
-      : check('workspace-snapshot', 'error', 'workspace-snapshot.json is missing')
+      : check(
+          'workspace-snapshot',
+          'warning',
+          'workspace-snapshot.json is missing; install verification will be unavailable'
+        )
   );
 
   const collectReport = await readOptionalJson<CollectReport>(

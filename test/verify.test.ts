@@ -253,7 +253,21 @@ describe('verifyBundle', () => {
     });
   });
 
-  it('fails missing workspace snapshot, fetch errors, and missing tarballs', async () => {
+  it('warns when workspace snapshot is missing', async () => {
+    await writeValidBundle();
+    await fs.remove(path.join(bundleDir, 'workspace-snapshot.json'));
+
+    const report = await verifyBundle({ bundleDir });
+
+    expect(report.ok).toBe(true);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'workspace-snapshot', status: 'warning' }),
+      ])
+    );
+  });
+
+  it('fails fetch errors and missing tarballs', async () => {
     await writeValidBundle();
     await fs.remove(path.join(bundleDir, 'workspace-snapshot.json'));
     await fs.remove(path.join(bundleDir, 'packages/demo-1.0.0.tgz'));
@@ -281,7 +295,7 @@ describe('verifyBundle', () => {
       expect.arrayContaining([
         expect.objectContaining({ name: 'tarballs', status: 'error' }),
         expect.objectContaining({ name: 'fetch-report', status: 'error' }),
-        expect.objectContaining({ name: 'workspace-snapshot', status: 'error' }),
+        expect.objectContaining({ name: 'workspace-snapshot', status: 'warning' }),
       ])
     );
   });
