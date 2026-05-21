@@ -65,6 +65,19 @@ export interface GitSourcesManifest {
   skipped: SkippedGitRequirement[];
 }
 
+export interface CollectReport {
+  dryRun: boolean;
+  fetch: FetchReport;
+  generatedAt: string;
+  gitFetch: GitFetchReport;
+  gitSources: GitSourcesManifest;
+  outputDir: string;
+  registryUrl: string;
+  repositoryUpdate: RepositoryUpdateReport;
+  root: string;
+  wroteBundle: boolean;
+}
+
 export type GitFetchActionStatus = 'planned' | 'cloned' | 'updated' | 'error';
 
 export interface GitFetchActionResult {

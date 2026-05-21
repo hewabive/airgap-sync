@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import type {
   BundleManifest,
+  CollectReport,
   DistTagsManifest,
   FetchReport,
   GiteaRepositoryProvisionReport,
@@ -107,6 +108,11 @@ export async function writeBundleDocuments(
 export async function writeFetchReport(outputDir: string, report: FetchReport): Promise<void> {
   await fs.ensureDir(outputDir);
   await fs.writeJson(path.join(outputDir, 'fetch-report.json'), report, { spaces: 2 });
+}
+
+export async function writeCollectReport(outputDir: string, report: CollectReport): Promise<void> {
+  await fs.ensureDir(outputDir);
+  await fs.writeJson(path.join(outputDir, 'collect-report.json'), report, { spaces: 2 });
 }
 
 export async function readFetchReport(bundleDir: string): Promise<FetchReport> {

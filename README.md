@@ -29,7 +29,8 @@ package-spec input, recursive dependency fetch, manifest input, bundle validatio
 metadata caching, bundle inspection, and Verdaccio publish are implemented. Git
 dependency mirroring is implemented as portable source metadata, local mirror fetch,
 Gitea repository creation, mirror push, and Git URL rewrite steps. Higher-level repository
-orchestration and automated install verification are still design work.
+orchestration has a first online `collect` command; automated install verification is
+still design work.
 
 ## Target Workflow
 

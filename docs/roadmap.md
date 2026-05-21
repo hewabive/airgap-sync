@@ -52,6 +52,8 @@ verification.
 - Scan a removable-media directory for Git repositories.
 - Refresh repositories on the online side using safe fetch/pull policies.
 - Run repository refresh before dependency collection.
+- Add first-pass `collect` orchestration for repository refresh, npm bundle fetch, Git
+  source metadata, and Git mirror fetch.
 - Mirror or bundle repositories for transfer into a closed network.
 - Push mirrors into Gitea without accidentally deleting protected refs.
 - Generate `insteadOf` rules for closed-network installs.

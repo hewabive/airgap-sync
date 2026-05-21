@@ -1,8 +1,8 @@
 # Workflows
 
 This document describes the target end-to-end workflow. Some steps are currently
-implemented as lower-level commands; the high-level `repos update`, `collect`, and
-`apply` orchestration commands are the intended contract.
+implemented as lower-level commands; `collect` is implemented as the first online
+orchestration command, while top-level offline `apply` is still planned.
 
 ## Assumptions
 
@@ -46,7 +46,17 @@ airgap-sync collect ./repos \
   --output ./airgap-bundle
 ```
 
-The collect step should run to a fixed point:
+The current collect implementation performs the first pass:
+
+```text
+scan package.json files from project repositories
+  -> refresh clean Git repositories
+  -> resolve and download npm registry package closure
+  -> discover Git dependencies from package manifests
+  -> clone/update missing Git dependency mirrors
+```
+
+The target collect step should then run to a fixed point:
 
 ```text
 scan package.json files from project repositories

@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import {
   applyGitSources,
   CachedRegistryClient,
+  collectBundle,
   configureGitRewrites,
   createGitSourcesManifest,
   createBundleDocuments,
@@ -48,6 +49,14 @@ interface PublishOptions {
   dryRun?: boolean;
   registry: string;
   skipExisting?: boolean;
+}
+
+interface CollectOptions {
+  dryRun?: boolean;
+  includeDev?: boolean;
+  includePeer?: boolean;
+  output: string;
+  registry: string;
 }
 
 interface GitSourcesOptions {
@@ -123,6 +132,44 @@ program
   .name(packageName)
   .description('Sync Git and npm dependencies for airgapped environments')
   .version('0.0.0');
+
+program
+  .command('collect')
+  .description('Update repositories and build an online airgap bundle')
+  .argument('<root>', 'Directory containing project Git repositories or package manifests')
+  .option('-o, --output <dir>', 'Bundle output directory', './airgap-bundle')
+  .option('-r, --registry <url>', 'Source registry URL', 'https://registry.npmjs.org')
+  .option('--include-dev', 'Include root devDependencies')
+  .option('--include-peer', 'Traverse peerDependencies')
+  .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
+  .action(async (root: string, options: CollectOptions) => {
+    try {
+      const registry = new CachedRegistryClient(new HttpRegistryClient(options.registry));
+      const report = await collectBundle({
+        dryRun: options.dryRun === true,
+        includeDev: options.includeDev === true,
+        includePeer: options.includePeer === true,
+        outputDir: options.output,
+        registry,
+        registryUrl: options.registry,
+        root,
+      });
+
+      console.log(JSON.stringify(report, null, 2));
+
+      if (
+        report.repositoryUpdate.errors.length > 0 ||
+        report.fetch.errors.length > 0 ||
+        report.gitSources.skipped.length > 0 ||
+        report.gitFetch.errors.length > 0
+      ) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command('fetch')

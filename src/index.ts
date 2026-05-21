@@ -7,6 +7,7 @@ export {
   readDistTagsManifest,
   readFetchReport,
   writeBundleDocuments,
+  writeCollectReport,
   writeFetchReport,
   writeGiteaRepositoryProvisionReport,
   writeGitApplyReport,
@@ -14,6 +15,7 @@ export {
   writeGitFetchReport,
   writePublishReport,
 } from './core/bundle.js';
+export { collectBundle } from './core/collect.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
@@ -44,6 +46,7 @@ export {
 } from './core/tarball.js';
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
+export type { CollectBundleOptions } from './core/collect.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
 export type { ApplyGitSourcesOptions } from './core/git-apply.js';
 export type { ConfigureGitRewritesOptions } from './core/git-config.js';
@@ -84,6 +87,7 @@ export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.
 
 export type {
   BundleManifest,
+  CollectReport,
   DistTagsManifest,
   FetchReport,
   GiteaOrganizationActionResult,

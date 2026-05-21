@@ -27,13 +27,15 @@ airgap-sync collect ./repos \
   --output ./airgap-bundle
 ```
 
-Planned command. Refresh-aware collection should scan package manifests from project
-repositories, resolve npm registry packages, mirror Git dependencies, scan package
-manifests from newly mirrored Git repositories, and repeat until no new npm or Git
-inputs are found.
+Current first-pass command. It scans package manifests from project repositories,
+runs safe repository refresh checks/pulls, resolves npm registry packages, writes
+portable Git source metadata, and clones or updates Git dependency mirrors.
 
 The online bundle should store Git source identities and local mirrors, not
 Gitea-specific target URLs.
+
+Planned follow-up: scan package manifests from newly mirrored Git repositories and
+repeat until no new npm or Git inputs are found.
 
 ## fetch
 
