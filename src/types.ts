@@ -22,7 +22,25 @@ export interface UnsupportedRootPackageRequirement {
   type: string;
 }
 
+export interface GitRequirement {
+  committish?: string;
+  fetchSpec?: string;
+  gitRange?: string;
+  gitSubdir?: string;
+  hosted?: {
+    domain?: string;
+    project?: string;
+    type?: string;
+    user?: string;
+  };
+  name?: string;
+  raw: string;
+  rawSpec: string;
+  requiredBy: string;
+}
+
 export interface ParseRootSpecsResult {
+  gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported: UnsupportedRootPackageRequirement[];
 }
@@ -87,6 +105,7 @@ export interface FetchReport {
   downloaded: number;
   errors: ResolutionError[];
   generatedAt: string;
+  gitRequirements: GitRequirement[];
   resolved: number;
   skipped: number;
   unsupported: UnsupportedRootPackageRequirement[];

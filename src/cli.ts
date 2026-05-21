@@ -57,6 +57,7 @@ function toFetchPreview(result: ResolveRootRequirementsResult) {
 function toFetchDryRun(result: FetchSeedBundleResult) {
   return {
     downloaded: result.downloaded,
+    gitRequirements: result.gitRequirements,
     skipped: result.skipped,
     wouldDownload: result.wouldDownload,
     ...toFetchPreview(result),
@@ -92,9 +93,10 @@ program
           includeDev: options.includeDev === true,
           includePeer: options.includePeer === true,
         })
-      : { requirements: [], unsupported: [] };
+      : { gitRequirements: [], requirements: [], unsupported: [] };
     const requirements = [...parsedSpecs.requirements, ...parsedManifest.requirements];
     const unsupported = [...parsedSpecs.unsupported, ...parsedManifest.unsupported];
+    const gitRequirements = [...parsedSpecs.gitRequirements, ...parsedManifest.gitRequirements];
 
     if (requirements.length === 0) {
       console.error('Error: no supported package specs to resolve');
@@ -111,6 +113,7 @@ program
         includePeer: options.includePeer === true,
         outputDir: options.output,
         registry,
+        gitRequirements,
         requirements,
         unsupported,
       });
@@ -125,6 +128,7 @@ program
       includePeer: options.includePeer === true,
       outputDir: options.output,
       registry,
+      gitRequirements,
       requirements,
       unsupported,
     });
@@ -143,6 +147,7 @@ program
         createFetchReport({
           downloaded: resolution.downloaded,
           errors: resolution.errors,
+          gitRequirements: resolution.gitRequirements,
           resolved: resolution.resolved.length,
           skipped: resolution.skipped,
           unsupported: resolution.unsupported,

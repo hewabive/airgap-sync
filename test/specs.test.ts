@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDependencySpec, parseRootSpecs } from '../src/core/specs.js';
+import { parseDependencySpec, parseGitDependencySpec, parseRootSpecs } from '../src/core/specs.js';
 
 describe('parseRootSpecs', () => {
   it('treats a bare package name as the latest tag', () => {
@@ -63,6 +63,20 @@ describe('parseRootSpecs', () => {
     ]);
 
     expect(result.requirements).toEqual([]);
+    expect(result.gitRequirements).toEqual([
+      {
+        fetchSpec: 'https://github.com/user/project.git',
+        hosted: {
+          domain: 'github.com',
+          project: 'project',
+          type: 'github',
+          user: 'user',
+        },
+        raw: 'git+https://github.com/user/project.git',
+        rawSpec: 'git+https://github.com/user/project.git',
+        requiredBy: 'root',
+      },
+    ]);
     expect(result.unsupported).toEqual([
       {
         raw: 'git+https://github.com/user/project.git',
@@ -81,6 +95,7 @@ describe('parseRootSpecs', () => {
 
   it('ignores empty specs', () => {
     expect(parseRootSpecs(['', '   '])).toEqual({
+      gitRequirements: [],
       requirements: [],
       unsupported: [],
     });
@@ -124,6 +139,30 @@ describe('parseDependencySpec', () => {
       reason: 'Unsupported package spec type: directory',
       requiredBy: 'root@1.0.0',
       type: 'directory',
+    });
+  });
+});
+
+describe('parseGitDependencySpec', () => {
+  it('extracts hosted git dependency details', () => {
+    expect(
+      parseGitDependencySpec(
+        '@antv/setup',
+        'github:antvis/G2#7cb42f57561c321ecb09b4552802ae0ac55b3a7a',
+        'echarts-for-react@3.0.7'
+      )
+    ).toEqual({
+      committish: '7cb42f57561c321ecb09b4552802ae0ac55b3a7a',
+      hosted: {
+        domain: 'github.com',
+        project: 'G2',
+        type: 'github',
+        user: 'antvis',
+      },
+      name: '@antv/setup',
+      raw: '@antv/setup@github:antvis/G2#7cb42f57561c321ecb09b4552802ae0ac55b3a7a',
+      rawSpec: 'github:antvis/G2#7cb42f57561c321ecb09b4552802ae0ac55b3a7a',
+      requiredBy: 'echarts-for-react@3.0.7',
     });
   });
 });

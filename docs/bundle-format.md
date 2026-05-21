@@ -75,6 +75,11 @@ and `dist-tags.json`.
 Unsupported specs in `fetch-report.json` include `requiredBy`, so Git, file, link, and
 other non-registry specs can be traced back to the package that declared them.
 
+Git specs are also summarized separately in `gitRequirements`. Each item records the
+declaring package, package alias/name when present, raw npm spec, hosted provider
+metadata when npm can infer it, and the requested commitish/range/subdirectory. This is
+the input for future Git mirror/Gitea workflows.
+
 ## Audit
 
 Use `airgap-sync info ./seed` to print a JSON summary of package counts, tags,

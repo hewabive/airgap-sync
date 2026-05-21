@@ -1,12 +1,13 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import type {
+  GitRequirement,
   ParseRootSpecsResult,
   ProjectPackageManifest,
   RootPackageRequirement,
   UnsupportedRootPackageRequirement,
 } from '../types.js';
-import { parseDependencySpec } from './specs.js';
+import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 
 const ignoredDirectoryNames = new Set([
   '.git',
@@ -136,6 +137,7 @@ export async function readManifestRequirements(
     }
   }
 
+  const gitRequirements: GitRequirement[] = [];
   const requirements: RootPackageRequirement[] = [];
   const unsupported: UnsupportedRootPackageRequirement[] = [];
   const seenRequirements = new Set<string>();
@@ -151,6 +153,10 @@ export async function readManifestRequirements(
 
       const parsed = parseDependencySpec(name, specifier, requiredBy);
       if ('reason' in parsed) {
+        const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
+        if (gitRequirement) {
+          gitRequirements.push(gitRequirement);
+        }
         unsupported.push(parsed);
         continue;
       }
@@ -169,5 +175,5 @@ export async function readManifestRequirements(
     }
   }
 
-  return { requirements, unsupported };
+  return { gitRequirements, requirements, unsupported };
 }

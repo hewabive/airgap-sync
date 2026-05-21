@@ -1,5 +1,6 @@
 import npa from 'npm-package-arg';
 import type {
+  GitRequirement,
   ParseRootSpecsResult,
   RootPackageRequirement,
   SupportedSpecType,
@@ -8,6 +9,22 @@ import type {
 
 type NpaResult = npa.Result;
 type RegistrySpecType = Exclude<SupportedSpecType, 'alias'>;
+
+interface HostedGitInfo {
+  domain?: string;
+  project?: string;
+  type?: string;
+  user?: string;
+}
+
+type NpaGitResult = NpaResult & {
+  gitCommittish?: string | undefined;
+  gitRange?: string | undefined;
+  gitSubdir?: string | undefined;
+  hosted?: HostedGitInfo | undefined;
+  rawSpec: string;
+  type: 'git';
+};
 
 interface NpaAliasResult extends NpaResult {
   name: string;
@@ -19,6 +36,10 @@ const supportedRegistryTypes = new Set<NpaResult['type']>(['version', 'range', '
 
 function isAliasResult(parsed: NpaResult): parsed is NpaAliasResult {
   return parsed.type === 'alias' && typeof parsed.name === 'string' && 'subSpec' in parsed;
+}
+
+function isGitResult(parsed: NpaResult): parsed is NpaGitResult {
+  return parsed.type === 'git';
 }
 
 function hasExplicitSpecifier(raw: string, name: string): boolean {
@@ -81,6 +102,29 @@ function normalizeVersionSpecifier(specifier: string, type: RegistrySpecType): s
   return type === 'version' && specifier.startsWith('=') ? specifier.slice(1) : specifier;
 }
 
+function toGitRequirement(parsed: NpaGitResult, raw: string, requiredBy: string): GitRequirement {
+  return {
+    raw,
+    rawSpec: parsed.rawSpec,
+    requiredBy,
+    ...(parsed.name ? { name: parsed.name } : {}),
+    ...(parsed.fetchSpec ? { fetchSpec: parsed.fetchSpec } : {}),
+    ...(parsed.gitCommittish ? { committish: parsed.gitCommittish } : {}),
+    ...(parsed.gitRange ? { gitRange: parsed.gitRange } : {}),
+    ...(parsed.gitSubdir ? { gitSubdir: parsed.gitSubdir } : {}),
+    ...(parsed.hosted
+      ? {
+          hosted: {
+            ...(parsed.hosted.domain ? { domain: parsed.hosted.domain } : {}),
+            ...(parsed.hosted.project ? { project: parsed.hosted.project } : {}),
+            ...(parsed.hosted.type ? { type: parsed.hosted.type } : {}),
+            ...(parsed.hosted.user ? { user: parsed.hosted.user } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 function parseParsedSpec(
   parsed: NpaResult,
   raw: string,
@@ -124,24 +168,8 @@ function parseParsedSpec(
   };
 }
 
-function parseOneRootSpec(raw: string): RootPackageRequirement | UnsupportedRootPackageRequirement {
-  let parsed: NpaResult;
-
-  try {
-    parsed = npa(raw);
-  } catch (error) {
-    return {
-      raw,
-      reason: (error as Error).message,
-      requiredBy: 'root',
-      type: 'invalid',
-    };
-  }
-
-  return parseParsedSpec(parsed, raw, 'root', true);
-}
-
 export function parseRootSpecs(specs: string[]): ParseRootSpecsResult {
+  const gitRequirements: GitRequirement[] = [];
   const requirements: RootPackageRequirement[] = [];
   const unsupported: UnsupportedRootPackageRequirement[] = [];
 
@@ -149,15 +177,33 @@ export function parseRootSpecs(specs: string[]): ParseRootSpecsResult {
     const raw = rawSpec.trim();
     if (!raw) continue;
 
-    const parsed = parseOneRootSpec(raw);
-    if ('reason' in parsed) {
-      unsupported.push(parsed);
+    let parsedNpa: NpaResult;
+    try {
+      parsedNpa = npa(raw);
+    } catch (error) {
+      unsupported.push({
+        raw,
+        reason: (error as Error).message,
+        requiredBy: 'root',
+        type: 'invalid',
+      });
+      continue;
+    }
+
+    if (isGitResult(parsedNpa)) {
+      gitRequirements.push(toGitRequirement(parsedNpa, raw, 'root'));
+    }
+
+    const parsedRequirement = parseParsedSpec(parsedNpa, raw, 'root', true);
+
+    if ('reason' in parsedRequirement) {
+      unsupported.push(parsedRequirement);
     } else {
-      requirements.push(parsed);
+      requirements.push(parsedRequirement);
     }
   }
 
-  return { requirements, unsupported };
+  return { gitRequirements, requirements, unsupported };
 }
 
 export function parseDependencySpec(
@@ -176,5 +222,20 @@ export function parseDependencySpec(
       requiredBy,
       type: 'invalid',
     };
+  }
+}
+
+export function parseGitDependencySpec(
+  name: string,
+  specifier: string,
+  requiredBy: string
+): GitRequirement | undefined {
+  const raw = `${name}@${specifier}`;
+
+  try {
+    const parsed = npa.resolve(name, specifier);
+    return isGitResult(parsed) ? toGitRequirement(parsed, raw, requiredBy) : undefined;
+  } catch {
+    return undefined;
   }
 }

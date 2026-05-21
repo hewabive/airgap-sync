@@ -66,6 +66,7 @@ const fetchReport: FetchReport = {
   downloaded: 2,
   errors: [],
   generatedAt: '2026-05-20T00:01:00.000Z',
+  gitRequirements: [],
   resolved: 2,
   skipped: 0,
   unsupported: [],

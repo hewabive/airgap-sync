@@ -4,6 +4,7 @@ import type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
+  GitRequirement,
   PublishReport,
   ResolvedPackage,
   ResolvedRootPackage,
@@ -30,6 +31,7 @@ export interface FetchReportOptions {
   downloaded: number;
   errors: ResolutionError[];
   generatedAt?: string;
+  gitRequirements: GitRequirement[];
   resolved: number;
   skipped: number;
   unsupported: UnsupportedRootPackageRequirement[];
@@ -80,6 +82,7 @@ export function createFetchReport(options: FetchReportOptions): FetchReport {
     downloaded: options.downloaded,
     errors: options.errors,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
+    gitRequirements: options.gitRequirements,
     resolved: options.resolved,
     skipped: options.skipped,
     unsupported: options.unsupported,

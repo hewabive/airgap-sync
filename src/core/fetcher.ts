@@ -1,4 +1,5 @@
 import type {
+  GitRequirement,
   PackageManifest,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
@@ -7,7 +8,7 @@ import type {
 } from '../types.js';
 import type { RegistryClient } from './registry.js';
 import { resolveRootRequirements } from './resolver.js';
-import { parseDependencySpec } from './specs.js';
+import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import {
   dependencySpecsFromManifest,
   downloadResolvedPackage,
@@ -19,12 +20,14 @@ export interface FetchSeedBundleOptions {
   includePeer?: boolean;
   outputDir: string;
   registry: RegistryClient;
+  gitRequirements?: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported?: UnsupportedRootPackageRequirement[];
 }
 
 export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
   downloaded: number;
+  gitRequirements: GitRequirement[];
   skipped: number;
   unsupported: UnsupportedRootPackageRequirement[];
   wouldDownload: number;
@@ -97,6 +100,7 @@ export async function fetchSeedBundle(
     skipped: 0,
     resolved: [],
     errors: [],
+    gitRequirements: [...(options.gitRequirements ?? [])],
     tagRequirements: [],
     unsupported: [...(options.unsupported ?? [])],
     wouldDownload: 0,
@@ -168,6 +172,10 @@ export async function fetchSeedBundle(
       for (const [name, specifier] of Object.entries(dependencies)) {
         const parsed = parseDependencySpec(name, specifier, requiredBy);
         if ('reason' in parsed) {
+          const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
+          if (gitRequirement) {
+            result.gitRequirements.push(gitRequirement);
+          }
           result.unsupported.push(parsed);
         } else {
           queue.push(parsed);
