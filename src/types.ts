@@ -398,3 +398,14 @@ export interface PublishReport {
   timings: PublishTimings;
   totalPackages: number;
 }
+
+export interface ApplyBundleReport {
+  dryRun: boolean;
+  generatedAt: string;
+  gitApply: GitApplyReport;
+  gitConfig?: GitConfigReport;
+  gitea: GiteaRepositoryProvisionReport;
+  publish: PublishReport;
+  registryUrl: string;
+  succeeded: boolean;
+}

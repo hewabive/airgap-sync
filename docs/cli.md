@@ -227,14 +227,28 @@ writes `git-config-report.json`.
 airgap-sync apply ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
-  --gitea-token "$GITEA_TOKEN" \
-  --preserve-git-paths
+  --gitea-token "$GITEA_TOKEN"
 ```
 
-Planned command. Applies the whole bundle in the closed network: publish npm packages
-to Verdaccio, restore dist-tags, map Git sources to Gitea targets, create missing
-Gitea owners/repositories, push mirrors, and generate install configuration.
+Applies the whole bundle in the closed network: publish npm packages to Verdaccio,
+restore dist-tags, map Git sources to Gitea targets, create missing Gitea
+owners/repositories, push mirrors, and write apply reports.
 
-When `--preserve-git-paths` is enabled, a source such as
-`https://github.com/antvis/G2.git` should map to `http://gitea.local/antvis/G2.git` so
-consumer machines can use one broad `insteadOf` rule for the source host.
+Supported options:
+
+```text
+-r, --registry <url>      Target npm registry URL
+--gitea <url>             Closed-network Gitea base URL
+--gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN
+--mirrors-dir <dir>       Directory containing bare Git mirrors
+--public                  Create public Gitea repositories instead of private repositories
+--no-skip-existing        Attempt to publish npm versions that already exist
+--configure-git-global    Write Git URL rewrite rules into global Git config
+--dry-run                 Print planned apply operations without publishing or pushing
+```
+
+Git target paths preserve source owner/repository names by default. For example,
+`https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`, so
+consumer machines can use one broad `insteadOf` rule for the source host. `apply`
+writes those rewrite rules into `git-apply-report.json`; it only mutates global Git
+config when `--configure-git-global` is passed.

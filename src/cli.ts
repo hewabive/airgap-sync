@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import {
   addWorkspaceTarget,
+  applyBundle,
   applyGitSources,
   CachedRegistryClient,
   collectBundle,
@@ -60,6 +61,17 @@ interface FetchOptions {
 
 interface PublishOptions {
   dryRun?: boolean;
+  registry: string;
+  skipExisting?: boolean;
+}
+
+interface ApplyOptions {
+  configureGitGlobal?: boolean;
+  dryRun?: boolean;
+  gitea: string;
+  giteaToken?: string;
+  mirrorsDir?: string;
+  public?: boolean;
   registry: string;
   skipExisting?: boolean;
 }
@@ -821,6 +833,55 @@ gitCommand
       console.log(JSON.stringify(report, null, 2));
 
       if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('apply')
+  .description('Apply an airgap bundle to Verdaccio and Gitea')
+  .argument('<bundle>', 'Path to airgap bundle directory')
+  .requiredOption('-r, --registry <url>', 'Target npm registry URL')
+  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .option('--gitea-token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
+  .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
+  .option('--public', 'Create public Gitea repositories instead of private repositories')
+  .option('--no-skip-existing', 'Attempt to publish npm versions that already exist')
+  .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
+  .option('--dry-run', 'Print planned apply operations without publishing or pushing')
+  .action(async (bundle: string, options: ApplyOptions) => {
+    try {
+      const token = options.giteaToken ?? process.env.GITEA_TOKEN;
+      if (!token && options.dryRun !== true) {
+        console.error('Error: provide --gitea-token <token> or set GITEA_TOKEN');
+        process.exitCode = 1;
+        return;
+      }
+
+      const client =
+        options.dryRun === true
+          ? noopGiteaClient
+          : new HttpGiteaClient(options.gitea, { authToken: token ?? '' });
+      const report = await applyBundle({
+        bundleDir: bundle,
+        configureGitGlobal: options.configureGitGlobal === true,
+        dryRun: options.dryRun === true,
+        giteaBaseUrl: options.gitea,
+        giteaClient: client,
+        ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+        onPublishProgress: createPublishProgressLogger(),
+        private: options.public !== true,
+        registryUrl: options.registry,
+        skipExisting: options.skipExisting !== false,
+      });
+
+      console.log(JSON.stringify(report, null, 2));
+
+      if (!report.succeeded) {
         process.exitCode = 1;
       }
     } catch (error) {

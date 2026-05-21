@@ -1,6 +1,7 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import type {
+  ApplyBundleReport,
   BundleManifest,
   CollectReport,
   DistTagsManifest,
@@ -172,6 +173,20 @@ export async function writePublishReport(bundleDir: string, report: PublishRepor
   await fs.ensureDir(bundleDir);
   await fs.writeJson(
     path.join(bundleDir, report.dryRun ? 'publish-dry-run-report.json' : 'publish-report.json'),
+    report,
+    {
+      spaces: 2,
+    }
+  );
+}
+
+export async function writeApplyReport(
+  bundleDir: string,
+  report: ApplyBundleReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(
+    path.join(bundleDir, report.dryRun ? 'apply-dry-run-report.json' : 'apply-report.json'),
     report,
     {
       spaces: 2,

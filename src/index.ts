@@ -6,6 +6,7 @@ export {
   readBundleManifest,
   readDistTagsManifest,
   readFetchReport,
+  writeApplyReport,
   writeBundleDocuments,
   writeCollectReport,
   writeFetchReport,
@@ -15,6 +16,7 @@ export {
   writeGitFetchReport,
   writePublishReport,
 } from './core/bundle.js';
+export { applyBundle } from './core/apply.js';
 export { collectBundle } from './core/collect.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
 export { configureGitRewrites } from './core/git-config.js';
@@ -68,6 +70,7 @@ export {
 } from './core/lockfiles.js';
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
+export type { ApplyBundleOptions } from './core/apply.js';
 export type { CollectBundleOptions } from './core/collect.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
 export type { ApplyGitSourcesOptions } from './core/git-apply.js';
@@ -128,6 +131,7 @@ export type { DownloadedTarball } from './core/tarball.js';
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
 
 export type {
+  ApplyBundleReport,
   BundleManifest,
   CollectTimings,
   CollectReport,

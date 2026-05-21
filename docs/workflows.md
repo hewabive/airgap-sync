@@ -1,8 +1,8 @@
 # Workflows
 
-This document describes the target end-to-end workflow. Some steps are currently
-implemented as lower-level commands; `collect` is implemented as the first online
-orchestration command, while top-level offline `apply` is still planned.
+This document describes the target end-to-end workflow. `collect` handles the online
+side, and `apply` handles the closed-network import side. Lower-level commands remain
+available for debugging individual phases.
 
 ## Assumptions
 
@@ -143,6 +143,10 @@ The offline apply step should:
 - push local bare mirrors into Gitea;
 - generate install configuration for consumer machines.
 
+By default `apply` reports the Git rewrite rules without changing global Git config.
+Pass `--configure-git-global` on the import machine when that machine should also be
+configured as a consumer.
+
 For example:
 
 ```text
@@ -176,8 +180,7 @@ If install still tries to reach the public internet, inspect:
 
 ## Current Lower-Level Commands
 
-Until `repos update`, `collect`, and top-level `apply` are implemented, the current CLI
-uses lower-level commands:
+The current CLI also exposes lower-level commands for debugging:
 
 ```bash
 # Online
@@ -192,9 +195,9 @@ airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
 airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global
 ```
 
-These commands are useful for testing the current lower-level workflow. The bundle is
-not bound to a Gitea instance during the online phase: `git-sources.json` records public
-source identities, and the offline commands receive the local Gitea URL explicitly.
+These commands are useful for testing individual phases. The bundle is not bound to a
+Gitea instance during the online phase: `git-sources.json` records public source
+identities, and the offline commands receive the local Gitea URL explicitly.
 
 ## Dry Runs
 
@@ -209,11 +212,12 @@ airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global --dry
 
 `airgap-sync publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873`
 prints the planned npm publish and dist-tag operations without publishing.
+`airgap-sync apply ./bundle --dry-run --registry http://verdaccio.local:4873 --gitea http://gitea.local`
+plans the whole offline import without publishing, creating Gitea repositories, pushing
+mirrors, or writing global Git config.
 
 ## Current Gaps
 
-- There is no fixed-point `collect` command yet.
-- There is no single top-level `apply` command yet.
 - There is no automated external-network verification yet. The next milestone is a
   `verify` command that runs installs in a controlled environment and fails on public
   npm or Git access attempts.
