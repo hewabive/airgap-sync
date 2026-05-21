@@ -25,7 +25,7 @@ async function configureRule(
 ): Promise<GitConfigActionResult> {
   try {
     await runner({
-      args: ['config', '--global', gitConfigKey(rule), rule.insteadOf],
+      args: ['config', '--global', '--add', gitConfigKey(rule), rule.insteadOf],
     });
     return {
       insteadOf: rule.insteadOf,

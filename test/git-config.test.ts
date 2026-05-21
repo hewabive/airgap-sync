@@ -39,9 +39,9 @@ describe('configureGitRewrites', () => {
       dryRun: true,
       errors: [],
       generatedAt: '2026-05-21T00:00:00.000Z',
-      planned: 1,
+      planned: 3,
       scope: 'global',
-      totalRules: 1,
+      totalRules: 3,
     });
     expect(calls).toEqual([]);
   });
@@ -61,15 +61,39 @@ describe('configureGitRewrites', () => {
 
     expect(calls).toEqual([
       {
-        args: ['config', '--global', 'url.http://gitea.local/.insteadOf', 'https://github.com/'],
+        args: [
+          'config',
+          '--global',
+          '--add',
+          'url.http://gitea.local/.insteadOf',
+          'git@github.com:',
+        ],
+      },
+      {
+        args: [
+          'config',
+          '--global',
+          '--add',
+          'url.http://gitea.local/.insteadOf',
+          'https://github.com/',
+        ],
+      },
+      {
+        args: [
+          'config',
+          '--global',
+          '--add',
+          'url.http://gitea.local/.insteadOf',
+          'ssh://git@github.com/',
+        ],
       },
     ]);
     expect(report).toMatchObject({
-      configured: 1,
+      configured: 3,
       dryRun: false,
       errors: [],
       planned: 0,
-      totalRules: 1,
+      totalRules: 3,
     });
   });
 
@@ -86,7 +110,19 @@ describe('configureGitRewrites', () => {
       errors: [
         {
           error: 'permission denied',
+          insteadOf: 'git@github.com:',
+          status: 'error',
+          targetUrl: 'http://gitea.local/',
+        },
+        {
+          error: 'permission denied',
           insteadOf: 'https://github.com/',
+          status: 'error',
+          targetUrl: 'http://gitea.local/',
+        },
+        {
+          error: 'permission denied',
+          insteadOf: 'ssh://git@github.com/',
           status: 'error',
           targetUrl: 'http://gitea.local/',
         },

@@ -139,13 +139,25 @@ describe('applyBundle', () => {
       totalRepositories: 1,
     });
     expect(report.gitConfig).toMatchObject({
-      planned: 1,
-      totalRules: 1,
+      planned: 3,
+      totalRules: 3,
     });
     expect(report.gitApply.gitConfigRewriteRules).toEqual([
       {
-        command: 'git config --global url."http://gitea.local/".insteadOf "https://github.com/"',
+        command: 'git config --global --add url."http://gitea.local/".insteadOf "git@github.com:"',
+        insteadOf: 'git@github.com:',
+        targetUrl: 'http://gitea.local/',
+      },
+      {
+        command:
+          'git config --global --add url."http://gitea.local/".insteadOf "https://github.com/"',
         insteadOf: 'https://github.com/',
+        targetUrl: 'http://gitea.local/',
+      },
+      {
+        command:
+          'git config --global --add url."http://gitea.local/".insteadOf "ssh://git@github.com/"',
+        insteadOf: 'ssh://git@github.com/',
         targetUrl: 'http://gitea.local/',
       },
     ]);

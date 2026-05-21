@@ -186,7 +186,9 @@ function installEnv(options: { gitConfigPath: string; registryUrl: string }): No
   return {
     ...process.env,
     GIT_CONFIG_GLOBAL: options.gitConfigPath,
+    npm_config_replace_registry_host: 'npmjs',
     npm_config_registry: options.registryUrl,
+    NPM_CONFIG_REPLACE_REGISTRY_HOST: 'npmjs',
     NPM_CONFIG_REGISTRY: options.registryUrl,
   };
 }

@@ -32,12 +32,14 @@ export function createGitConfigRewriteRules(
   const targetUrl = `${normalizeBaseUrl(giteaBaseUrl)}/`;
 
   for (const source of manifest.sources) {
+    seen.add(`git@${source.host}:`);
     seen.add(`https://${source.host}/`);
+    seen.add(`ssh://git@${source.host}/`);
   }
 
   return [...seen]
     .map((insteadOf) => ({
-      command: `git config --global url.${quoteGitConfigPart(targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
+      command: `git config --global --add url.${quoteGitConfigPart(targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
       insteadOf,
       targetUrl,
     }))

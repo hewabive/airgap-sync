@@ -17,12 +17,12 @@ Creates `airgap-sync.json` plus the default workspace directories:
 
 ```text
 repos/
-bundle/
+airgap-bundle/
 cache/
 reports/
 ```
 
-The default config uses `https://registry.npmjs.org`, `./repos`, and `./bundle`.
+The default config uses `https://registry.npmjs.org`, `./repos`, and `./airgap-bundle`.
 
 ## target
 
@@ -153,9 +153,9 @@ missing tarball files, and bundle validation issues.
 ## verify
 
 ```bash
-airgap-sync verify ./bundle
-airgap-sync verify ./bundle --json
-airgap-sync verify install ./bundle \
+airgap-sync verify ./airgap-bundle
+airgap-sync verify ./airgap-bundle --json
+airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local
 ```

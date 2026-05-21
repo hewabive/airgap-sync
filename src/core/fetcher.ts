@@ -274,6 +274,7 @@ export async function fetchSeedBundle(
         const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
         if (gitRequirement) {
           result.gitRequirements.push(gitRequirement);
+          continue;
         }
         result.unsupported.push(parsed);
       } else {

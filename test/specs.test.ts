@@ -79,12 +79,6 @@ describe('parseRootSpecs', () => {
     ]);
     expect(result.unsupported).toEqual([
       {
-        raw: 'git+https://github.com/user/project.git',
-        reason: 'Package name could not be inferred from spec',
-        requiredBy: 'root',
-        type: 'git',
-      },
-      {
         raw: 'file:../local-package',
         reason: 'Package name could not be inferred from spec',
         requiredBy: 'root',

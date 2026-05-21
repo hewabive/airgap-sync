@@ -19,7 +19,7 @@ Example names used below:
 
 ```text
 ./repos                         Working clones for configured Git targets
-./bundle                        Transfer bundle directory
+./airgap-bundle                 Transfer bundle directory
 https://registry.npmjs.org      Source npm registry
 http://verdaccio.local:4873     Closed-network npm registry
 http://gitea.local              Closed-network Gitea base URL
@@ -53,7 +53,7 @@ airgap-sync collect
 
 The collect step clones missing configured Git targets under `repos/`, refreshes clean
 repositories with conservative `git pull --ff-only`, includes configured npm targets as
-root package specs, and writes the transfer bundle under `bundle/` by default.
+root package specs, and writes the transfer bundle under `airgap-bundle/` by default.
 
 Lower-level collection from an explicit repository directory is still available:
 
@@ -97,8 +97,8 @@ The collect step writes npm metadata and Git source metadata:
 Before transfer, inspect the bundle:
 
 ```bash
-airgap-sync info ./bundle
-airgap-sync verify ./bundle
+airgap-sync info ./airgap-bundle
+airgap-sync verify ./airgap-bundle
 ```
 
 Also check:
@@ -108,7 +108,7 @@ Also check:
 
 ## Transfer Phase
 
-Copy the whole `./bundle` directory to the closed network, including:
+Copy the whole `./airgap-bundle` directory to the closed network, including:
 
 - `packages/`
 - `git-mirrors/`
@@ -129,7 +129,7 @@ Apply the bundle to Verdaccio and Gitea:
 ```bash
 export GITEA_TOKEN=...
 
-airgap-sync apply ./bundle \
+airgap-sync apply ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
@@ -183,8 +183,8 @@ If install still tries to reach the public internet, inspect:
 Before running project installs, verify the imported bundle:
 
 ```bash
-airgap-sync verify ./bundle
-airgap-sync verify install ./bundle \
+airgap-sync verify ./airgap-bundle
+airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local
 ```
@@ -223,7 +223,7 @@ airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global --dry
 
 `airgap-sync publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873`
 prints the planned npm publish and dist-tag operations without publishing.
-`airgap-sync apply ./bundle --dry-run --registry http://verdaccio.local:4873 --gitea http://gitea.local`
+`airgap-sync apply ./airgap-bundle --dry-run --registry http://verdaccio.local:4873 --gitea http://gitea.local`
 plans the whole offline import without publishing, creating Gitea repositories, pushing
 mirrors, or writing global Git config.
 

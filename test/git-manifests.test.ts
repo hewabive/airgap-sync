@@ -133,14 +133,7 @@ describe('readGitSourceManifestRequirements', () => {
         requiredBy: 'local@1.0.0',
       },
     ]);
-    expect(result.unsupported).toEqual([
-      {
-        raw: 'gitpkg@github:other/repo#main',
-        reason: 'Unsupported package spec type: git',
-        requiredBy: 'local@1.0.0',
-        type: 'git',
-      },
-    ]);
+    expect(result.unsupported).toEqual([]);
   });
 
   it('limits manifest discovery to gitSubdir when present', async () => {

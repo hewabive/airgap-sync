@@ -28,7 +28,7 @@ describe('workspace config', () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
 
     expect(config).toEqual({
-      output: './bundle',
+      output: './airgap-bundle',
       reposDir: './repos',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
@@ -36,7 +36,7 @@ describe('workspace config', () => {
     });
     expect(await fs.pathExists(path.join(tempDir, 'airgap-sync.json'))).toBe(true);
     expect(await fs.pathExists(path.join(tempDir, 'repos'))).toBe(true);
-    expect(await fs.pathExists(path.join(tempDir, 'bundle'))).toBe(true);
+    expect(await fs.pathExists(path.join(tempDir, 'airgap-bundle'))).toBe(true);
   });
 
   it('adds, lists, deduplicates, and removes targets', async () => {
@@ -151,7 +151,7 @@ describe('workspace config', () => {
       })
     ).toEqual({
       createdAt: '2026-05-21T00:00:00.000Z',
-      output: './bundle',
+      output: './airgap-bundle',
       reposDir: './repos',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',

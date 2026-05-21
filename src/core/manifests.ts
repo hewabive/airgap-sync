@@ -164,6 +164,7 @@ export function parseManifestRequirementsFromEntries(
         const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
         if (gitRequirement) {
           gitRequirements.push(gitRequirement);
+          continue;
         }
         unsupported.push(parsed);
         continue;

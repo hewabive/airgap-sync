@@ -3,7 +3,7 @@ import * as fs from './fs.js';
 import { type GitCommandRunner, runGitCommand } from './git-fetch.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
-export const defaultWorkspaceOutputDir = './bundle';
+export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceReposDir = './repos';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
 

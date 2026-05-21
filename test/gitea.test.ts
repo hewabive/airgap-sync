@@ -196,7 +196,7 @@ describe('provisionGiteaRepositories', () => {
       {
         fullName: 'airgap-sync mirror owner for owner',
         name: 'owner',
-        visibility: 'private',
+        visibility: 'public',
       },
     ]);
     expect(createCalls).toEqual([

@@ -99,8 +99,19 @@ function isAlreadyExistsError(error: unknown): boolean {
 }
 
 function errorSummary(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.split('\n')[0] ?? 'Unknown error';
+  const stderr =
+    error && typeof error === 'object' && 'stderr' in error ? String(error.stderr).trim() : '';
+  const message = stderr || (error instanceof Error ? error.message : String(error));
+  const lines = message
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return (
+    lines.find((line) => /^npm (?:error|ERR!)/u.test(line)) ??
+    lines.find((line) => !line.startsWith('npm notice')) ??
+    lines.at(-1) ??
+    'Unknown error'
+  );
 }
 
 function packageNamesMissingLatestTags(

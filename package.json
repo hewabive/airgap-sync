@@ -21,6 +21,7 @@
     "format:check": "prettier --check .",
     "knip": "knip",
     "lint": "eslint .",
+    "e2e:local": "node ./scripts/e2e-local.mjs",
     "registry:start": "verdaccio --config ./verdaccio/config.yaml",
     "test": "vitest",
     "test:run": "vitest run",

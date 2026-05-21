@@ -14,6 +14,23 @@ pnpm check
 pnpm format:check
 ```
 
+## Local End-To-End Test
+
+With a local Gitea instance running, the full workflow can be tested against temporary
+repositories and a temporary Verdaccio instance:
+
+```bash
+GITEA_URL=http://127.0.0.1:3000 \
+GITEA_USER=maxim \
+GITEA_PASSWORD=11111111 \
+pnpm e2e:local
+```
+
+The script creates a Gitea token, creates public test repositories, adds a Git
+dependency that looks like a GitHub dependency, builds an `airgap-bundle`, publishes npm
+tarballs into a no-proxy Verdaccio through authenticated `npm publish`, mirrors the Git
+dependency into Gitea, restores dist-tags, and runs `verify install`.
+
 ## Local Verdaccio
 
 The repository includes a Verdaccio config for integration testing:

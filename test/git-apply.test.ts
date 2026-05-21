@@ -32,8 +32,20 @@ describe('createGitConfigRewriteRules', () => {
   it('creates deterministic host-wide git config commands', () => {
     expect(createGitConfigRewriteRules(manifest, 'http://gitea.local/')).toEqual([
       {
-        command: 'git config --global url."http://gitea.local/".insteadOf "https://github.com/"',
+        command: 'git config --global --add url."http://gitea.local/".insteadOf "git@github.com:"',
+        insteadOf: 'git@github.com:',
+        targetUrl: 'http://gitea.local/',
+      },
+      {
+        command:
+          'git config --global --add url."http://gitea.local/".insteadOf "https://github.com/"',
         insteadOf: 'https://github.com/',
+        targetUrl: 'http://gitea.local/',
+      },
+      {
+        command:
+          'git config --global --add url."http://gitea.local/".insteadOf "ssh://git@github.com/"',
+        insteadOf: 'ssh://git@github.com/',
         targetUrl: 'http://gitea.local/',
       },
     ]);

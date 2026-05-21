@@ -192,6 +192,7 @@ export function parseRootSpecs(specs: string[]): ParseRootSpecsResult {
 
     if (isGitResult(parsedNpa)) {
       gitRequirements.push(toGitRequirement(parsedNpa, raw, 'root'));
+      continue;
     }
 
     const parsedRequirement = parseParsedSpec(parsedNpa, raw, 'root', true);

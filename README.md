@@ -42,15 +42,15 @@ airgap-sync target add npm eslint@latest
 
 # Online machine: refresh configured targets and collect npm/Git closure.
 airgap-sync collect
-airgap-sync verify ./bundle
+airgap-sync verify ./airgap-bundle
 
 # Closed network: populate Verdaccio and Gitea from the transfer bundle.
-airgap-sync apply ./bundle \
+airgap-sync apply ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
-airgap-sync verify ./bundle
-airgap-sync verify install ./bundle \
+airgap-sync verify ./airgap-bundle
+airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local
 ```
@@ -79,8 +79,8 @@ The configured workspace lives on removable media:
 ```text
 airgap-sync.json          Target list and defaults
 repos/                    Working clones for configured Git targets
-bundle/                   Transfer bundle for Verdaccio and Gitea
-bundle/workspace-snapshot.json  Portable target snapshot for verification
+airgap-bundle/            Transfer bundle for Verdaccio and Gitea
+airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 cache/                    Reserved for local caches
 reports/                  Reserved for operator-facing reports
 ```

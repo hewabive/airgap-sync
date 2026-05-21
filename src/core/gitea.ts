@@ -11,7 +11,7 @@ export interface GiteaClient {
   createOrganization(options: {
     fullName: string;
     name: string;
-    visibility: 'private';
+    visibility: 'private' | 'public';
   }): Promise<void>;
   createRepository(options: {
     description: string;
@@ -153,7 +153,7 @@ export class HttpGiteaClient implements GiteaClient {
   async createOrganization(options: {
     fullName: string;
     name: string;
-    visibility: 'private';
+    visibility: 'private' | 'public';
   }): Promise<void> {
     await this.#request('/orgs', {
       body: {
@@ -187,7 +187,8 @@ export class HttpGiteaClient implements GiteaClient {
 
 async function provisionOrganization(
   owner: string,
-  options: ProvisionGiteaRepositoriesOptions
+  options: ProvisionGiteaRepositoriesOptions,
+  isPrivate: boolean
 ): Promise<GiteaOrganizationActionResult> {
   try {
     const exists = await options.client.organizationExists(owner);
@@ -201,7 +202,7 @@ async function provisionOrganization(
     await options.client.createOrganization({
       fullName: `airgap-sync mirror owner for ${owner}`,
       name: owner,
-      visibility: 'private',
+      visibility: isPrivate ? 'private' : 'public',
     });
 
     return {
@@ -308,7 +309,7 @@ export async function provisionGiteaRepositories(
     }
   } else {
     for (const owner of owners) {
-      const action = await provisionOrganization(owner, options);
+      const action = await provisionOrganization(owner, options, isPrivate);
       organizationActions.push(action);
       organizationActionsByOwner.set(owner, action);
     }
