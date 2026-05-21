@@ -46,20 +46,11 @@ airgap-sync collect ./repos \
   --output ./airgap-bundle
 ```
 
-The current collect implementation performs the first pass:
+The collect step runs to a fixed point:
 
 ```text
 scan package.json files from project repositories
   -> refresh clean Git repositories
-  -> resolve and download npm registry package closure
-  -> discover Git dependencies from package manifests
-  -> clone/update missing Git dependency mirrors
-```
-
-The target collect step should then run to a fixed point:
-
-```text
-scan package.json files from project repositories
   -> resolve and download npm registry package closure
   -> discover Git dependencies from package manifests
   -> clone/update missing Git dependency mirrors

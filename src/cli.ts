@@ -161,7 +161,9 @@ program
         report.repositoryUpdate.errors.length > 0 ||
         report.fetch.errors.length > 0 ||
         report.gitSources.skipped.length > 0 ||
-        report.gitFetch.errors.length > 0
+        report.gitFetch.errors.length > 0 ||
+        report.gitManifestScanErrors.length > 0 ||
+        report.maxIterationsReached
       ) {
         process.exitCode = 1;
       }

@@ -65,12 +65,32 @@ export interface GitSourcesManifest {
   skipped: SkippedGitRequirement[];
 }
 
+export interface CollectGitManifestScanError {
+  error: string;
+  mirrorPath: string;
+  sourceId: string;
+}
+
+export interface CollectIterationReport {
+  addedGitRequirements: number;
+  addedRequirements: number;
+  addedUnsupported: number;
+  gitSources: number;
+  iteration: number;
+  resolved: number;
+  scannedGitSources: number;
+}
+
 export interface CollectReport {
   dryRun: boolean;
   fetch: FetchReport;
+  fixedPoint: boolean;
   generatedAt: string;
   gitFetch: GitFetchReport;
+  gitManifestScanErrors: CollectGitManifestScanError[];
   gitSources: GitSourcesManifest;
+  iterations: CollectIterationReport[];
+  maxIterationsReached: boolean;
   outputDir: string;
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
