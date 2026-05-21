@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from '../src/core/fs.js';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { downloadResolvedPackage, readPackageManifest } from '../src/core/tarball.js';

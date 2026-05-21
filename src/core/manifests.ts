@@ -1,5 +1,5 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type {
   GitRequirement,
   ParseRootSpecsResult,
@@ -125,7 +125,7 @@ export async function readManifestRequirements(
 
   for (const file of files) {
     entries.push({
-      manifest: (await fs.readJson(file)) as ProjectPackageManifest,
+      manifest: await fs.readJson<ProjectPackageManifest>(file),
       path: file,
     });
   }

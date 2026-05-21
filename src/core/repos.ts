@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type { RepositoryUpdateReport, RepositoryUpdateResult } from '../types.js';
 
 const ignoredDirectoryNames = new Set([

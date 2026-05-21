@@ -1,5 +1,5 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type { BundleManifest, DistTagsManifest, FetchReport, PublishReport } from '../types.js';
 import { readBundleManifest, readDistTagsManifest } from './bundle.js';
 import { validateBundle, type BundleValidationIssue } from './validation.js';
@@ -44,7 +44,7 @@ async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
     return undefined;
   }
 
-  return (await fs.readJson(filePath)) as T;
+  return fs.readJson<T>(filePath);
 }
 
 function reportStatus(report: FetchReport | PublishReport | undefined): BundleInfoReportStatus {

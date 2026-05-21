@@ -1,5 +1,5 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type {
   GitRequirement,
   GitSource,
@@ -184,5 +184,5 @@ export async function writeGitSourcesManifest(
 }
 
 export async function readGitSourcesManifest(bundleDir: string): Promise<GitSourcesManifest> {
-  return (await fs.readJson(path.join(bundleDir, 'git-sources.json'))) as GitSourcesManifest;
+  return fs.readJson<GitSourcesManifest>(path.join(bundleDir, 'git-sources.json'));
 }

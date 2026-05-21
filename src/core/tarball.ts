@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import * as tar from 'tar';
 import type { PackageManifest, ResolvedRootPackage } from '../types.js';
 import { packageFileName } from './files.js';

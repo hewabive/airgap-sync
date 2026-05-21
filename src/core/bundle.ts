@@ -1,5 +1,5 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type {
   BundleManifest,
   CollectReport,
@@ -125,7 +125,7 @@ export async function writeCollectReport(outputDir: string, report: CollectRepor
 }
 
 export async function readFetchReport(bundleDir: string): Promise<FetchReport> {
-  return (await fs.readJson(path.join(bundleDir, 'fetch-report.json'))) as FetchReport;
+  return fs.readJson<FetchReport>(path.join(bundleDir, 'fetch-report.json'));
 }
 
 export async function writeGitFetchReport(
@@ -161,11 +161,11 @@ export async function writeGiteaRepositoryProvisionReport(
 }
 
 export async function readBundleManifest(bundleDir: string): Promise<BundleManifest> {
-  return (await fs.readJson(path.join(bundleDir, 'seed-manifest.json'))) as BundleManifest;
+  return fs.readJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json'));
 }
 
 export async function readDistTagsManifest(bundleDir: string): Promise<DistTagsManifest> {
-  return (await fs.readJson(path.join(bundleDir, 'dist-tags.json'))) as DistTagsManifest;
+  return fs.readJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json'));
 }
 
 export async function writePublishReport(bundleDir: string, report: PublishReport): Promise<void> {

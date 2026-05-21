@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
 import { packageNamesMissingLatestTags } from '../src/core/publisher.js';

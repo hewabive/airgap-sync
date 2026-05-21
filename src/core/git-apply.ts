@@ -1,5 +1,5 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type {
   GitApplyActionResult,
   GitApplyReport,

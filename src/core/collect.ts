@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import fs from 'fs-extra';
+import * as fs from './fs.js';
 import type {
   CollectGitManifestScanError,
   CollectIterationReport,
