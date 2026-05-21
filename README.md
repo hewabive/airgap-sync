@@ -27,22 +27,32 @@ The broader target is an airgap sync workflow for portable media:
 This repository is an early implementation. The npm registry package path is usable:
 package-spec input, recursive dependency fetch, manifest input, bundle validation,
 metadata caching, bundle inspection, and Verdaccio publish are implemented. Git
-repository orchestration and Git dependency mirroring are still design work.
+dependency mirroring is implemented as explicit planning, local mirror fetch, Gitea
+repository creation, mirror push, and Git URL rewrite steps. Higher-level repository
+orchestration and automated install verification are still design work.
 
-## Intended CLI
+## Current Workflow
 
 ```bash
-# Online machine: resolve package specs and build a transfer bundle.
-airgap-sync fetch react@latest @types/node@^22 -o ./seed
-
-# Or seed from a project manifest.
-airgap-sync fetch --manifest ./package.json -o ./seed
-
-# Monorepos are scanned recursively from the manifest directory.
+# Online machine: build npm bundle and collect Git mirrors.
 airgap-sync fetch --manifest ./package.json --include-dev -o ./seed
+airgap-sync git plan ./seed --gitea http://gitea.local --owner npm-mirrors --write
+airgap-sync git fetch ./seed
 
-# Offline machine: publish tarballs and restore required dist-tags.
-airgap-sync publish ./seed -r http://192.168.0.10:4873
+# Closed network: populate Verdaccio and Gitea.
+airgap-sync publish ./seed -r http://verdaccio.local:4873
+airgap-sync git create-repos ./seed --token "$GITEA_TOKEN"
+airgap-sync git apply ./seed
+airgap-sync git config ./seed --global
+```
+
+For a Gitea organization, add `--owner-type org` to `git create-repos`.
+
+After that, normal installs should use the closed-network services:
+
+```bash
+npm ci --registry http://verdaccio.local:4873
+pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
 Future commands are expected to cover a larger workflow:
@@ -102,6 +112,7 @@ pnpm check       # Lint, type-check, and test
 - [Bundle Format](./docs/bundle-format.md)
 - [Development Guide](./docs/development.md)
 - [Roadmap](./docs/roadmap.md)
+- [Workflows](./docs/workflows.md)
 
 ## License
 
