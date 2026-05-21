@@ -86,6 +86,8 @@ export type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
+  GiteaOrganizationActionResult,
+  GiteaOrganizationActionStatus,
   GiteaRepositoryActionResult,
   GiteaRepositoryActionStatus,
   GiteaRepositoryProvisionReport,

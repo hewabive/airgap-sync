@@ -134,6 +134,13 @@ export interface GitConfigReport {
 }
 
 export type GiteaRepositoryActionStatus = 'planned' | 'exists' | 'created' | 'error';
+export type GiteaOrganizationActionStatus = 'planned' | 'exists' | 'created' | 'error';
+
+export interface GiteaOrganizationActionResult {
+  error?: string;
+  owner: string;
+  status: GiteaOrganizationActionStatus;
+}
 
 export interface GiteaRepositoryActionResult {
   error?: string;
@@ -151,8 +158,14 @@ export interface GiteaRepositoryProvisionReport {
   exists: number;
   generatedAt: string;
   giteaBaseUrl: string;
+  organizationCreated: number;
+  organizationErrors: GiteaOrganizationActionResult[];
+  organizationExists: number;
+  organizationPlanned: number;
+  organizations: GiteaOrganizationActionResult[];
   planned: number;
   private: boolean;
+  totalOrganizations: number;
   totalRepositories: number;
 }
 

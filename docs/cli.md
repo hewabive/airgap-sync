@@ -163,8 +163,8 @@ Reads `git-sources.json` and creates missing repositories in Gitea before
 required for `--dry-run`.
 
 By default repositories are created as private organization repositories, preserving
-the original owner name as the Gitea organization. Those organizations must already
-exist in Gitea. Use `--public` when mirrors should not be private.
+the original owner name as the Gitea organization. Missing organizations are created
+before repositories. Use `--public` when mirrors should not be private.
 
 ## git config
 

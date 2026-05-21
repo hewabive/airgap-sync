@@ -83,7 +83,9 @@ interface ReposUpdateOptions {
 }
 
 const noopGiteaClient: GiteaClient = {
+  createOrganization: () => Promise.resolve(),
   createRepository: () => Promise.resolve(),
+  organizationExists: () => Promise.resolve(false),
   repositoryExists: () => Promise.resolve(false),
 };
 

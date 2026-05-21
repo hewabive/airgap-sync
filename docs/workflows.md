@@ -194,8 +194,6 @@ prints the planned npm publish and dist-tag operations without publishing.
 ## Current Gaps
 
 - There is no fixed-point `collect` command yet.
-- Gitea organizations for preserved upstream owners must exist before repository
-  creation.
 - There is no single top-level `apply` command yet.
 - There is no automated external-network verification yet. The next milestone is a
   `verify` command that runs installs in a controlled environment and fails on public
