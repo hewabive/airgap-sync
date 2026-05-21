@@ -45,7 +45,13 @@ export {
   downloadResolvedPackage,
   readPackageManifest,
 } from './core/tarball.js';
-export { parsePnpmLockRequirementsFromContent, readPnpmLockRequirements } from './core/pnpm-lock.js';
+export {
+  parseLockfileRequirementsFromContent,
+  parseNpmLockRequirementsFromContent,
+  parsePnpmLockRequirementsFromContent,
+  parseYarnLockRequirementsFromContent,
+  readLockfileRequirements,
+} from './core/lockfiles.js';
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { CollectBundleOptions } from './core/collect.js';

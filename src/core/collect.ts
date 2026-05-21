@@ -22,8 +22,8 @@ import { fetchGitSources, type GitCommandRunner } from './git-fetch.js';
 import { readGitSourceManifestRequirements } from './git-manifests.js';
 import { createGitSourcesManifest, writeGitSourcesManifest } from './git-sources.js';
 import { gitSourceMirrorPath } from './git-targets.js';
+import { readLockfileRequirements } from './lockfiles.js';
 import { readManifestRequirements } from './manifests.js';
-import { readPnpmLockRequirements } from './pnpm-lock.js';
 import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
 
@@ -173,7 +173,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     includeDev,
     includePeer,
   });
-  const parsedLockfiles = await readPnpmLockRequirements(root);
+  const parsedLockfiles = await readLockfileRequirements(root);
   const state: RequirementState = {
     gitRequirements: [],
     requirements: [],
