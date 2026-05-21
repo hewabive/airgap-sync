@@ -18,6 +18,7 @@ import type {
   ResolutionError,
   TagRequirement,
   UnsupportedRootPackageRequirement,
+  VerifyReport,
 } from '../types.js';
 import { packageFileName } from './files.js';
 import type { WorkspaceSnapshot } from './workspace.js';
@@ -201,4 +202,9 @@ export async function writeWorkspaceSnapshot(
 ): Promise<void> {
   await fs.ensureDir(bundleDir);
   await fs.writeJson(path.join(bundleDir, 'workspace-snapshot.json'), snapshot, { spaces: 2 });
+}
+
+export async function writeVerifyReport(bundleDir: string, report: VerifyReport): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'verify-report.json'), report, { spaces: 2 });
 }

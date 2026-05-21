@@ -15,6 +15,7 @@ export {
   writeGitConfigReport,
   writeGitFetchReport,
   writePublishReport,
+  writeVerifyReport,
   writeWorkspaceSnapshot,
 } from './core/bundle.js';
 export { applyBundle } from './core/apply.js';
@@ -43,6 +44,7 @@ export { createPublishPlan, publishBundle } from './core/publisher.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
 export { throwIfInvalidBundle, validateBundle } from './core/validation.js';
+export { verifyBundle } from './core/verify.js';
 export {
   addWorkspaceTarget,
   createWorkspaceSnapshot,
@@ -116,6 +118,7 @@ export type {
   BundleValidationResult,
   BundleValidationSeverity,
 } from './core/validation.js';
+export type { VerifyBundleOptions } from './core/verify.js';
 export type {
   InitWorkspaceOptions,
   MaterializeWorkspaceGitTargetsOptions,
@@ -183,4 +186,7 @@ export type {
   TagRequirement,
   SkippedGitRequirement,
   UnsupportedRootPackageRequirement,
+  VerifyCheck,
+  VerifyCheckStatus,
+  VerifyReport,
 } from './types.js';

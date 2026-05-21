@@ -98,6 +98,7 @@ Before transfer, inspect the bundle:
 
 ```bash
 airgap-sync info ./bundle
+airgap-sync verify ./bundle
 ```
 
 Also check:
@@ -131,8 +132,7 @@ export GITEA_TOKEN=...
 airgap-sync apply ./bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
-  --gitea-token "$GITEA_TOKEN" \
-  --preserve-git-paths
+  --gitea-token "$GITEA_TOKEN"
 ```
 
 The offline apply step should:
@@ -179,6 +179,12 @@ If install still tries to reach the public internet, inspect:
   configuration.
 - Missing npm versions or tags: check `publish-report.json` and `dist-tags.json`.
 - Unsupported specs: check `fetch-report.json`.
+
+Before running project installs, verify the imported bundle:
+
+```bash
+airgap-sync verify ./bundle
+```
 
 ## Current Lower-Level Commands
 

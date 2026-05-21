@@ -42,13 +42,14 @@ airgap-sync target add npm eslint@latest
 
 # Online machine: refresh configured targets and collect npm/Git closure.
 airgap-sync collect
+airgap-sync verify ./bundle
 
 # Closed network: populate Verdaccio and Gitea from the transfer bundle.
 airgap-sync apply ./bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
-  --gitea-token "$GITEA_TOKEN" \
-  --preserve-git-paths
+  --gitea-token "$GITEA_TOKEN"
+airgap-sync verify ./bundle
 ```
 
 The intended Git mirror layout preserves upstream owner/repository paths. For example,
@@ -91,8 +92,7 @@ airgap-sync collect ./repos -o ./airgap-bundle
 # Closed network: publish npm packages and push Git mirrors.
 airgap-sync apply ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local \
-  --preserve-git-paths
+  --gitea http://gitea.local
 ```
 
 ## Design Principles

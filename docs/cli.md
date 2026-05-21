@@ -150,6 +150,21 @@ airgap-sync info ./airgap-bundle
 Prints a JSON summary with package counts, package names, restored tags, report status,
 missing tarball files, and bundle validation issues.
 
+## verify
+
+```bash
+airgap-sync verify ./bundle
+airgap-sync verify ./bundle --json
+```
+
+Checks the bundle without running package-manager installs. It validates bundle
+manifests and tarballs, checks fetch and collect reports, verifies
+`workspace-snapshot.json`, checks Git mirror presence from `git-sources.json`, and
+checks `apply-report.json` when present. The command writes `verify-report.json`.
+
+Errors produce a non-zero exit code. Warnings, such as a missing `apply-report.json`
+before the offline import has run, are reported but do not fail the command.
+
 ## git sources
 
 ```bash

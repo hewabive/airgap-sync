@@ -32,6 +32,7 @@ import {
   readWorkspaceConfig,
   removeWorkspaceTarget,
   updateRepositories,
+  verifyBundle,
   writeBundleDocuments,
   writeFetchReport,
   writeGiteaRepositoryProvisionReport,
@@ -49,6 +50,7 @@ import type {
   PublishProgressEvent,
   PublishProgressPhase,
   ResolveRootRequirementsResult,
+  VerifyReport,
 } from './index.js';
 
 interface FetchOptions {
@@ -76,6 +78,10 @@ interface ApplyOptions {
   public?: boolean;
   registry: string;
   skipExisting?: boolean;
+}
+
+interface VerifyOptions {
+  json?: boolean;
 }
 
 interface CollectOptions {
@@ -259,6 +265,17 @@ function toFetchDryRun(result: FetchSeedBundleResult) {
     ...toFetchPreview(result),
     unsupported: result.unsupported,
   };
+}
+
+function formatVerifyReport(report: VerifyReport): string {
+  const lines = report.checks.map((item) => {
+    const label = item.status === 'ok' ? 'OK' : item.status === 'warning' ? 'WARN' : 'ERROR';
+    return `${label} ${item.name}: ${item.message}`;
+  });
+  lines.push(
+    `SUMMARY ${String(report.summary.ok)} ok, ${String(report.summary.warnings)} warnings, ${String(report.summary.errors)} errors`
+  );
+  return lines.join('\n');
 }
 
 program
@@ -671,6 +688,27 @@ program
     try {
       const info = await readBundleInfo(bundle);
       console.log(JSON.stringify(info, null, 2));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('verify')
+  .description('Verify an airgap bundle without running package installs')
+  .argument('<bundle>', 'Path to airgap bundle directory')
+  .option('--json', 'Print the full JSON verification report')
+  .action(async (bundle: string, options: VerifyOptions) => {
+    try {
+      const report = await verifyBundle({ bundleDir: bundle });
+      console.log(
+        options.json === true ? JSON.stringify(report, null, 2) : formatVerifyReport(report)
+      );
+
+      if (!report.ok) {
+        process.exitCode = 1;
+      }
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

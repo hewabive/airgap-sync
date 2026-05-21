@@ -409,3 +409,24 @@ export interface ApplyBundleReport {
   registryUrl: string;
   succeeded: boolean;
 }
+
+export type VerifyCheckStatus = 'ok' | 'warning' | 'error';
+
+export interface VerifyCheck {
+  details?: unknown;
+  message: string;
+  name: string;
+  status: VerifyCheckStatus;
+}
+
+export interface VerifyReport {
+  bundle: string;
+  checks: VerifyCheck[];
+  generatedAt: string;
+  ok: boolean;
+  summary: {
+    errors: number;
+    ok: number;
+    warnings: number;
+  };
+}
