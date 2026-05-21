@@ -69,6 +69,13 @@ const fetchReport: FetchReport = {
   gitRequirements: [],
   resolved: 2,
   skipped: 0,
+  timings: {
+    dependencyScanMs: 0,
+    downloadMs: 0,
+    manifestReadMs: 0,
+    resolveMs: 0,
+    totalMs: 0,
+  },
   unsupported: [],
 };
 

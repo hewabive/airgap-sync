@@ -75,10 +75,26 @@ export interface CollectIterationReport {
   addedGitRequirements: number;
   addedRequirements: number;
   addedUnsupported: number;
+  fetchMs: number;
+  gitFetchMs: number;
+  gitManifestScanMs: number;
   gitSources: number;
   iteration: number;
   resolved: number;
   scannedGitSources: number;
+  totalMs: number;
+}
+
+export interface CollectTimings {
+  bundleDocumentsMs: number;
+  fetchIterationsMs: number;
+  gitFetchMs: number;
+  gitManifestScanMs: number;
+  lockfileScanMs: number;
+  manifestScanMs: number;
+  repositoryUpdateMs: number;
+  reportWriteMs: number;
+  totalMs: number;
 }
 
 export interface CollectReport {
@@ -95,6 +111,7 @@ export interface CollectReport {
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
   root: string;
+  timings: CollectTimings;
   wroteBundle: boolean;
 }
 
@@ -291,6 +308,14 @@ export interface ResolvedPackage extends PackageIdentity {
   resolvedFrom: ResolutionReason[];
 }
 
+export interface FetchTimings {
+  dependencyScanMs: number;
+  downloadMs: number;
+  manifestReadMs: number;
+  resolveMs: number;
+  totalMs: number;
+}
+
 export interface FetchReport {
   downloaded: number;
   errors: ResolutionError[];
@@ -298,6 +323,7 @@ export interface FetchReport {
   gitRequirements: GitRequirement[];
   resolved: number;
   skipped: number;
+  timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
 }
 

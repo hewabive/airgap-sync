@@ -1,9 +1,11 @@
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import fs from 'fs-extra';
 import type {
   CollectGitManifestScanError,
   CollectIterationReport,
   CollectReport,
+  CollectTimings,
   GitRequirement,
   GitSource,
   RootPackageRequirement,
@@ -45,6 +47,24 @@ interface RequirementState {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported: UnsupportedRootPackageRequirement[];
+}
+
+function createCollectTimings(): CollectTimings {
+  return {
+    bundleDocumentsMs: 0,
+    fetchIterationsMs: 0,
+    gitFetchMs: 0,
+    gitManifestScanMs: 0,
+    lockfileScanMs: 0,
+    manifestScanMs: 0,
+    repositoryUpdateMs: 0,
+    reportWriteMs: 0,
+    totalMs: 0,
+  };
+}
+
+function elapsedMs(start: number): number {
+  return Math.round(performance.now() - start);
 }
 
 function requirementKey(requirement: RootPackageRequirement): string {
@@ -155,6 +175,8 @@ async function scanGitSourceManifests(options: {
 }
 
 export async function collectBundle(options: CollectBundleOptions): Promise<CollectReport> {
+  const totalStart = performance.now();
+  const timings = createCollectTimings();
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const root = path.resolve(options.root);
   const outputDir = path.resolve(options.outputDir);
@@ -163,17 +185,23 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const includePeer = options.includePeer === true;
   const maxIterations = options.maxIterations ?? 10;
 
+  const repositoryUpdateStart = performance.now();
   const repositoryUpdate = await updateRepositories({
     dryRun,
     generatedAt,
     root,
     ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
   });
+  timings.repositoryUpdateMs = elapsedMs(repositoryUpdateStart);
+  const manifestScanStart = performance.now();
   const parsedManifest = await readManifestRequirements(root, {
     includeDev,
     includePeer,
   });
+  timings.manifestScanMs = elapsedMs(manifestScanStart);
+  const lockfileScanStart = performance.now();
   const parsedLockfiles = await readLockfileRequirements(root);
+  timings.lockfileScanMs = elapsedMs(lockfileScanStart);
   const state: RequirementState = {
     gitRequirements: [],
     requirements: [],
@@ -213,6 +241,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     unsupported: [],
   });
   let gitSources = createGitSourcesManifest([], { createdAt: generatedAt });
+  const initialGitFetchStart = performance.now();
   let gitFetch = await fetchGitSources({
     bundleDir: outputDir,
     dryRun: true,
@@ -220,9 +249,12 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     manifest: gitSources,
     ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
   });
+  timings.gitFetchMs += elapsedMs(initialGitFetchStart);
   let maxIterationsReached = false;
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
+    const iterationStart = performance.now();
+    const fetchIterationStart = performance.now();
     resolution = await fetchSeedBundle({
       download: !dryRun,
       includePeer,
@@ -232,6 +264,8 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       requirements: state.requirements,
       unsupported: state.unsupported,
     });
+    const fetchMs = elapsedMs(fetchIterationStart);
+    timings.fetchIterationsMs += fetchMs;
     fetch = createFetchReport({
       downloaded: resolution.downloaded,
       errors: resolution.errors,
@@ -239,11 +273,13 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       gitRequirements: resolution.gitRequirements,
       resolved: resolution.resolved.length,
       skipped: resolution.skipped,
+      timings: resolution.timings,
       unsupported: resolution.unsupported,
     });
     gitSources = createGitSourcesManifest(resolution.gitRequirements, {
       createdAt: generatedAt,
     });
+    const gitFetchStart = performance.now();
     gitFetch = await fetchGitSources({
       bundleDir: outputDir,
       dryRun,
@@ -251,6 +287,8 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       manifest: gitSources,
       ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
     });
+    const gitFetchMs = elapsedMs(gitFetchStart);
+    timings.gitFetchMs += gitFetchMs;
     addUnique(
       state.gitRequirements,
       seenGitRequirements,
@@ -263,8 +301,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     const beforeGitRequirementCount = state.gitRequirements.length;
     const beforeUnsupportedCount = state.unsupported.length;
     let scannedGitSources = 0;
+    let gitManifestScanMs = 0;
 
     if (!dryRun && resolution.errors.length === 0 && gitFetch.errors.length === 0) {
+      const gitManifestScanStart = performance.now();
       const scan = await scanGitSourceManifests({
         bundleDir: outputDir,
         includeDev,
@@ -285,6 +325,8 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         gitRequirementKey
       );
       addUnique(state.unsupported, seenUnsupported, scan.state.unsupported, unsupportedKey);
+      gitManifestScanMs = elapsedMs(gitManifestScanStart);
+      timings.gitManifestScanMs += gitManifestScanMs;
     }
 
     const addedRequirements = state.requirements.length - beforeRequirementCount;
@@ -294,10 +336,14 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       addedGitRequirements,
       addedRequirements,
       addedUnsupported,
+      fetchMs,
+      gitFetchMs,
+      gitManifestScanMs,
       gitSources: sourceIds(gitSources.sources).size,
       iteration,
       resolved: resolution.resolved.length,
       scannedGitSources,
+      totalMs: elapsedMs(iterationStart),
     });
 
     if (
@@ -327,6 +373,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     scanErrors.length === 0 &&
     !maxIterationsReached;
 
+  timings.totalMs = elapsedMs(totalStart);
   const report: CollectReport = {
     dryRun,
     fetch,
@@ -341,24 +388,30 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     registryUrl: options.registryUrl,
     repositoryUpdate,
     root,
+    timings,
     wroteBundle,
   };
 
   if (!dryRun) {
+    if (wroteBundle && resolution) {
+      const bundleDocumentsStart = performance.now();
+      const documents = createBundleDocuments({
+        outputDir,
+        resolved: resolution.resolved,
+        sourceRegistry: options.registryUrl,
+        tagRequirements: resolution.tagRequirements,
+      });
+      await writeBundleDocuments(outputDir, documents);
+      timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
+    }
+
+    const reportWriteStart = performance.now();
     await writeFetchReport(outputDir, fetch);
     await writeGitSourcesManifest(outputDir, gitSources);
     await writeGitFetchReport(outputDir, gitFetch);
+    timings.reportWriteMs = elapsedMs(reportWriteStart);
+    timings.totalMs = elapsedMs(totalStart);
     await writeCollectReport(outputDir, report);
-  }
-
-  if (wroteBundle && resolution) {
-    const documents = createBundleDocuments({
-      outputDir,
-      resolved: resolution.resolved,
-      sourceRegistry: options.registryUrl,
-      tagRequirements: resolution.tagRequirements,
-    });
-    await writeBundleDocuments(outputDir, documents);
   }
 
   return report;

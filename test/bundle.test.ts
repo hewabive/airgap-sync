@@ -93,6 +93,13 @@ describe('createFetchReport', () => {
       gitRequirements: [],
       resolved: 1,
       skipped: 0,
+      timings: {
+        dependencyScanMs: 0,
+        downloadMs: 0,
+        manifestReadMs: 0,
+        resolveMs: 0,
+        totalMs: 0,
+      },
       unsupported: [],
     });
   });

@@ -5,6 +5,7 @@ import type {
   CollectReport,
   DistTagsManifest,
   FetchReport,
+  FetchTimings,
   GiteaRepositoryProvisionReport,
   GitApplyReport,
   GitConfigReport,
@@ -39,6 +40,7 @@ export interface FetchReportOptions {
   gitRequirements: GitRequirement[];
   resolved: number;
   skipped: number;
+  timings?: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
 }
 
@@ -90,6 +92,13 @@ export function createFetchReport(options: FetchReportOptions): FetchReport {
     gitRequirements: options.gitRequirements,
     resolved: options.resolved,
     skipped: options.skipped,
+    timings: options.timings ?? {
+      dependencyScanMs: 0,
+      downloadMs: 0,
+      manifestReadMs: 0,
+      resolveMs: 0,
+      totalMs: 0,
+    },
     unsupported: options.unsupported,
   };
 }

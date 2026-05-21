@@ -1,4 +1,6 @@
+import { performance } from 'node:perf_hooks';
 import type {
+  FetchTimings,
   GitRequirement,
   PackageManifest,
   ResolveRootRequirementsResult,
@@ -29,6 +31,7 @@ export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
   downloaded: number;
   gitRequirements: GitRequirement[];
   skipped: number;
+  timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
   wouldDownload: number;
 }
@@ -61,6 +64,20 @@ function publishLatestRequirement(name: string): RootPackageRequirement {
   };
 }
 
+function createFetchTimings(): FetchTimings {
+  return {
+    dependencyScanMs: 0,
+    downloadMs: 0,
+    manifestReadMs: 0,
+    resolveMs: 0,
+    totalMs: 0,
+  };
+}
+
+function elapsedMs(start: number): number {
+  return Math.round(performance.now() - start);
+}
+
 async function manifestFromRegistry(
   pkg: ResolvedRootPackage,
   registry: RegistryClient
@@ -88,6 +105,7 @@ async function manifestFromRegistry(
 export async function fetchSeedBundle(
   options: FetchSeedBundleOptions
 ): Promise<FetchSeedBundleResult> {
+  const totalStart = performance.now();
   const shouldDownload = options.download !== false;
   const queue = [...options.requirements];
   const latestRequirements = new Set<string>();
@@ -95,6 +113,7 @@ export async function fetchSeedBundle(
   const scannedPackages = new Set<string>();
   const resolvedById = new Map<string, ResolvedRootPackage>();
   const tagRequirements = new Set<string>();
+  const timings = createFetchTimings();
   const result: FetchSeedBundleResult = {
     downloaded: 0,
     skipped: 0,
@@ -102,6 +121,7 @@ export async function fetchSeedBundle(
     errors: [],
     gitRequirements: [...(options.gitRequirements ?? [])],
     tagRequirements: [],
+    timings,
     unsupported: [...(options.unsupported ?? [])],
     wouldDownload: 0,
   };
@@ -116,7 +136,9 @@ export async function fetchSeedBundle(
     }
     processedRequirements.add(reqId);
 
+    const resolveStart = performance.now();
     const resolution = await resolveRootRequirements([requirement], options.registry);
+    timings.resolveMs += elapsedMs(resolveStart);
     result.errors.push(...resolution.errors);
 
     for (const tagRequirement of resolution.tagRequirements) {
@@ -147,16 +169,22 @@ export async function fetchSeedBundle(
       let manifest: PackageManifest;
 
       if (shouldDownload) {
+        const downloadStart = performance.now();
         const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
+        timings.downloadMs += elapsedMs(downloadStart);
         if (downloaded.skipped) {
           result.skipped++;
         } else {
           result.downloaded++;
         }
+        const manifestStart = performance.now();
         manifest = await readPackageManifest(downloaded.path);
+        timings.manifestReadMs += elapsedMs(manifestStart);
       } else {
         result.wouldDownload++;
+        const manifestStart = performance.now();
         manifest = await manifestFromRegistry(resolved, options.registry);
+        timings.manifestReadMs += elapsedMs(manifestStart);
       }
 
       if (scannedPackages.has(id)) {
@@ -165,6 +193,7 @@ export async function fetchSeedBundle(
       scannedPackages.add(id);
 
       const requiredBy = packageId(manifest);
+      const dependencyScanStart = performance.now();
       const dependencies = dependencySpecsFromManifest(manifest, {
         includePeer: options.includePeer === true,
       });
@@ -181,8 +210,10 @@ export async function fetchSeedBundle(
           queue.push(parsed);
         }
       }
+      timings.dependencyScanMs += elapsedMs(dependencyScanStart);
     }
   }
 
+  timings.totalMs = elapsedMs(totalStart);
   return result;
 }

@@ -316,6 +316,7 @@ program
           gitRequirements: resolution.gitRequirements,
           resolved: resolution.resolved.length,
           skipped: resolution.skipped,
+          timings: resolution.timings,
           unsupported: resolution.unsupported,
         })
       );
@@ -327,6 +328,7 @@ program
             downloaded: resolution.downloaded,
             skipped: resolution.skipped,
             resolved: resolution.resolved.length,
+            timings: resolution.timings,
             tagRequirements: resolution.tagRequirements.length,
           },
           null,
