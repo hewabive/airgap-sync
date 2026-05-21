@@ -68,7 +68,7 @@ verification.
   additional package manifests.
 - Preserve upstream owner/repository paths when mapping mirrors into Gitea.
 - Create missing Gitea owners/repositories during the offline apply phase.
-- Push local bare mirrors to planned Gitea target URLs and emit broad `insteadOf` rules
+- Push local bare mirrors to derived Gitea target URLs and emit broad `insteadOf` rules
   when preserved paths make that safe.
 - Configure Git `insteadOf` rewrite rules from the transfer bundle.
 - Recursively inspect package manifests from Git dependencies.

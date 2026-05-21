@@ -1,18 +1,17 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
-  GiteaOwnerType,
   GiteaRepositoryActionResult,
   GiteaRepositoryProvisionReport,
-  GitMirrorPlan,
-  GitMirrorRepositoryPlan,
+  GitSource,
+  GitSourcesManifest,
 } from '../types.js';
+import { gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
 
 export interface GiteaClient {
   createRepository(options: {
     description: string;
     name: string;
     owner: string;
-    ownerType: GiteaOwnerType;
     private: boolean;
   }): Promise<void>;
   repositoryExists(owner: string, name: string): Promise<boolean>;
@@ -26,14 +25,10 @@ export interface HttpGiteaClientOptions {
 export interface ProvisionGiteaRepositoriesOptions {
   client: GiteaClient;
   dryRun?: boolean;
+  giteaBaseUrl: string;
   generatedAt?: string;
-  ownerType: GiteaOwnerType;
-  plan: GitMirrorPlan;
+  manifest: GitSourcesManifest;
   private?: boolean;
-}
-
-function normalizeBaseUrl(url: string): string {
-  return url.replace(/\/+$/, '');
 }
 
 function encodePathPart(value: string): string {
@@ -84,14 +79,10 @@ export class HttpGiteaClient implements GiteaClient {
     description: string;
     name: string;
     owner: string;
-    ownerType: GiteaOwnerType;
     private: boolean;
   }): Promise<void> {
-    const endpoint =
-      options.ownerType === 'org' ? `/orgs/${encodePathPart(options.owner)}/repos` : '/user/repos';
-
     await this.#http.post(
-      endpoint,
+      `/orgs/${encodePathPart(options.owner)}/repos`,
       {
         auto_init: false,
         description: options.description,
@@ -106,42 +97,46 @@ export class HttpGiteaClient implements GiteaClient {
 }
 
 async function provisionRepository(
-  repository: GitMirrorRepositoryPlan,
+  source: GitSource,
   options: ProvisionGiteaRepositoriesOptions,
   isPrivate: boolean
 ): Promise<GiteaRepositoryActionResult> {
+  const targetUrl = gitSourceTargetUrl(source, options.giteaBaseUrl);
+
   try {
-    const exists = await options.client.repositoryExists(options.plan.owner, repository.repository);
+    const exists = await options.client.repositoryExists(source.owner, source.repo);
     if (exists) {
       return {
+        owner: source.owner,
         private: isPrivate,
-        repository: repository.repository,
+        repository: source.repo,
         status: 'exists',
-        targetUrl: repository.targetUrl,
+        targetUrl,
       };
     }
 
     await options.client.createRepository({
-      description: `airgap-sync mirror for ${repository.id}`,
-      name: repository.repository,
-      owner: options.plan.owner,
-      ownerType: options.ownerType,
+      description: `airgap-sync mirror for ${source.id}`,
+      name: source.repo,
+      owner: source.owner,
       private: isPrivate,
     });
 
     return {
+      owner: source.owner,
       private: isPrivate,
-      repository: repository.repository,
+      repository: source.repo,
       status: 'created',
-      targetUrl: repository.targetUrl,
+      targetUrl,
     };
   } catch (error) {
     return {
       error: errorMessage(error),
+      owner: source.owner,
       private: isPrivate,
-      repository: repository.repository,
+      repository: source.repo,
       status: 'error',
-      targetUrl: repository.targetUrl,
+      targetUrl,
     };
   }
 }
@@ -153,17 +148,18 @@ export async function provisionGiteaRepositories(
   const actions: GiteaRepositoryActionResult[] = [];
 
   if (options.dryRun === true) {
-    for (const repository of options.plan.repositories) {
+    for (const source of options.manifest.sources) {
       actions.push({
+        owner: source.owner,
         private: isPrivate,
-        repository: repository.repository,
+        repository: source.repo,
         status: 'planned',
-        targetUrl: repository.targetUrl,
+        targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
       });
     }
   } else {
-    for (const repository of options.plan.repositories) {
-      actions.push(await provisionRepository(repository, options, isPrivate));
+    for (const source of options.manifest.sources) {
+      actions.push(await provisionRepository(source, options, isPrivate));
     }
   }
 
@@ -175,9 +171,7 @@ export async function provisionGiteaRepositories(
     errors,
     exists: actions.filter((action) => action.status === 'exists').length,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
-    giteaBaseUrl: options.plan.giteaBaseUrl,
-    owner: options.plan.owner,
-    ownerType: options.ownerType,
+    giteaBaseUrl: normalizeBaseUrl(options.giteaBaseUrl),
     planned: actions.filter((action) => action.status === 'planned').length,
     private: isPrivate,
     totalRepositories: actions.length,

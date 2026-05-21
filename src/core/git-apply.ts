@@ -4,110 +4,111 @@ import type {
   GitApplyActionResult,
   GitApplyReport,
   GitConfigRewriteRule,
-  GitMirrorPlan,
-  GitMirrorRepositoryPlan,
+  GitSource,
+  GitSourcesManifest,
 } from '../types.js';
 import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
+import { gitSourceMirrorPath, gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
 
-export interface ApplyGitMirrorsOptions {
+export interface ApplyGitSourcesOptions {
   bundleDir: string;
   dryRun?: boolean;
+  giteaBaseUrl: string;
   generatedAt?: string;
+  manifest: GitSourcesManifest;
   mirrorsDir?: string;
-  plan: GitMirrorPlan;
   runner?: GitCommandRunner;
-}
-
-function mirrorPath(mirrorsDir: string, repository: GitMirrorRepositoryPlan): string {
-  return path.join(mirrorsDir, `${repository.repository}.git`);
 }
 
 function quoteGitConfigPart(value: string): string {
   return JSON.stringify(value);
 }
 
-export function createGitConfigRewriteRules(plan: GitMirrorPlan): GitConfigRewriteRule[] {
+export function createGitConfigRewriteRules(
+  manifest: GitSourcesManifest,
+  giteaBaseUrl: string
+): GitConfigRewriteRule[] {
   const seen = new Set<string>();
-  const rules: GitConfigRewriteRule[] = [];
+  const targetUrl = `${normalizeBaseUrl(giteaBaseUrl)}/`;
 
-  for (const repository of plan.repositories) {
-    for (const insteadOf of repository.insteadOf) {
-      const key = `${repository.targetUrl}\0${insteadOf}`;
-      if (seen.has(key)) {
-        continue;
-      }
-
-      seen.add(key);
-      rules.push({
-        command: `git config --global url.${quoteGitConfigPart(repository.targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
-        insteadOf,
-        targetUrl: repository.targetUrl,
-      });
-    }
+  for (const source of manifest.sources) {
+    seen.add(`https://${source.host}/`);
   }
 
-  return rules.sort((left, right) => {
-    const byTarget = left.targetUrl.localeCompare(right.targetUrl);
-    return byTarget === 0 ? left.insteadOf.localeCompare(right.insteadOf) : byTarget;
+  return [...seen]
+    .map((insteadOf) => ({
+      command: `git config --global url.${quoteGitConfigPart(targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
+      insteadOf,
+      targetUrl,
+    }))
+    .sort((left, right) => left.insteadOf.localeCompare(right.insteadOf));
+}
+
+function sourcePath(source: GitSource, options: ApplyGitSourcesOptions): string {
+  return gitSourceMirrorPath({
+    bundleDir: options.bundleDir,
+    ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+    source,
   });
 }
 
 async function applyRepository(
-  repository: GitMirrorRepositoryPlan,
-  mirrorsDir: string,
+  source: GitSource,
+  options: ApplyGitSourcesOptions,
   runner: GitCommandRunner
 ): Promise<GitApplyActionResult> {
-  const sourcePath = mirrorPath(mirrorsDir, repository);
+  const mirrorPath = sourcePath(source, options);
+  const targetUrl = gitSourceTargetUrl(source, options.giteaBaseUrl);
 
-  if (!(await fs.pathExists(sourcePath))) {
+  if (!(await fs.pathExists(mirrorPath))) {
     return {
-      repository: repository.repository,
-      sourcePath,
+      repository: source.id,
+      sourcePath: mirrorPath,
       status: 'missing-mirror',
-      targetUrl: repository.targetUrl,
+      targetUrl,
     };
   }
 
   try {
     await runner({
-      args: ['-C', sourcePath, 'push', '--mirror', repository.targetUrl],
+      args: ['-C', mirrorPath, 'push', '--mirror', targetUrl],
     });
     return {
-      repository: repository.repository,
-      sourcePath,
+      repository: source.id,
+      sourcePath: mirrorPath,
       status: 'pushed',
-      targetUrl: repository.targetUrl,
+      targetUrl,
     };
   } catch (error) {
     return {
       error: (error as Error).message,
-      repository: repository.repository,
-      sourcePath,
+      repository: source.id,
+      sourcePath: mirrorPath,
       status: 'error',
-      targetUrl: repository.targetUrl,
+      targetUrl,
     };
   }
 }
 
-export async function applyGitMirrors(options: ApplyGitMirrorsOptions): Promise<GitApplyReport> {
+export async function applyGitSources(options: ApplyGitSourcesOptions): Promise<GitApplyReport> {
   const mirrorsDir = path.resolve(
     options.mirrorsDir ?? path.join(options.bundleDir, 'git-mirrors')
   );
   const actions: GitApplyActionResult[] = [];
 
   if (options.dryRun === true) {
-    for (const repository of options.plan.repositories) {
+    for (const source of options.manifest.sources) {
       actions.push({
-        repository: repository.repository,
-        sourcePath: mirrorPath(mirrorsDir, repository),
+        repository: source.id,
+        sourcePath: sourcePath(source, options),
         status: 'planned',
-        targetUrl: repository.targetUrl,
+        targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
       });
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    for (const repository of options.plan.repositories) {
-      actions.push(await applyRepository(repository, mirrorsDir, runner));
+    for (const source of options.manifest.sources) {
+      actions.push(await applyRepository(source, options, runner));
     }
   }
 
@@ -119,7 +120,7 @@ export async function applyGitMirrors(options: ApplyGitMirrorsOptions): Promise<
     dryRun: options.dryRun === true,
     errors,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
-    gitConfigRewriteRules: createGitConfigRewriteRules(options.plan),
+    gitConfigRewriteRules: createGitConfigRewriteRules(options.manifest, options.giteaBaseUrl),
     mirrorsDir,
     missingMirrors: actions.filter((action) => action.status === 'missing-mirror').length,
     planned: actions.filter((action) => action.status === 'planned').length,

@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { provisionGiteaRepositories, type GiteaClient } from '../src/index.js';
-import type { GitMirrorPlan } from '../src/types.js';
+import type { GitSourcesManifest } from '../src/types.js';
 
-const plan: GitMirrorPlan = {
+const manifest: GitSourcesManifest = {
   schemaVersion: 1,
-  createdAt: '2026-05-20T00:00:00.000Z',
-  giteaBaseUrl: 'http://gitea.local',
-  owner: 'npm-mirrors',
-  repositories: [
+  createdAt: '2026-05-21T00:00:00.000Z',
+  sources: [
     {
+      host: 'github.com',
       id: 'github.com/owner/repo',
-      insteadOf: ['https://github.com/owner/repo.git'],
-      repository: 'github.com-owner-repo',
+      localMirrorPath: 'git-mirrors/github.com/owner/repo.git',
+      owner: 'owner',
+      repo: 'repo',
       requirements: [],
       sourceUrl: 'https://github.com/owner/repo.git',
-      targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
     },
   ],
   skipped: [],
@@ -38,19 +37,17 @@ describe('provisionGiteaRepositories', () => {
       provisionGiteaRepositories({
         client,
         dryRun: true,
-        generatedAt: '2026-05-20T00:00:00.000Z',
-        ownerType: 'org',
-        plan,
+        generatedAt: '2026-05-21T00:00:00.000Z',
+        giteaBaseUrl: 'http://gitea.local/',
+        manifest,
       })
     ).resolves.toEqual({
       created: 0,
       dryRun: true,
       errors: [],
       exists: 0,
-      generatedAt: '2026-05-20T00:00:00.000Z',
+      generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
-      owner: 'npm-mirrors',
-      ownerType: 'org',
       planned: 1,
       private: true,
       totalRepositories: 1,
@@ -68,9 +65,9 @@ describe('provisionGiteaRepositories', () => {
 
     const report = await provisionGiteaRepositories({
       client,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      ownerType: 'user',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
     });
 
     expect(report).toMatchObject({
@@ -82,7 +79,7 @@ describe('provisionGiteaRepositories', () => {
     });
   });
 
-  it('creates missing repositories', async () => {
+  it('creates missing repositories preserving original owner and repo names', async () => {
     const createCalls: unknown[] = [];
     const client: GiteaClient = {
       createRepository: (options) => {
@@ -94,18 +91,17 @@ describe('provisionGiteaRepositories', () => {
 
     const report = await provisionGiteaRepositories({
       client,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      ownerType: 'org',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
       private: false,
     });
 
     expect(createCalls).toEqual([
       {
         description: 'airgap-sync mirror for github.com/owner/repo',
-        name: 'github.com-owner-repo',
-        owner: 'npm-mirrors',
-        ownerType: 'org',
+        name: 'repo',
+        owner: 'owner',
         private: false,
       },
     ]);
@@ -125,9 +121,9 @@ describe('provisionGiteaRepositories', () => {
 
     const report = await provisionGiteaRepositories({
       client,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      ownerType: 'user',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
     });
 
     expect(report).toMatchObject({
@@ -135,10 +131,11 @@ describe('provisionGiteaRepositories', () => {
       errors: [
         {
           error: 'create failed',
+          owner: 'owner',
           private: true,
-          repository: 'github.com-owner-repo',
+          repository: 'repo',
           status: 'error',
-          targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
+          targetUrl: 'http://gitea.local/owner/repo.git',
         },
       ],
       exists: 0,

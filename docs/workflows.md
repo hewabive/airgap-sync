@@ -164,20 +164,18 @@ uses lower-level commands:
 # Online
 airgap-sync fetch --manifest ./package.json --include-dev -o ./airgap-bundle
 airgap-sync git sources ./airgap-bundle --write
-airgap-sync git plan ./airgap-bundle --gitea http://gitea.local --owner npm-mirrors --write
 airgap-sync git fetch ./airgap-bundle
 
 # Offline
 airgap-sync publish ./airgap-bundle --registry http://verdaccio.local:4873
-airgap-sync git create-repos ./airgap-bundle --token "$GITEA_TOKEN"
-airgap-sync git apply ./airgap-bundle
-airgap-sync git config ./airgap-bundle --global
+airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
+airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global
 ```
 
-These commands are useful for testing, but they still bind the Git plan to Gitea during
-the online phase for later offline steps. `git sources` and `git fetch` already support
-portable source metadata and preserved local mirror paths; the remaining work is to move
-offline apply/create/config to that metadata.
+These commands are useful for testing the current lower-level workflow. The bundle is
+not bound to a Gitea instance during the online phase: `git-sources.json` records public
+source identities, and the offline commands receive the local Gitea URL explicitly.
 
 ## Dry Runs
 
@@ -185,9 +183,9 @@ Most mutating Git steps support dry-run:
 
 ```bash
 airgap-sync git fetch ./airgap-bundle --dry-run
-airgap-sync git create-repos ./airgap-bundle --dry-run
-airgap-sync git apply ./airgap-bundle --dry-run
-airgap-sync git config ./airgap-bundle --global --dry-run
+airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --dry-run
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --dry-run
+airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global --dry-run
 ```
 
 `airgap-sync publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873`
@@ -196,8 +194,8 @@ prints the planned npm publish and dist-tag operations without publishing.
 ## Current Gaps
 
 - There is no fixed-point `collect` command yet.
-- Git source metadata is not yet separated from offline Gitea planning.
-- Gitea paths are not yet preserved as upstream `owner/repo`.
+- Gitea organizations for preserved upstream owners must exist before repository
+  creation.
 - There is no single top-level `apply` command yet.
 - There is no automated external-network verification yet. The next milestone is a
   `verify` command that runs installs in a controlled environment and fails on public

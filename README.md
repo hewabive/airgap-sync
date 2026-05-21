@@ -27,8 +27,8 @@ The broader target is an airgap sync workflow for portable media:
 This repository is an early implementation. The npm registry package path is usable:
 package-spec input, recursive dependency fetch, manifest input, bundle validation,
 metadata caching, bundle inspection, and Verdaccio publish are implemented. Git
-dependency mirroring is implemented as explicit planning, local mirror fetch, Gitea
-repository creation, mirror push, and Git URL rewrite steps. Higher-level repository
+dependency mirroring is implemented as portable source metadata, local mirror fetch,
+Gitea repository creation, mirror push, and Git URL rewrite steps. Higher-level repository
 orchestration and automated install verification are still design work.
 
 ## Target Workflow

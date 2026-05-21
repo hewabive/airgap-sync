@@ -5,26 +5,21 @@ export {
   createFetchReport,
   readBundleManifest,
   readDistTagsManifest,
+  readFetchReport,
   writeBundleDocuments,
   writeFetchReport,
+  writeGiteaRepositoryProvisionReport,
+  writeGitApplyReport,
+  writeGitConfigReport,
+  writeGitFetchReport,
   writePublishReport,
 } from './core/bundle.js';
-export { applyGitMirrors, createGitConfigRewriteRules } from './core/git-apply.js';
+export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
-export { fetchGitMirrors, fetchGitSources, runGitCommand } from './core/git-fetch.js';
-export {
-  createGitMirrorPlan,
-  readFetchReport,
-  readGitMirrorPlan,
-  writeGitApplyReport,
-  writeGitConfigReport,
-  writeGiteaRepositoryProvisionReport,
-  writeGitFetchReport,
-  writeGitMirrorPlan,
-} from './core/git-plan.js';
+export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export {
   createGitSourcesManifest,
   readGitSourcesManifest,
@@ -50,7 +45,7 @@ export {
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
-export type { ApplyGitMirrorsOptions } from './core/git-apply.js';
+export type { ApplyGitSourcesOptions } from './core/git-apply.js';
 export type { ConfigureGitRewritesOptions } from './core/git-config.js';
 export type {
   GiteaClient,
@@ -58,12 +53,10 @@ export type {
   ProvisionGiteaRepositoriesOptions,
 } from './core/gitea.js';
 export type {
-  FetchGitMirrorsOptions,
   FetchGitSourcesOptions,
   GitCommandInvocation,
   GitCommandRunner,
 } from './core/git-fetch.js';
-export type { GitMirrorPlanOptions } from './core/git-plan.js';
 export type { GitSourcesOptions } from './core/git-sources.js';
 export type {
   BundleInfo,
@@ -93,7 +86,6 @@ export type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
-  GiteaOwnerType,
   GiteaRepositoryActionResult,
   GiteaRepositoryActionStatus,
   GiteaRepositoryProvisionReport,
@@ -107,8 +99,6 @@ export type {
   GitFetchActionResult,
   GitFetchActionStatus,
   GitFetchReport,
-  GitMirrorPlan,
-  GitMirrorRepositoryPlan,
   GitRequirement,
   GitSource,
   GitSourcesManifest,

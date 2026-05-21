@@ -39,27 +39,9 @@ export interface GitRequirement {
   requiredBy: string;
 }
 
-export interface GitMirrorRepositoryPlan {
-  id: string;
-  insteadOf: string[];
-  repository: string;
-  requirements: GitRequirement[];
-  sourceUrl: string;
-  targetUrl: string;
-}
-
 export interface SkippedGitRequirement {
   reason: string;
   requirement: GitRequirement;
-}
-
-export interface GitMirrorPlan {
-  schemaVersion: 1;
-  createdAt: string;
-  giteaBaseUrl: string;
-  owner: string;
-  repositories: GitMirrorRepositoryPlan[];
-  skipped: SkippedGitRequirement[];
 }
 
 export interface GitSource {
@@ -151,11 +133,11 @@ export interface GitConfigReport {
   totalRules: number;
 }
 
-export type GiteaOwnerType = 'user' | 'org';
 export type GiteaRepositoryActionStatus = 'planned' | 'exists' | 'created' | 'error';
 
 export interface GiteaRepositoryActionResult {
   error?: string;
+  owner: string;
   private: boolean;
   repository: string;
   status: GiteaRepositoryActionStatus;
@@ -169,8 +151,6 @@ export interface GiteaRepositoryProvisionReport {
   exists: number;
   generatedAt: string;
   giteaBaseUrl: string;
-  owner: string;
-  ownerType: GiteaOwnerType;
   planned: number;
   private: boolean;
   totalRepositories: number;

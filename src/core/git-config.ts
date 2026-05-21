@@ -2,15 +2,16 @@ import type {
   GitConfigActionResult,
   GitConfigReport,
   GitConfigRewriteRule,
-  GitMirrorPlan,
+  GitSourcesManifest,
 } from '../types.js';
 import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
 import { createGitConfigRewriteRules } from './git-apply.js';
 
 export interface ConfigureGitRewritesOptions {
   dryRun?: boolean;
+  giteaBaseUrl: string;
   generatedAt?: string;
-  plan: GitMirrorPlan;
+  manifest: GitSourcesManifest;
   runner?: GitCommandRunner;
 }
 
@@ -44,7 +45,7 @@ async function configureRule(
 export async function configureGitRewrites(
   options: ConfigureGitRewritesOptions
 ): Promise<GitConfigReport> {
-  const rules = createGitConfigRewriteRules(options.plan);
+  const rules = createGitConfigRewriteRules(options.manifest, options.giteaBaseUrl);
   const actions: GitConfigActionResult[] = [];
 
   if (options.dryRun === true) {

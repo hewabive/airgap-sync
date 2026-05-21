@@ -3,52 +3,44 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  applyGitMirrors,
+  applyGitSources,
   createGitConfigRewriteRules,
   type GitCommandInvocation,
 } from '../src/index.js';
-import type { GitMirrorPlan } from '../src/types.js';
+import type { GitSourcesManifest } from '../src/types.js';
 
 let bundleDir: string;
 
-const plan: GitMirrorPlan = {
+const manifest: GitSourcesManifest = {
   schemaVersion: 1,
-  createdAt: '2026-05-20T00:00:00.000Z',
-  giteaBaseUrl: 'http://gitea.local',
-  owner: 'npm-mirrors',
-  repositories: [
+  createdAt: '2026-05-21T00:00:00.000Z',
+  sources: [
     {
+      host: 'github.com',
       id: 'github.com/owner/repo',
-      insteadOf: ['https://github.com/owner/repo', 'https://github.com/owner/repo.git'],
-      repository: 'github.com-owner-repo',
+      localMirrorPath: 'git-mirrors/github.com/owner/repo.git',
+      owner: 'owner',
+      repo: 'repo',
       requirements: [],
       sourceUrl: 'https://github.com/owner/repo.git',
-      targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
     },
   ],
   skipped: [],
 };
 
 describe('createGitConfigRewriteRules', () => {
-  it('creates deterministic git config commands', () => {
-    expect(createGitConfigRewriteRules(plan)).toEqual([
+  it('creates deterministic host-wide git config commands', () => {
+    expect(createGitConfigRewriteRules(manifest, 'http://gitea.local/')).toEqual([
       {
-        command:
-          'git config --global url."http://gitea.local/npm-mirrors/github.com-owner-repo.git".insteadOf "https://github.com/owner/repo"',
-        insteadOf: 'https://github.com/owner/repo',
-        targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
-      },
-      {
-        command:
-          'git config --global url."http://gitea.local/npm-mirrors/github.com-owner-repo.git".insteadOf "https://github.com/owner/repo.git"',
-        insteadOf: 'https://github.com/owner/repo.git',
-        targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
+        command: 'git config --global url."http://gitea.local/".insteadOf "https://github.com/"',
+        insteadOf: 'https://github.com/',
+        targetUrl: 'http://gitea.local/',
       },
     ]);
   });
 });
 
-describe('applyGitMirrors', () => {
+describe('applyGitSources', () => {
   beforeEach(async () => {
     bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-git-apply-'));
   });
@@ -59,11 +51,12 @@ describe('applyGitMirrors', () => {
 
   it('plans pushes without running git in dry-run mode', async () => {
     const calls: GitCommandInvocation[] = [];
-    const report = await applyGitMirrors({
+    const report = await applyGitSources({
       bundleDir,
       dryRun: true,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
       runner: (invocation) => {
         calls.push(invocation);
         return Promise.resolve();
@@ -82,20 +75,21 @@ describe('applyGitMirrors', () => {
   });
 
   it('reports missing local mirrors', async () => {
-    const report = await applyGitMirrors({
+    const report = await applyGitSources({
       bundleDir,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
     });
 
     expect(report).toMatchObject({
       dryRun: false,
       errors: [
         {
-          repository: 'github.com-owner-repo',
-          sourcePath: path.join(bundleDir, 'git-mirrors/github.com-owner-repo.git'),
+          repository: 'github.com/owner/repo',
+          sourcePath: path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
           status: 'missing-mirror',
-          targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
+          targetUrl: 'http://gitea.local/owner/repo.git',
         },
       ],
       missingMirrors: 1,
@@ -104,14 +98,15 @@ describe('applyGitMirrors', () => {
   });
 
   it('pushes existing local mirrors to the target URL', async () => {
-    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com-owner-repo.git');
+    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
     await fs.ensureDir(sourcePath);
     const calls: GitCommandInvocation[] = [];
 
-    const report = await applyGitMirrors({
+    const report = await applyGitSources({
       bundleDir,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
       runner: (invocation) => {
         calls.push(invocation);
         return Promise.resolve();
@@ -120,13 +115,7 @@ describe('applyGitMirrors', () => {
 
     expect(calls).toEqual([
       {
-        args: [
-          '-C',
-          sourcePath,
-          'push',
-          '--mirror',
-          'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
-        ],
+        args: ['-C', sourcePath, 'push', '--mirror', 'http://gitea.local/owner/repo.git'],
       },
     ]);
     expect(report).toMatchObject({
@@ -139,13 +128,14 @@ describe('applyGitMirrors', () => {
   });
 
   it('records push failures', async () => {
-    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com-owner-repo.git');
+    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
     await fs.ensureDir(sourcePath);
 
-    const report = await applyGitMirrors({
+    const report = await applyGitSources({
       bundleDir,
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
       runner: () => Promise.reject(new Error('push rejected')),
     });
 
@@ -153,10 +143,10 @@ describe('applyGitMirrors', () => {
       errors: [
         {
           error: 'push rejected',
-          repository: 'github.com-owner-repo',
+          repository: 'github.com/owner/repo',
           sourcePath,
           status: 'error',
-          targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
+          targetUrl: 'http://gitea.local/owner/repo.git',
         },
       ],
       pushed: 0,

@@ -1,13 +1,8 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'fs-extra';
-import type {
-  GitFetchActionResult,
-  GitFetchReport,
-  GitMirrorPlan,
-  GitMirrorRepositoryPlan,
-  GitSourcesManifest,
-} from '../types.js';
+import type { GitFetchActionResult, GitFetchReport, GitSourcesManifest } from '../types.js';
+import { gitSourceMirrorPath } from './git-targets.js';
 
 export interface GitCommandInvocation {
   args: string[];
@@ -15,15 +10,6 @@ export interface GitCommandInvocation {
 }
 
 export type GitCommandRunner = (invocation: GitCommandInvocation) => Promise<void>;
-
-export interface FetchGitMirrorsOptions {
-  bundleDir: string;
-  dryRun?: boolean;
-  generatedAt?: string;
-  mirrorsDir?: string;
-  plan: GitMirrorPlan;
-  runner?: GitCommandRunner;
-}
 
 export interface FetchGitSourcesOptions {
   bundleDir: string;
@@ -64,10 +50,6 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<v
       );
     });
   });
-}
-
-function mirrorPath(mirrorsDir: string, repository: GitMirrorRepositoryPlan): string {
-  return path.join(mirrorsDir, `${repository.repository}.git`);
 }
 
 async function fetchEntry(
@@ -150,25 +132,6 @@ async function fetchEntries(options: {
   };
 }
 
-export async function fetchGitMirrors(options: FetchGitMirrorsOptions): Promise<GitFetchReport> {
-  const mirrorsDir = path.resolve(
-    options.mirrorsDir ?? path.join(options.bundleDir, 'git-mirrors')
-  );
-  const entries = options.plan.repositories.map((repository) => ({
-    id: repository.repository,
-    sourceUrl: repository.sourceUrl,
-    targetPath: mirrorPath(mirrorsDir, repository),
-  }));
-
-  return await fetchEntries({
-    dryRun: options.dryRun === true,
-    entries,
-    mirrorsDir,
-    ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
-    ...(options.runner ? { runner: options.runner } : {}),
-  });
-}
-
 export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<GitFetchReport> {
   const bundleDir = path.resolve(options.bundleDir);
   const defaultMirrorRoot = path.join(bundleDir, 'git-mirrors');
@@ -176,9 +139,11 @@ export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<
   const entries = options.manifest.sources.map((source) => ({
     id: source.id,
     sourceUrl: source.sourceUrl,
-    targetPath: options.mirrorsDir
-      ? path.join(mirrorsDir, path.relative('git-mirrors', source.localMirrorPath))
-      : path.join(bundleDir, source.localMirrorPath),
+    targetPath: gitSourceMirrorPath({
+      bundleDir,
+      ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+      source,
+    }),
   }));
 
   return await fetchEntries({

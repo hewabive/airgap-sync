@@ -2,14 +2,12 @@
 
 import { Command } from 'commander';
 import {
-  applyGitMirrors,
+  applyGitSources,
   CachedRegistryClient,
   configureGitRewrites,
-  createGitMirrorPlan,
   createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
-  fetchGitMirrors,
   fetchGitSources,
   fetchSeedBundle,
   HttpGiteaClient,
@@ -19,7 +17,6 @@ import {
   publishBundle,
   readBundleInfo,
   readFetchReport,
-  readGitMirrorPlan,
   readGitSourcesManifest,
   readManifestRequirements,
   readBundleManifest,
@@ -31,7 +28,6 @@ import {
   writeGitApplyReport,
   writeGitConfigReport,
   writeGitFetchReport,
-  writeGitMirrorPlan,
   writeGitSourcesManifest,
   writePublishReport,
   provisionGiteaRepositories,
@@ -54,12 +50,6 @@ interface PublishOptions {
   skipExisting?: boolean;
 }
 
-interface GitPlanOptions {
-  gitea: string;
-  owner: string;
-  write?: boolean;
-}
-
 interface GitSourcesOptions {
   write?: boolean;
 }
@@ -71,17 +61,19 @@ interface GitFetchOptions {
 
 interface GitApplyOptions {
   dryRun?: boolean;
+  gitea: string;
   mirrorsDir?: string;
 }
 
 interface GitConfigOptions {
   dryRun?: boolean;
+  gitea: string;
   global?: boolean;
 }
 
 interface GitCreateReposOptions {
   dryRun?: boolean;
-  ownerType: string;
+  gitea: string;
   public?: boolean;
   token?: string;
 }
@@ -336,39 +328,6 @@ gitCommand
   });
 
 gitCommand
-  .command('plan')
-  .description('Create a Gitea mirror plan from bundle Git requirements')
-  .argument('<bundle>', 'Path to airgap bundle directory')
-  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
-  .requiredOption('--owner <owner>', 'Gitea user or organization that will own mirror repositories')
-  .option('--write', 'Write git-plan.json into the bundle')
-  .action(async (bundle: string, options: GitPlanOptions) => {
-    try {
-      const fetchReport = await readFetchReport(bundle);
-      const gitRequirements = Array.isArray(fetchReport.gitRequirements)
-        ? fetchReport.gitRequirements
-        : [];
-      const plan = createGitMirrorPlan(gitRequirements, {
-        giteaBaseUrl: options.gitea,
-        owner: options.owner,
-      });
-
-      if (options.write === true) {
-        await writeGitMirrorPlan(bundle, plan);
-      }
-
-      console.log(JSON.stringify(plan, null, 2));
-
-      if (plan.skipped.length > 0) {
-        process.exitCode = 1;
-      }
-    } catch (error) {
-      console.error(`Error: ${(error as Error).message}`);
-      process.exitCode = 1;
-    }
-  });
-
-gitCommand
   .command('fetch')
   .description('Clone or update local bare mirrors from Git source metadata')
   .argument('<bundle>', 'Path to airgap bundle directory')
@@ -376,28 +335,13 @@ gitCommand
   .option('--dry-run', 'Print planned mirror fetch operations without running Git')
   .action(async (bundle: string, options: GitFetchOptions) => {
     try {
-      let report;
-      try {
-        const manifest = await readGitSourcesManifest(bundle);
-        report = await fetchGitSources({
-          bundleDir: bundle,
-          dryRun: options.dryRun === true,
-          manifest,
-          ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
-        });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-
-        const plan = await readGitMirrorPlan(bundle);
-        report = await fetchGitMirrors({
-          bundleDir: bundle,
-          dryRun: options.dryRun === true,
-          plan,
-          ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
-        });
-      }
+      const manifest = await readGitSourcesManifest(bundle);
+      const report = await fetchGitSources({
+        bundleDir: bundle,
+        dryRun: options.dryRun === true,
+        manifest,
+        ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+      });
 
       await writeGitFetchReport(bundle, report);
       console.log(JSON.stringify(report, null, 2));
@@ -415,15 +359,17 @@ gitCommand
   .command('apply')
   .description('Push local bare mirrors into Gitea and report Git rewrite rules')
   .argument('<bundle>', 'Path to airgap bundle directory')
+  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
     try {
-      const plan = await readGitMirrorPlan(bundle);
-      const report = await applyGitMirrors({
+      const manifest = await readGitSourcesManifest(bundle);
+      const report = await applyGitSources({
         bundleDir: bundle,
         dryRun: options.dryRun === true,
-        plan,
+        giteaBaseUrl: options.gitea,
+        manifest,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
       });
 
@@ -441,16 +387,18 @@ gitCommand
 
 gitCommand
   .command('config')
-  .description('Configure Git URL rewrites from git-plan.json')
+  .description('Configure Git URL rewrites from git-sources.json')
   .argument('<bundle>', 'Path to airgap bundle directory')
+  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
   .requiredOption('--global', 'Write rewrite rules into the global Git config')
   .option('--dry-run', 'Print planned Git config operations without writing config')
   .action(async (bundle: string, options: GitConfigOptions) => {
     try {
-      const plan = await readGitMirrorPlan(bundle);
+      const manifest = await readGitSourcesManifest(bundle);
       const report = await configureGitRewrites({
         dryRun: options.dryRun === true,
-        plan,
+        giteaBaseUrl: options.gitea,
+        manifest,
       });
 
       await writeGitConfigReport(bundle, report);
@@ -467,21 +415,15 @@ gitCommand
 
 gitCommand
   .command('create-repos')
-  .description('Create missing Gitea repositories from git-plan.json')
+  .description('Create missing Gitea repositories from git-sources.json')
   .argument('<bundle>', 'Path to airgap bundle directory')
+  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
   .option('--token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
-  .option('--owner-type <type>', 'Gitea owner type: user or org', 'user')
   .option('--public', 'Create public repositories instead of private repositories')
   .option('--dry-run', 'Print planned repository creation without calling Gitea')
   .action(async (bundle: string, options: GitCreateReposOptions) => {
     try {
-      if (options.ownerType !== 'user' && options.ownerType !== 'org') {
-        console.error('Error: --owner-type must be user or org');
-        process.exitCode = 1;
-        return;
-      }
-
-      const plan = await readGitMirrorPlan(bundle);
+      const manifest = await readGitSourcesManifest(bundle);
       const token = options.token ?? process.env.GITEA_TOKEN;
       if (!token && options.dryRun !== true) {
         console.error('Error: provide --token <token> or set GITEA_TOKEN');
@@ -492,12 +434,12 @@ gitCommand
       const client =
         options.dryRun === true
           ? noopGiteaClient
-          : new HttpGiteaClient(plan.giteaBaseUrl, { authToken: token ?? '' });
+          : new HttpGiteaClient(options.gitea, { authToken: token ?? '' });
       const report = await provisionGiteaRepositories({
         client,
         dryRun: options.dryRun === true,
-        ownerType: options.ownerType,
-        plan,
+        giteaBaseUrl: options.gitea,
+        manifest,
         private: options.public !== true,
       });
 

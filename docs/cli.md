@@ -117,27 +117,6 @@ the bundle to a Gitea instance. Source records preserve upstream host and
 owner/repository paths, for example `github.com/antvis/G2`, and point at local mirror
 paths such as `git-mirrors/github.com/antvis/G2.git`.
 
-## git plan
-
-```bash
-airgap-sync git plan ./airgap-bundle \
-  --gitea http://gitea.local \
-  --owner npm-mirrors \
-  --write
-```
-
-Reads `fetch-report.json`, groups discovered Git dependency specs by source
-repository, and creates a deterministic mirror plan for Gitea. `--write` stores the
-plan as `git-plan.json` inside the bundle; without it, the command only prints JSON.
-
-This is a current lower-level command. The target workflow moves Gitea mapping to the
-offline apply phase and preserves upstream owner/repository paths where possible.
-
-The plan is intentionally non-mutating: it does not clone repositories, create Gitea
-projects, or patch package manifests. It records source clone URLs, target Gitea URLs,
-the npm packages that required each Git dependency, and candidate `insteadOf` prefixes
-for a later apply/verify phase.
-
 ## git fetch
 
 ```bash
@@ -146,13 +125,10 @@ airgap-sync git fetch ./airgap-bundle --dry-run
 airgap-sync git fetch ./airgap-bundle --mirrors-dir ./git-mirrors
 ```
 
-Reads `git-plan.json` and stores local bare mirror repositories. Missing mirrors are
+Reads `git-sources.json` and stores local bare mirror repositories using preserved
+source paths such as `git-mirrors/github.com/antvis/G2.git`. Missing mirrors are
 created with `git clone --mirror`; existing mirrors run `git remote set-url origin` and
 `git remote update --prune`. The command writes `git-fetch-report.json`.
-
-When `git-sources.json` exists, it is preferred and mirrors are stored using preserved
-source paths such as `git-mirrors/github.com/antvis/G2.git`. If `git-sources.json` is
-absent, the command falls back to legacy `git-plan.json`.
 
 This is the online-side collection step only. It does not push to Gitea; that belongs
 to a later offline apply command.
@@ -160,14 +136,16 @@ to a later offline apply command.
 ## git apply
 
 ```bash
-airgap-sync git apply ./airgap-bundle
-airgap-sync git apply ./airgap-bundle --dry-run
-airgap-sync git apply ./airgap-bundle --mirrors-dir ./git-mirrors
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --dry-run
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --mirrors-dir ./git-mirrors
 ```
 
-Reads `git-plan.json` and pushes local bare mirrors to the planned Gitea target URLs
-with `git push --mirror`. The target repositories must already exist unless the Gitea
-instance is configured to create repositories on push.
+Reads `git-sources.json` and pushes local bare mirrors to Gitea with
+`git push --mirror`. Target URLs preserve upstream owner/repository paths: for example
+`https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`.
+The target repositories must already exist unless the Gitea instance is configured to
+create repositories on push.
 
 The command writes `git-apply-report.json`, including generated `git config --global
 url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
@@ -175,29 +153,30 @@ url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea
 ## git create-repos
 
 ```bash
-airgap-sync git create-repos ./airgap-bundle --token "$GITEA_TOKEN"
-airgap-sync git create-repos ./airgap-bundle --owner-type org --dry-run
-airgap-sync git create-repos ./airgap-bundle --public
+airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
+airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --dry-run
+airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --public
 ```
 
-Reads `git-plan.json` and creates missing repositories in Gitea before `git apply`.
-The Gitea base URL and owner are taken from the plan. Tokens can be passed through
-`--token` or `GITEA_TOKEN`; no token is required for `--dry-run`.
+Reads `git-sources.json` and creates missing repositories in Gitea before
+`git apply`. Tokens can be passed through `--token` or `GITEA_TOKEN`; no token is
+required for `--dry-run`.
 
-By default repositories are created as private user repositories. Use `--owner-type org`
-when the plan owner is a Gitea organization, and `--public` when mirrors should not be
-private.
+By default repositories are created as private organization repositories, preserving
+the original owner name as the Gitea organization. Those organizations must already
+exist in Gitea. Use `--public` when mirrors should not be private.
 
 ## git config
 
 ```bash
-airgap-sync git config ./airgap-bundle --global
-airgap-sync git config ./airgap-bundle --global --dry-run
+airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global
+airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global --dry-run
 ```
 
-Reads `git-plan.json` and writes the generated URL rewrite rules into the global Git
-configuration with `git config --global url.<gitea-url>.insteadOf <public-url>`. The
-command writes `git-config-report.json`.
+Reads `git-sources.json` and writes host-wide rewrite rules into the global Git
+configuration, for example
+`git config --global url.http://gitea.local/.insteadOf https://github.com/`. The command
+writes `git-config-report.json`.
 
 ## apply
 

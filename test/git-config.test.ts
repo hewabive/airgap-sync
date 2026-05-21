@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { configureGitRewrites, type GitCommandInvocation } from '../src/index.js';
-import type { GitMirrorPlan } from '../src/types.js';
+import type { GitSourcesManifest } from '../src/types.js';
 
-const plan: GitMirrorPlan = {
+const manifest: GitSourcesManifest = {
   schemaVersion: 1,
-  createdAt: '2026-05-20T00:00:00.000Z',
-  giteaBaseUrl: 'http://gitea.local',
-  owner: 'npm-mirrors',
-  repositories: [
+  createdAt: '2026-05-21T00:00:00.000Z',
+  sources: [
     {
+      host: 'github.com',
       id: 'github.com/owner/repo',
-      insteadOf: ['https://github.com/owner/repo.git'],
-      repository: 'github.com-owner-repo',
+      localMirrorPath: 'git-mirrors/github.com/owner/repo.git',
+      owner: 'owner',
+      repo: 'repo',
       requirements: [],
       sourceUrl: 'https://github.com/owner/repo.git',
-      targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
     },
   ],
   skipped: [],
@@ -27,8 +26,9 @@ describe('configureGitRewrites', () => {
     await expect(
       configureGitRewrites({
         dryRun: true,
-        generatedAt: '2026-05-20T00:00:00.000Z',
-        plan,
+        generatedAt: '2026-05-21T00:00:00.000Z',
+        giteaBaseUrl: 'http://gitea.local',
+        manifest,
         runner: (invocation) => {
           calls.push(invocation);
           return Promise.resolve();
@@ -38,7 +38,7 @@ describe('configureGitRewrites', () => {
       configured: 0,
       dryRun: true,
       errors: [],
-      generatedAt: '2026-05-20T00:00:00.000Z',
+      generatedAt: '2026-05-21T00:00:00.000Z',
       planned: 1,
       scope: 'global',
       totalRules: 1,
@@ -50,8 +50,9 @@ describe('configureGitRewrites', () => {
     const calls: GitCommandInvocation[] = [];
 
     const report = await configureGitRewrites({
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local/',
+      manifest,
       runner: (invocation) => {
         calls.push(invocation);
         return Promise.resolve();
@@ -60,12 +61,7 @@ describe('configureGitRewrites', () => {
 
     expect(calls).toEqual([
       {
-        args: [
-          'config',
-          '--global',
-          'url.http://gitea.local/npm-mirrors/github.com-owner-repo.git.insteadOf',
-          'https://github.com/owner/repo.git',
-        ],
+        args: ['config', '--global', 'url.http://gitea.local/.insteadOf', 'https://github.com/'],
       },
     ]);
     expect(report).toMatchObject({
@@ -79,8 +75,9 @@ describe('configureGitRewrites', () => {
 
   it('records git config failures', async () => {
     const report = await configureGitRewrites({
-      generatedAt: '2026-05-20T00:00:00.000Z',
-      plan,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
       runner: () => Promise.reject(new Error('permission denied')),
     });
 
@@ -89,9 +86,9 @@ describe('configureGitRewrites', () => {
       errors: [
         {
           error: 'permission denied',
-          insteadOf: 'https://github.com/owner/repo.git',
+          insteadOf: 'https://github.com/',
           status: 'error',
-          targetUrl: 'http://gitea.local/npm-mirrors/github.com-owner-repo.git',
+          targetUrl: 'http://gitea.local/',
         },
       ],
     });

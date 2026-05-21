@@ -4,6 +4,10 @@ import type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
+  GiteaRepositoryProvisionReport,
+  GitApplyReport,
+  GitConfigReport,
+  GitFetchReport,
   GitRequirement,
   PublishReport,
   ResolvedPackage,
@@ -103,6 +107,42 @@ export async function writeBundleDocuments(
 export async function writeFetchReport(outputDir: string, report: FetchReport): Promise<void> {
   await fs.ensureDir(outputDir);
   await fs.writeJson(path.join(outputDir, 'fetch-report.json'), report, { spaces: 2 });
+}
+
+export async function readFetchReport(bundleDir: string): Promise<FetchReport> {
+  return (await fs.readJson(path.join(bundleDir, 'fetch-report.json'))) as FetchReport;
+}
+
+export async function writeGitFetchReport(
+  bundleDir: string,
+  report: GitFetchReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'git-fetch-report.json'), report, { spaces: 2 });
+}
+
+export async function writeGitApplyReport(
+  bundleDir: string,
+  report: GitApplyReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'git-apply-report.json'), report, { spaces: 2 });
+}
+
+export async function writeGitConfigReport(
+  bundleDir: string,
+  report: GitConfigReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'git-config-report.json'), report, { spaces: 2 });
+}
+
+export async function writeGiteaRepositoryProvisionReport(
+  bundleDir: string,
+  report: GiteaRepositoryProvisionReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'gitea-repos-report.json'), report, { spaces: 2 });
 }
 
 export async function readBundleManifest(bundleDir: string): Promise<BundleManifest> {
