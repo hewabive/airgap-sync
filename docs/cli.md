@@ -126,20 +126,18 @@ airgap-sync publish ./airgap-bundle \
   --registry http://192.168.0.10:4873
 ```
 
-Planned options:
+Supported options:
 
 ```text
 -r, --registry <url>      Target registry URL
---concurrency <number>    Concurrent publish operations
+--publish-concurrency <n> Concurrent npm publish operations, default 4
 --no-skip-existing        Attempt to publish versions that already exist
 --dry-run                 Print planned operations without publishing
---debug                   Verbose diagnostics
 ```
 
-Current MVP behavior publishes tarballs sequentially with a temporary tag, then restores
-the required tags from `dist-tags.json`. Before running npm publish commands, it
-validates that bundle manifests are internally consistent and every referenced tarball
-exists.
+Current behavior publishes tarballs with a temporary tag, then restores the required
+tags from `dist-tags.json`. Before running npm publish commands, it validates that
+bundle manifests are internally consistent and every referenced tarball exists.
 
 ## info
 
@@ -279,6 +277,7 @@ Supported options:
 --mirrors-dir <dir>       Directory containing bare Git mirrors
 --public                  Create public Gitea repositories instead of private repositories
 --no-skip-existing        Attempt to publish npm versions that already exist
+--publish-concurrency <n> Concurrent npm publish operations, default 4
 --configure-git-global    Write Git URL rewrite rules into global Git config
 --dry-run                 Print planned apply operations without publishing or pushing
 ```

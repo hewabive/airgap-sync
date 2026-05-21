@@ -22,6 +22,7 @@ export interface PublishBundleOptions {
   bundleDir: string;
   dryRun?: boolean;
   onProgress?: (event: PublishProgressEvent) => void;
+  publishConcurrency?: number;
   registryUrl: string;
   skipExisting?: boolean;
 }
@@ -64,6 +65,15 @@ interface NpmViewPackageSnapshot {
   versions?: unknown;
 }
 
+type ManifestPackage = BundleManifest['packages'][number];
+
+interface PublishPackageResult {
+  error?: string;
+  package: string;
+  packageName: string;
+  status: 'published' | 'skipped' | 'error';
+}
+
 const emptyPackageSnapshot = (): PackageRegistrySnapshot => ({
   distTags: {},
   versions: new Set(),
@@ -85,8 +95,30 @@ function elapsedMs(start: number): number {
   return Math.round(performance.now() - start);
 }
 
+function normalizeConcurrency(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.floor(value));
+}
+
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
+}
+
+function groupPackagesByName(packages: ManifestPackage[]): ManifestPackage[][] {
+  const groups = new Map<string, ManifestPackage[]>();
+  for (const pkg of packages) {
+    const group = groups.get(pkg.name);
+    if (group) {
+      group.push(pkg);
+    } else {
+      groups.set(pkg.name, [pkg]);
+    }
+  }
+
+  return [...groups.values()];
 }
 
 function isAlreadyExistsError(error: unknown): boolean {
@@ -453,6 +485,7 @@ export async function publishBundle(
   timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
 
   const publishStart = performance.now();
+  const publishConcurrency = normalizeConcurrency(options.publishConcurrency, 4);
   let publishProgress = 0;
   options.onProgress?.({
     current: publishProgress,
@@ -460,59 +493,99 @@ export async function publishBundle(
     status: 'start',
     total: manifest.packages.length,
   });
-  for (const pkg of manifest.packages) {
+
+  async function publishPackage(pkg: ManifestPackage): Promise<PublishPackageResult> {
+    const id = packageId(pkg);
+
     if (existingVersionsByPackage.get(pkg.name)?.has(pkg.version)) {
-      skipped++;
       publishProgress++;
       options.onProgress?.({
         current: publishProgress,
-        package: packageId(pkg),
+        package: id,
         phase: 'publish',
         status: 'skipped',
         total: manifest.packages.length,
       });
-      continue;
+      return {
+        package: id,
+        packageName: pkg.name,
+        status: 'skipped',
+      };
     }
 
     try {
       await npmPublish(path.join(options.bundleDir, pkg.file), options.registryUrl);
-      published++;
-      publishedPackageNames.add(pkg.name);
       publishProgress++;
       options.onProgress?.({
         current: publishProgress,
-        package: packageId(pkg),
+        package: id,
         phase: 'publish',
         status: 'published',
         total: manifest.packages.length,
       });
+      return {
+        package: id,
+        packageName: pkg.name,
+        status: 'published',
+      };
     } catch (error) {
       if (options.skipExisting !== false && isAlreadyExistsError(error)) {
-        skipped++;
         publishProgress++;
         options.onProgress?.({
           current: publishProgress,
-          package: packageId(pkg),
+          package: id,
           phase: 'publish',
           status: 'skipped',
           total: manifest.packages.length,
         });
-        continue;
+        return {
+          package: id,
+          packageName: pkg.name,
+          status: 'skipped',
+        };
       }
 
       publishProgress++;
       options.onProgress?.({
         current: publishProgress,
-        package: packageId(pkg),
+        package: id,
         phase: 'publish',
         status: 'error',
         total: manifest.packages.length,
       });
+      return {
+        error: errorSummary(error),
+        package: id,
+        packageName: pkg.name,
+        status: 'error',
+      };
+    }
+  }
+
+  const publishResultGroups = await mapWithConcurrency(
+    groupPackagesByName(manifest.packages),
+    publishConcurrency,
+    async (group) => {
+      const results: PublishPackageResult[] = [];
+      for (const pkg of group) {
+        results.push(await publishPackage(pkg));
+      }
+      return results;
+    }
+  );
+  const publishResults = publishResultGroups.flat();
+  for (const result of publishResults) {
+    if (result.status === 'published') {
+      published++;
+      publishedPackageNames.add(result.packageName);
+    } else if (result.status === 'skipped') {
+      skipped++;
+    } else {
       errors.push({
         action: 'publish',
-        package: packageId(pkg),
+        package: result.package,
         status: 'error',
-        error: errorSummary(error),
+        error: result.error ?? 'Unknown error',
       });
     }
   }

@@ -67,6 +67,7 @@ interface FetchOptions {
 
 interface PublishOptions {
   dryRun?: boolean;
+  publishConcurrency: number;
   registry: string;
   skipExisting?: boolean;
 }
@@ -77,6 +78,7 @@ interface ApplyOptions {
   gitea: string;
   giteaToken?: string;
   mirrorsDir?: string;
+  publishConcurrency: number;
   public?: boolean;
   registry: string;
   skipExisting?: boolean;
@@ -686,6 +688,12 @@ program
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('-r, --registry <url>', 'Target registry URL')
   .option('--no-skip-existing', 'Attempt to publish versions that already exist')
+  .option(
+    '--publish-concurrency <count>',
+    'Concurrent npm publish operations',
+    parsePositiveInteger,
+    4
+  )
   .option('--dry-run', 'Print planned operations without publishing')
   .action(async (bundle: string, options: PublishOptions) => {
     try {
@@ -695,6 +703,7 @@ program
         bundleDir: bundle,
         dryRun: options.dryRun === true,
         onProgress: createPublishProgressLogger(),
+        publishConcurrency: options.publishConcurrency,
         registryUrl: options.registry,
         skipExisting: options.skipExisting !== false,
       });
@@ -970,6 +979,12 @@ program
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--public', 'Create public Gitea repositories instead of private repositories')
   .option('--no-skip-existing', 'Attempt to publish npm versions that already exist')
+  .option(
+    '--publish-concurrency <count>',
+    'Concurrent npm publish operations',
+    parsePositiveInteger,
+    4
+  )
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
   .option('--dry-run', 'Print planned apply operations without publishing or pushing')
   .action(async (bundle: string, options: ApplyOptions) => {
@@ -994,6 +1009,7 @@ program
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
         onPublishProgress: createPublishProgressLogger(),
         private: options.public !== true,
+        publishConcurrency: options.publishConcurrency,
         registryUrl: options.registry,
         skipExisting: options.skipExisting !== false,
       });

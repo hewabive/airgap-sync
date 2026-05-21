@@ -33,6 +33,7 @@ export interface ApplyBundleOptions {
   mirrorsDir?: string;
   onPublishProgress?: PublishBundleOptions['onProgress'];
   private?: boolean;
+  publishConcurrency?: number;
   registryUrl: string;
   runGitCommand?: GitCommandRunner;
   skipExisting?: boolean;
@@ -85,6 +86,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const publish = await publishBundle(manifest, distTags, {
     bundleDir,
     dryRun,
+    ...(options.publishConcurrency === undefined
+      ? {}
+      : { publishConcurrency: options.publishConcurrency }),
     registryUrl: options.registryUrl,
     ...(options.onPublishProgress ? { onProgress: options.onPublishProgress } : {}),
     ...(options.skipExisting === undefined ? {} : { skipExisting: options.skipExisting }),
