@@ -13,6 +13,7 @@ import { throwIfInvalidBundle, validateBundle } from './validation.js';
 
 const execFileAsync = promisify(execFile);
 const tempPublishTag = 'airgap-sync-temp';
+const registryLookupConcurrency = 8;
 
 export interface PublishBundleOptions {
   bundleDir: string;
@@ -37,6 +38,20 @@ function isAlreadyExistsError(error: unknown): boolean {
 function errorSummary(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split('\n')[0] ?? 'Unknown error';
+}
+
+export function packageNamesMissingLatestTags(
+  manifest: BundleManifest,
+  distTags: DistTagsManifest
+): string[] {
+  const packageNames = new Set(manifest.packages.map((pkg) => pkg.name));
+  const namesWithLatest = new Set(
+    distTags.requirements
+      .filter((requirement) => requirement.tag === 'latest')
+      .map((requirement) => requirement.name)
+  );
+
+  return [...packageNames].filter((name) => !namesWithLatest.has(name));
 }
 
 async function npmPublish(tarballPath: string, registryUrl: string): Promise<void> {
@@ -88,6 +103,113 @@ async function npmDistTagRemove(
   });
 }
 
+function parseNpmJsonList(stdout: string): string[] {
+  if (!stdout.trim()) {
+    return [];
+  }
+
+  const parsed = JSON.parse(stdout) as string | string[];
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function parseNpmJsonObject(stdout: string): Record<string, string> {
+  if (!stdout.trim()) {
+    return {};
+  }
+
+  const parsed = JSON.parse(stdout) as Record<string, string>;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      const item = items[currentIndex];
+      if (item === undefined) {
+        continue;
+      }
+
+      results[currentIndex] = await mapper(item);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => worker())
+  );
+  return results;
+}
+
+async function npmPackageVersions(packageName: string, registryUrl: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'npm',
+      ['view', packageName, 'versions', '--json', '--registry', registryUrl],
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30_000,
+      }
+    );
+    return parseNpmJsonList(stdout);
+  } catch {
+    return [];
+  }
+}
+
+async function npmPackageDistTags(
+  packageName: string,
+  registryUrl: string
+): Promise<Record<string, string>> {
+  try {
+    const { stdout } = await execFileAsync(
+      'npm',
+      ['view', packageName, 'dist-tags', '--json', '--registry', registryUrl],
+      {
+        maxBuffer: 1024 * 1024,
+        timeout: 30_000,
+      }
+    );
+    return parseNpmJsonObject(stdout);
+  } catch {
+    return {};
+  }
+}
+
+async function lookupExistingVersions(
+  manifest: BundleManifest,
+  registryUrl: string
+): Promise<Map<string, Set<string>>> {
+  const packageNames = [...new Set(manifest.packages.map((pkg) => pkg.name))];
+  const entries = await mapWithConcurrency(
+    packageNames,
+    registryLookupConcurrency,
+    async (name) => [name, new Set(await npmPackageVersions(name, registryUrl))] as const
+  );
+
+  return new Map(entries);
+}
+
+async function lookupCurrentDistTags(
+  distTags: DistTagsManifest,
+  registryUrl: string
+): Promise<Map<string, Record<string, string>>> {
+  const packageNames = [...new Set(distTags.requirements.map((requirement) => requirement.name))];
+  const entries = await mapWithConcurrency(
+    packageNames,
+    registryLookupConcurrency,
+    async (name) => [name, await npmPackageDistTags(name, registryUrl)] as const
+  );
+
+  return new Map(entries);
+}
+
 async function npmPackageNameExists(packageName: string, registryUrl: string): Promise<boolean> {
   try {
     await execFileAsync('npm', ['view', packageName, 'version', '--registry', registryUrl], {
@@ -134,14 +256,6 @@ export async function publishBundle(
   let published = 0;
   let skipped = 0;
   let restoredTags = 0;
-  const existingPackageNames = new Set<string>();
-  const desiredTagsByPackage = new Map<string, Set<string>>();
-
-  for (const requirement of distTags.requirements) {
-    const tags = desiredTagsByPackage.get(requirement.name) ?? new Set<string>();
-    tags.add(requirement.tag);
-    desiredTagsByPackage.set(requirement.name, tags);
-  }
 
   if (options.dryRun) {
     const plan = createPublishPlan(manifest, distTags);
@@ -157,38 +271,54 @@ export async function publishBundle(
     };
   }
 
-  for (const pkg of manifest.packages) {
-    if (existingPackageNames.has(pkg.name)) {
+  const existingPackageNames = new Set<string>();
+  const existingVersionsByPackage =
+    options.skipExisting === false
+      ? new Map<string, Set<string>>()
+      : await lookupExistingVersions(manifest, options.registryUrl);
+  const currentDistTags =
+    options.skipExisting === false
+      ? new Map<string, Record<string, string>>()
+      : await lookupCurrentDistTags(distTags, options.registryUrl);
+  const publishedPackageNames = new Set<string>();
+
+  const packageNamesWithoutLatest = packageNamesMissingLatestTags(manifest, distTags);
+  for (const packageName of packageNamesWithoutLatest) {
+    if (existingPackageNames.has(packageName)) {
       continue;
     }
 
-    if (await npmPackageNameExists(pkg.name, options.registryUrl)) {
-      existingPackageNames.add(pkg.name);
+    const existingVersions = existingVersionsByPackage.get(packageName);
+    if (
+      (existingVersions && existingVersions.size > 0) ||
+      (await npmPackageNameExists(packageName, options.registryUrl))
+    ) {
+      existingPackageNames.add(packageName);
     }
   }
 
-  const missingLatest = new Set<string>();
-  for (const pkg of manifest.packages) {
-    const desiredTags = desiredTagsByPackage.get(pkg.name) ?? new Set<string>();
-    if (!existingPackageNames.has(pkg.name) && !desiredTags.has('latest')) {
-      missingLatest.add(pkg.name);
-    }
-  }
+  const missingLatest = packageNamesWithoutLatest.filter((name) => !existingPackageNames.has(name));
 
-  if (missingLatest.size > 0) {
+  if (missingLatest.length > 0) {
     throw new Error(
       [
         'Bundle is missing upstream latest tags for packages that do not exist in the target registry.',
         'Regenerate the bundle with a current airgap-sync fetch command.',
-        `Packages: ${[...missingLatest].join(', ')}`,
+        `Packages: ${missingLatest.join(', ')}`,
       ].join(' ')
     );
   }
 
   for (const pkg of manifest.packages) {
+    if (existingVersionsByPackage.get(pkg.name)?.has(pkg.version)) {
+      skipped++;
+      continue;
+    }
+
     try {
       await npmPublish(path.join(options.bundleDir, pkg.file), options.registryUrl);
       published++;
+      publishedPackageNames.add(pkg.name);
     } catch (error) {
       if (options.skipExisting !== false && isAlreadyExistsError(error)) {
         skipped++;
@@ -206,6 +336,11 @@ export async function publishBundle(
 
   if (errors.length === 0) {
     for (const requirement of distTags.requirements) {
+      if (currentDistTags.get(requirement.name)?.[requirement.tag] === requirement.version) {
+        restoredTags++;
+        continue;
+      }
+
       try {
         await npmDistTagAdd(requirement, options.registryUrl);
         restoredTags++;
@@ -220,9 +355,9 @@ export async function publishBundle(
       }
     }
 
-    for (const pkg of manifest.packages) {
+    for (const packageName of publishedPackageNames) {
       try {
-        await npmDistTagRemove(pkg.name, tempPublishTag, options.registryUrl);
+        await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
       } catch {
         // The temp tag may already be absent if the package existed before this run.
       }

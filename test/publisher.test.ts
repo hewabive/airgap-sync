@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import { describe, expect, it } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
+import { packageNamesMissingLatestTags } from '../src/core/publisher.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
 const manifest: BundleManifest = {
@@ -73,6 +74,33 @@ describe('createPublishPlan', () => {
         tag: 'latest',
       },
     ]);
+  });
+});
+
+describe('packageNamesMissingLatestTags', () => {
+  it('does not require registry existence checks when every package name has latest', () => {
+    expect(packageNamesMissingLatestTags(manifest, distTags)).toEqual([]);
+  });
+
+  it('returns only package names that are missing latest tags', () => {
+    expect(
+      packageNamesMissingLatestTags(
+        {
+          ...manifest,
+          packages: [
+            ...manifest.packages,
+            {
+              name: 'untagged',
+              version: '1.0.0',
+              file: 'packages/untagged-1.0.0.tgz',
+              tarball: 'https://registry.example/untagged/-/untagged-1.0.0.tgz',
+              resolvedFrom: [],
+            },
+          ],
+        },
+        distTags
+      )
+    ).toEqual(['untagged']);
   });
 });
 
