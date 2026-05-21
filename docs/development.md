@@ -41,6 +41,8 @@ pnpm registry:start
 
 This config has no uplinks and no package `proxy` rules. The registry is populated only
 through `npm publish`, which matches the offline target environment.
+`max_body_size` is intentionally high because large native package tarballs can exceed
+Verdaccio's smaller defaults and fail with `E413`.
 
 Before publishing test bundles, create a local user:
 

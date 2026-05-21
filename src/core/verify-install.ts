@@ -182,14 +182,27 @@ function gitConfigContent(
     .join('\n');
 }
 
-function installEnv(options: { gitConfigPath: string; registryUrl: string }): NodeJS.ProcessEnv {
+function installEnv(options: {
+  cacheRoot: string;
+  gitConfigPath: string;
+  registryUrl: string;
+}): NodeJS.ProcessEnv {
+  const npmCache = path.join(options.cacheRoot, 'npm');
+  const pnpmStore = path.join(options.cacheRoot, 'pnpm-store');
+  const yarnCache = path.join(options.cacheRoot, 'yarn');
+
   return {
     ...process.env,
     GIT_CONFIG_GLOBAL: options.gitConfigPath,
+    npm_config_cache: npmCache,
     npm_config_replace_registry_host: 'npmjs',
     npm_config_registry: options.registryUrl,
+    npm_config_store_dir: pnpmStore,
+    NPM_CONFIG_CACHE: npmCache,
     NPM_CONFIG_REPLACE_REGISTRY_HOST: 'npmjs',
     NPM_CONFIG_REGISTRY: options.registryUrl,
+    NPM_CONFIG_STORE_DIR: pnpmStore,
+    YARN_CACHE_FOLDER: yarnCache,
   };
 }
 
@@ -268,6 +281,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
   await fs.writeFile(gitConfigPath, gitConfigContent(gitSources, options.giteaBaseUrl));
 
   const env = installEnv({
+    cacheRoot: path.join(tempRoot, 'cache'),
     gitConfigPath,
     registryUrl: options.registryUrl,
   });

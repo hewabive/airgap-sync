@@ -105,7 +105,10 @@ describe('verifyInstall', () => {
       command: 'npm',
     });
     expect(typeof calls[0]?.env.GIT_CONFIG_GLOBAL).toBe('string');
+    expect(calls[0]?.env.npm_config_cache).toContain('airgap-sync-install-');
     expect(calls[0]?.env.npm_config_registry).toBe('http://verdaccio.local:4873');
+    expect(calls[0]?.env.npm_config_store_dir).toContain('airgap-sync-install-');
+    expect(calls[0]?.env.YARN_CACHE_FOLDER).toContain('airgap-sync-install-');
     expect(calls[0]?.cwd).not.toBe(path.join(workspaceDir, 'repos/github.com/acme/app'));
     expect(report).toMatchObject({
       failed: 0,

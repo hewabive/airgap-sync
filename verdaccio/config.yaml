@@ -1,5 +1,5 @@
 storage: ./storage
-max_body_size: 100mb
+max_body_size: 1000mb
 
 web:
   title: airgap-sync local registry
