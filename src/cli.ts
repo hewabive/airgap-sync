@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import {
   applyGitMirrors,
   CachedRegistryClient,
+  configureGitRewrites,
   createGitMirrorPlan,
   createBundleDocuments,
   createFetchReport,
@@ -22,6 +23,7 @@ import {
   writeBundleDocuments,
   writeFetchReport,
   writeGitApplyReport,
+  writeGitConfigReport,
   writeGitFetchReport,
   writeGitMirrorPlan,
   writePublishReport,
@@ -57,6 +59,11 @@ interface GitFetchOptions {
 interface GitApplyOptions {
   dryRun?: boolean;
   mirrorsDir?: string;
+}
+
+interface GitConfigOptions {
+  dryRun?: boolean;
+  global?: boolean;
 }
 
 const program = new Command();
@@ -324,6 +331,32 @@ gitCommand
       });
 
       await writeGitApplyReport(bundle, report);
+      console.log(JSON.stringify(report, null, 2));
+
+      if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+gitCommand
+  .command('config')
+  .description('Configure Git URL rewrites from git-plan.json')
+  .argument('<bundle>', 'Path to seed bundle directory')
+  .requiredOption('--global', 'Write rewrite rules into the global Git config')
+  .option('--dry-run', 'Print planned Git config operations without writing config')
+  .action(async (bundle: string, options: GitConfigOptions) => {
+    try {
+      const plan = await readGitMirrorPlan(bundle);
+      const report = await configureGitRewrites({
+        dryRun: options.dryRun === true,
+        plan,
+      });
+
+      await writeGitConfigReport(bundle, report);
       console.log(JSON.stringify(report, null, 2));
 
       if (report.errors.length > 0) {

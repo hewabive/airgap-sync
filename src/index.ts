@@ -10,6 +10,7 @@ export {
   writePublishReport,
 } from './core/bundle.js';
 export { applyGitMirrors, createGitConfigRewriteRules } from './core/git-apply.js';
+export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { fetchGitMirrors, runGitCommand } from './core/git-fetch.js';
@@ -18,6 +19,7 @@ export {
   readFetchReport,
   readGitMirrorPlan,
   writeGitApplyReport,
+  writeGitConfigReport,
   writeGitFetchReport,
   writeGitMirrorPlan,
 } from './core/git-plan.js';
@@ -41,6 +43,7 @@ export {
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
 export type { ApplyGitMirrorsOptions } from './core/git-apply.js';
+export type { ConfigureGitRewritesOptions } from './core/git-config.js';
 export type {
   FetchGitMirrorsOptions,
   GitCommandInvocation,
@@ -72,6 +75,9 @@ export type {
   GitApplyActionResult,
   GitApplyActionStatus,
   GitApplyReport,
+  GitConfigActionResult,
+  GitConfigActionStatus,
+  GitConfigReport,
   GitConfigRewriteRule,
   GitFetchActionResult,
   GitFetchActionStatus,

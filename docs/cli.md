@@ -120,3 +120,14 @@ instance is configured to create repositories on push.
 
 The command writes `git-apply-report.json`, including generated `git config --global
 url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
+
+## git config
+
+```bash
+airgap-sync git config ./seed --global
+airgap-sync git config ./seed --global --dry-run
+```
+
+Reads `git-plan.json` and writes the generated URL rewrite rules into the global Git
+configuration with `git config --global url.<gitea-url>.insteadOf <public-url>`. The
+command writes `git-config-report.json`.

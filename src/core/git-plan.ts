@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import type {
   FetchReport,
   GitApplyReport,
+  GitConfigReport,
   GitFetchReport,
   GitMirrorPlan,
   GitMirrorRepositoryPlan,
@@ -182,4 +183,12 @@ export async function writeGitApplyReport(
 ): Promise<void> {
   await fs.ensureDir(bundleDir);
   await fs.writeJson(path.join(bundleDir, 'git-apply-report.json'), report, { spaces: 2 });
+}
+
+export async function writeGitConfigReport(
+  bundleDir: string,
+  report: GitConfigReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'git-config-report.json'), report, { spaces: 2 });
 }

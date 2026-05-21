@@ -111,6 +111,25 @@ export interface GitApplyReport {
   totalRepositories: number;
 }
 
+export type GitConfigActionStatus = 'planned' | 'configured' | 'error';
+
+export interface GitConfigActionResult {
+  error?: string;
+  insteadOf: string;
+  status: GitConfigActionStatus;
+  targetUrl: string;
+}
+
+export interface GitConfigReport {
+  configured: number;
+  dryRun: boolean;
+  errors: GitConfigActionResult[];
+  generatedAt: string;
+  planned: number;
+  scope: 'global';
+  totalRules: number;
+}
+
 export interface ParseRootSpecsResult {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];
