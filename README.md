@@ -24,13 +24,14 @@ The broader target is an airgap sync workflow for portable media:
 
 ## Status
 
-This repository is an early implementation. The npm registry package path is usable:
-package-spec input, recursive dependency fetch, manifest input, bundle validation,
-metadata caching, bundle inspection, and Verdaccio publish are implemented. Git
-dependency mirroring is implemented as portable source metadata, local mirror fetch,
-Gitea repository creation, mirror push, and Git URL rewrite steps. Higher-level repository
-orchestration has a first online `collect` command; automated install verification is
-still design work.
+This repository is an early but usable implementation. The core workflow is in place:
+workspace targets, conservative Git refresh, recursive npm dependency collection,
+lockfile and nested package.json scanning, Git dependency mirroring, Verdaccio publish,
+dist-tag restoration, Gitea repository creation, mirror push, static bundle validation,
+and install verification.
+
+It still needs real-environment hardening around large repositories, authentication
+variants, performance tuning, and operator ergonomics.
 
 ## Target Workflow
 
@@ -71,8 +72,7 @@ npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
-Current lower-level commands are documented in the [CLI Contract](./docs/cli.md). The
-workflow above is the direction for the next orchestration layer.
+Current lower-level commands are documented in the [CLI Reference](./docs/cli.md).
 
 The configured workspace lives on removable media:
 
@@ -131,12 +131,13 @@ pnpm test        # Run tests
 pnpm lint        # Run ESLint
 pnpm format      # Format source and docs
 pnpm check       # Lint, type-check, and test
+pnpm e2e:local   # Run the local Gitea/Verdaccio integration test
 ```
 
 ## Documentation
 
 - [Architecture](./docs/architecture.md)
-- [CLI Contract](./docs/cli.md)
+- [CLI Reference](./docs/cli.md)
 - [Bundle Format](./docs/bundle-format.md)
 - [Development Guide](./docs/development.md)
 - [Roadmap](./docs/roadmap.md)

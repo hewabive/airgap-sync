@@ -15,6 +15,8 @@ import { encodePackageName, isBlockedPublishRegistry } from './registry.js';
 import { throwIfInvalidBundle, validateBundle } from './validation.js';
 
 const execFileAsync = promisify(execFile);
+const defaultDistTagConcurrency = 4;
+const defaultPublishConcurrency = 4;
 const tempPublishTag = 'airgap-sync-temp';
 const registryLookupConcurrency = 8;
 
@@ -493,7 +495,10 @@ export async function publishBundle(
   timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
 
   const publishStart = performance.now();
-  const publishConcurrency = normalizeConcurrency(options.publishConcurrency, 4);
+  const publishConcurrency = normalizeConcurrency(
+    options.publishConcurrency,
+    defaultPublishConcurrency
+  );
   let publishProgress = 0;
   options.onProgress?.({
     current: publishProgress,
@@ -607,7 +612,10 @@ export async function publishBundle(
 
   if (errors.length === 0) {
     const distTagsStart = performance.now();
-    const distTagConcurrency = normalizeConcurrency(options.distTagConcurrency, 4);
+    const distTagConcurrency = normalizeConcurrency(
+      options.distTagConcurrency,
+      defaultDistTagConcurrency
+    );
     let tagProgress = 0;
     options.onProgress?.({
       current: tagProgress,

@@ -1,8 +1,8 @@
 # Workflows
 
-This document describes the target end-to-end workflow. `collect` handles the online
-side, and `apply` handles the closed-network import side. Lower-level commands remain
-available for debugging individual phases.
+This document describes the end-to-end workflow. `collect` handles the online side, and
+`apply` handles the closed-network import side. Lower-level commands remain available
+for debugging individual phases.
 
 ## Assumptions
 
@@ -229,6 +229,7 @@ mirrors, or writing global Git config.
 
 ## Current Gaps
 
-- There is no automated external-network verification yet. The next milestone is a
-  `verify` command that runs installs in a controlled environment and fails on public
-  npm or Git access attempts.
+- `verify install` runs real installs with isolated package-manager caches and Git
+  rewrites, but it does not yet enforce a network-deny sandbox.
+- Real-environment testing is still needed for large monorepositories, private source
+  registries, private Git hosts, and authentication variants.

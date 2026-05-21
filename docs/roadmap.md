@@ -7,78 +7,83 @@ verification.
 
 ## Milestone 1: Repository Skeleton
 
-- TypeScript CLI scaffold.
-- Documentation for architecture, CLI, and bundle format.
-- Formatting, linting, type-checking, tests, and CI.
+- Done: TypeScript CLI scaffold.
+- Done: Documentation for architecture, CLI, and bundle format.
+- Done: Formatting, linting, type-checking, tests, and CI.
 
-## Milestone 2: Resolver MVP
+## Milestone 2: Resolver
 
-- Resolve one or more package specs from CLI arguments.
-- Resolve `version`, `range`, `tag`, and `alias` specs.
-- Download tarballs into `packages/`.
-- Traverse `dependencies` and `optionalDependencies`.
-- Write `seed-manifest.json` and `dist-tags.json`.
+- Done: Resolve one or more package specs from CLI arguments.
+- Done: Resolve `version`, `range`, `tag`, and `alias` specs.
+- Done: Download tarballs into `packages/`.
+- Done: Traverse `dependencies` and `optionalDependencies`.
+- Done: Write `seed-manifest.json` and `dist-tags.json`.
 
 ## Milestone 2.1: Manifest Input
 
-- Read one root `package.json`.
-- Include production dependencies by default.
-- Optionally include root `devDependencies`.
+- Done: Read package.json files from files or directories.
+- Done: Include production dependencies by default.
+- Done: Optionally include root `devDependencies`.
+- Done: Scan nested package.json files for monorepositories.
+- Done: Read npm, pnpm, and Yarn lockfiles when present.
 
-## Milestone 3: Publish MVP
+## Milestone 3: Publish
 
-- Publish all tarballs to Verdaccio.
-- Use a temporary publish tag.
-- Restore tags from `dist-tags.json`.
-- Write `publish-report.json`.
-- Add package existence pre-checks and concurrency.
+- Done: Publish all tarballs to Verdaccio.
+- Done: Use a temporary publish tag.
+- Done: Restore tags from `dist-tags.json`.
+- Done: Write `publish-report.json`.
+- Done: Add package existence pre-checks and concurrency.
 
 ## Milestone 4: Project-Scale Inputs
 
-- Accept multiple manifests.
-- Accept package spec lists.
-- Support workspace roots.
-- Add `info` and `verify` commands.
+- Done: Accept multiple manifests.
+- Done: Accept package spec lists.
+- Done: Support workspace roots.
+- Done: Add `info` and `verify` commands.
 
 ## Milestone 5: Hardening
 
-- Retry and backoff.
-- Auth token discovery.
-- Deterministic reports.
-- Integration tests with Verdaccio.
+- Todo: Retry and backoff for transient registry/Git failures.
+- Todo: Auth token discovery for private source registries and private Git hosts.
+- In progress: deterministic reports.
+- Done: Integration tests with Verdaccio and Gitea.
 
 ## Milestone 6: Git Repository Orchestration
 
-- Scan a removable-media directory for Git repositories.
-- Refresh repositories on the online side using safe fetch/pull policies.
-- Run repository refresh before dependency collection.
-- Add first-pass `collect` orchestration for repository refresh, npm bundle fetch, Git
-  source metadata, and Git mirror fetch.
-- Mirror or bundle repositories for transfer into a closed network.
-- Push mirrors into Gitea without accidentally deleting protected refs.
-- Generate `insteadOf` rules for closed-network installs.
+- Done: Scan configured repository directories.
+- Done: Refresh repositories on the online side using safe fetch/pull policies.
+- Done: Run repository refresh before dependency collection.
+- Done: Add `collect` orchestration for repository refresh, npm bundle fetch, Git source
+  metadata, and Git mirror fetch.
+- Done: Mirror repositories for transfer into a closed network.
+- Done: Push mirrors into Gitea.
+- Done: Generate `insteadOf` rules for closed-network installs.
+- Todo: Decide whether protected-ref handling needs safer defaults than `git push --mirror`.
 
 ## Milestone 7: Git Dependencies in Node Graphs
 
-- Preserve `requiredBy` for unsupported Git specs in fetch reports.
-- Parse npm Git specs into canonical repository URL and commit/tag selectors.
-- Store source Git identities in the online bundle without binding them to a specific
-  Gitea instance.
-- Fetch local bare mirrors for Git dependencies discovered in transitive npm package
-  manifests.
-- Re-run npm dependency collection when newly mirrored Git repositories expose
+- Done: Preserve `requiredBy` for unsupported Git specs in fetch reports.
+- Done: Parse npm Git specs into canonical repository URL and commit/tag selectors.
+- Done: Store source Git identities in the online bundle without binding them to a
+  specific Gitea instance.
+- Done: Fetch local bare mirrors for Git dependencies discovered in transitive npm
+  package manifests.
+- Done: Re-run npm dependency collection when newly mirrored Git repositories expose
   additional package manifests.
-- Preserve upstream owner/repository paths when mapping mirrors into Gitea.
-- Create missing Gitea owners/repositories during the offline apply phase.
-- Push local bare mirrors to derived Gitea target URLs and emit broad `insteadOf` rules
-  when preserved paths make that safe.
-- Configure Git `insteadOf` rewrite rules from the transfer bundle.
-- Recursively inspect package manifests from Git dependencies.
-- Decide when URL rewriting is enough and when package/lockfile patching is required.
+- Done: Preserve upstream owner/repository paths when mapping mirrors into Gitea.
+- Done: Create missing Gitea owners/repositories during the offline apply phase.
+- Done: Push local bare mirrors to derived Gitea target URLs and emit broad `insteadOf`
+  rules when preserved paths make that safe.
+- Done: Configure Git `insteadOf` rewrite rules from the transfer bundle.
+- Done: Recursively inspect package manifests from Git dependencies.
+- Todo: Decide when URL rewriting is enough and when package/lockfile patching is
+  required.
 
 ## Milestone 8: End-to-End Verification
 
-- Create a closed-network install sandbox.
-- Force npm registry access through Verdaccio.
-- Force Git access through Gitea rewrite rules.
-- Fail if install attempts to reach public npm, GitHub, or other external hosts.
+- Done: Create temporary install directories with isolated package-manager caches.
+- Done: Force npm registry access through Verdaccio.
+- Done: Force Git access through Gitea rewrite rules.
+- Todo: Add a network-deny sandbox or proxy guard that fails on public npm, GitHub, or
+  other external host access.

@@ -1,7 +1,7 @@
-# CLI Contract
+# CLI Reference
 
-The final CLI should keep fetch and publish separate so the online and offline phases
-are auditable.
+The CLI keeps collection and application separate so the online and offline phases are
+auditable.
 
 The preferred user workflow is workspace-based: initialize a directory on removable
 media, add Git/npm targets once, then run `collect` online and `apply` offline.
@@ -91,7 +91,7 @@ airgap-sync fetch --manifest ./package.json \
   --output ./airgap-bundle
 ```
 
-Planned options:
+Supported options:
 
 ```text
 <spec...>                  Package specs to seed, e.g. react@latest
@@ -102,7 +102,6 @@ Planned options:
 --include-peer            Traverse peerDependencies
 --concurrency <number>    Concurrent registry and download operations
 --dry-run                 Resolve and report without downloading
---debug                   Verbose diagnostics
 ```
 
 At least one package spec or `--manifest` is required.

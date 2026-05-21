@@ -55,6 +55,9 @@ import type {
   VerifyInstallReport,
 } from './index.js';
 
+const defaultDistTagConcurrency = 4;
+const defaultPublishConcurrency = 4;
+
 interface FetchOptions {
   concurrency: number;
   dryRun?: boolean;
@@ -694,13 +697,13 @@ program
     '--dist-tag-concurrency <count>',
     'Concurrent npm dist-tag operations',
     parsePositiveInteger,
-    4
+    defaultDistTagConcurrency
   )
   .option(
     '--publish-concurrency <count>',
     'Concurrent npm publish operations',
     parsePositiveInteger,
-    4
+    defaultPublishConcurrency
   )
   .option('--dry-run', 'Print planned operations without publishing')
   .action(async (bundle: string, options: PublishOptions) => {
@@ -992,13 +995,13 @@ program
     '--dist-tag-concurrency <count>',
     'Concurrent npm dist-tag operations',
     parsePositiveInteger,
-    4
+    defaultDistTagConcurrency
   )
   .option(
     '--publish-concurrency <count>',
     'Concurrent npm publish operations',
     parsePositiveInteger,
-    4
+    defaultPublishConcurrency
   )
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
   .option('--dry-run', 'Print planned apply operations without publishing or pushing')
