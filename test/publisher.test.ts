@@ -1,25 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
-import type { AxiosRequestConfig } from 'axios';
 import fs from 'fs-extra';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
 import { packageNamesMissingLatestTags } from '../src/core/publisher.js';
 import type { PublishProgressEvent } from '../src/core/publisher.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
-type AxiosGet = (
-  url: string,
-  config?: AxiosRequestConfig
-) => Promise<{ data: unknown; status: number }>;
-
-const axiosMock = vi.hoisted(() => ({
-  get: vi.fn<AxiosGet>(),
-}));
-
-vi.mock('axios', () => ({
-  default: axiosMock,
-}));
+const fetchMock = vi.fn<typeof fetch>();
 
 const manifest: BundleManifest = {
   schemaVersion: 1,
@@ -44,7 +32,12 @@ const manifest: BundleManifest = {
 };
 
 beforeEach(() => {
-  axiosMock.get.mockReset();
+  fetchMock.mockReset();
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const distTags: DistTagsManifest = {
@@ -194,24 +187,26 @@ describe('publishBundle', () => {
     const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
     const progress: PublishProgressEvent[] = [];
 
-    axiosMock.get.mockResolvedValue({
-      data: {
-        'dist-tags': {
-          latest: '1.0.0',
-        },
-        name: 'demo',
-        versions: {
-          '1.0.0': {
-            dist: {
-              tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
-            },
-            name: 'demo',
-            version: '1.0.0',
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          'dist-tags': {
+            latest: '1.0.0',
           },
-        },
-      },
-      status: 200,
-    });
+          name: 'demo',
+          versions: {
+            '1.0.0': {
+              dist: {
+                tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
+              },
+              name: 'demo',
+              version: '1.0.0',
+            },
+          },
+        }),
+        { status: 200 }
+      )
+    );
 
     try {
       await fs.ensureDir(path.join(bundleDir, 'packages'));
@@ -243,18 +238,15 @@ describe('publishBundle', () => {
       expect(report.timings.totalMs).toBeGreaterThanOrEqual(0);
       expect(report.timings.validateMs).toBeGreaterThanOrEqual(0);
 
-      expect(axiosMock.get).toHaveBeenCalledTimes(1);
-      const firstCall = axiosMock.get.mock.calls[0];
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const firstCall = fetchMock.mock.calls[0];
       expect(firstCall?.[0]).toBe('http://localhost:4873/demo');
       expect(firstCall?.[1]).toMatchObject({
         headers: {
           Accept: 'application/vnd.npm.install-v1+json, application/json',
         },
-        timeout: 30_000,
       });
-      expect(firstCall?.[1]?.httpAgent).toBeDefined();
-      expect(firstCall?.[1]?.httpsAgent).toBeDefined();
-      expect(firstCall?.[1]?.validateStatus).toBeTypeOf('function');
+      expect(firstCall?.[1]?.signal).toBeDefined();
       expect(progress).toContainEqual({
         current: 1,
         phase: 'lookup-metadata',

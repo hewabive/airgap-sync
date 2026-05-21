@@ -1,10 +1,7 @@
 import path from 'node:path';
-import { Agent as HttpAgent } from 'node:http';
-import { Agent as HttpsAgent } from 'node:https';
 import { execFile } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
-import axios from 'axios';
 import type {
   BundleManifest,
   DistTagsManifest,
@@ -20,8 +17,6 @@ import { throwIfInvalidBundle, validateBundle } from './validation.js';
 const execFileAsync = promisify(execFile);
 const tempPublishTag = 'airgap-sync-temp';
 const registryLookupConcurrency = 8;
-const packageSnapshotHttpAgent = new HttpAgent({ keepAlive: true });
-const packageSnapshotHttpsAgent = new HttpsAgent({ keepAlive: true });
 
 export interface PublishBundleOptions {
   bundleDir: string;
@@ -238,22 +233,25 @@ async function fetchPackageSnapshot(
   packageName: string,
   registryUrl: string
 ): Promise<PackageRegistrySnapshot> {
-  const response = await axios.get<PackageMetadata>(
+  const response = await fetch(
     `${registryUrl.replace(/\/$/, '')}/${encodePackageName(packageName)}`,
     {
       headers: {
         Accept: 'application/vnd.npm.install-v1+json, application/json',
       },
-      httpAgent: packageSnapshotHttpAgent,
-      httpsAgent: packageSnapshotHttpsAgent,
-      timeout: 30_000,
-      validateStatus: (status) => status === 200 || status === 404,
+      signal: AbortSignal.timeout(30_000),
     }
   );
 
-  return response.status === 404
-    ? emptyPackageSnapshot()
-    : packageSnapshotFromMetadata(response.data);
+  if (response.status === 404) {
+    return emptyPackageSnapshot();
+  }
+
+  if (response.status !== 200) {
+    throw new Error(`Package metadata request failed with status ${String(response.status)}`);
+  }
+
+  return packageSnapshotFromMetadata((await response.json()) as PackageMetadata);
 }
 
 async function npmPackageSnapshotFromCli(

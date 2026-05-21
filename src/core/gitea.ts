@@ -1,4 +1,3 @@
-import axios, { type AxiosInstance } from 'axios';
 import type {
   GiteaOrganizationActionResult,
   GiteaRepositoryActionResult,
@@ -42,19 +41,39 @@ function encodePathPart(value: string): string {
   return encodeURIComponent(value);
 }
 
+class GiteaApiError extends Error {
+  readonly data: unknown;
+  readonly status: number;
+
+  constructor(status: number, data: unknown) {
+    super(`Gitea API request failed with status ${String(status)}`);
+    this.status = status;
+    this.data = data;
+  }
+}
+
 function errorMessage(error: unknown): string {
-  if (axios.isAxiosError(error)) {
-    const response = error.response;
-    const data = response?.data as unknown;
-    if (data && typeof data === 'object' && 'message' in data) {
-      return String(data.message);
+  if (error instanceof GiteaApiError) {
+    if (error.data && typeof error.data === 'object' && 'message' in error.data) {
+      return String(error.data.message);
     }
-    if (response?.status) {
-      return `Gitea API request failed with status ${String(response.status)}`;
-    }
+    return error.message;
   }
 
   return (error as Error).message;
+}
+
+async function responseData(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
 function uniqueOwners(manifest: GitSourcesManifest): string[] {
@@ -62,24 +81,60 @@ function uniqueOwners(manifest: GitSourcesManifest): string[] {
 }
 
 export class HttpGiteaClient implements GiteaClient {
-  readonly #http: AxiosInstance;
+  readonly #baseUrl: string;
+  readonly #headers: Record<string, string>;
+  readonly #timeoutMs: number;
 
   constructor(giteaBaseUrl: string, options: HttpGiteaClientOptions) {
-    this.#http = axios.create({
-      baseURL: `${normalizeBaseUrl(giteaBaseUrl)}/api/v1`,
-      headers: {
-        Accept: 'application/json',
-        Authorization: `token ${options.authToken}`,
-      },
-      timeout: options.timeoutMs ?? 30_000,
-    });
+    this.#baseUrl = `${normalizeBaseUrl(giteaBaseUrl)}/api/v1`;
+    this.#headers = {
+      Accept: 'application/json',
+      Authorization: `token ${options.authToken}`,
+    };
+    this.#timeoutMs = options.timeoutMs ?? 30_000;
+  }
+
+  async #request(
+    path: string,
+    options: {
+      body?: unknown;
+      method: 'GET' | 'POST';
+      validStatuses: Set<number>;
+    }
+  ): Promise<Response> {
+    const headers = { ...this.#headers };
+    let body: string | undefined;
+
+    if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(options.body);
+    }
+
+    const request: RequestInit = {
+      headers,
+      method: options.method,
+      signal: AbortSignal.timeout(this.#timeoutMs),
+    };
+
+    if (body !== undefined) {
+      request.body = body;
+    }
+
+    const response = await fetch(`${this.#baseUrl}${path}`, request);
+
+    if (!options.validStatuses.has(response.status)) {
+      throw new GiteaApiError(response.status, await responseData(response));
+    }
+
+    return response;
   }
 
   async repositoryExists(owner: string, name: string): Promise<boolean> {
-    const response = await this.#http.get(
+    const response = await this.#request(
       `/repos/${encodePathPart(owner)}/${encodePathPart(name)}`,
       {
-        validateStatus: (status) => status === 200 || status === 404,
+        method: 'GET',
+        validStatuses: new Set([200, 404]),
       }
     );
 
@@ -87,8 +142,9 @@ export class HttpGiteaClient implements GiteaClient {
   }
 
   async organizationExists(owner: string): Promise<boolean> {
-    const response = await this.#http.get(`/orgs/${encodePathPart(owner)}`, {
-      validateStatus: (status) => status === 200 || status === 404,
+    const response = await this.#request(`/orgs/${encodePathPart(owner)}`, {
+      method: 'GET',
+      validStatuses: new Set([200, 404]),
     });
 
     return response.status === 200;
@@ -99,17 +155,15 @@ export class HttpGiteaClient implements GiteaClient {
     name: string;
     visibility: 'private';
   }): Promise<void> {
-    await this.#http.post(
-      '/orgs',
-      {
+    await this.#request('/orgs', {
+      body: {
         full_name: options.fullName,
         username: options.name,
         visibility: options.visibility,
       },
-      {
-        validateStatus: (status) => status === 201,
-      }
-    );
+      method: 'POST',
+      validStatuses: new Set([201]),
+    });
   }
 
   async createRepository(options: {
@@ -118,18 +172,16 @@ export class HttpGiteaClient implements GiteaClient {
     owner: string;
     private: boolean;
   }): Promise<void> {
-    await this.#http.post(
-      `/orgs/${encodePathPart(options.owner)}/repos`,
-      {
+    await this.#request(`/orgs/${encodePathPart(options.owner)}/repos`, {
+      body: {
         auto_init: false,
         description: options.description,
         name: options.name,
         private: options.private,
       },
-      {
-        validateStatus: (status) => status === 201,
-      }
-    );
+      method: 'POST',
+      validStatuses: new Set([201]),
+    });
   }
 }
 

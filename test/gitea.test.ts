@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { provisionGiteaRepositories, type GiteaClient } from '../src/index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HttpGiteaClient, provisionGiteaRepositories, type GiteaClient } from '../src/index.js';
 import type { GitSourcesManifest } from '../src/types.js';
+
+const fetchMock = vi.fn<typeof fetch>();
 
 const manifest: GitSourcesManifest = {
   schemaVersion: 1,
@@ -18,6 +20,66 @@ const manifest: GitSourcesManifest = {
   ],
   skipped: [],
 };
+
+beforeEach(() => {
+  fetchMock.mockReset();
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('HttpGiteaClient', () => {
+  it('checks repositories through the Gitea API', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }));
+    const client = new HttpGiteaClient('http://gitea.local/', {
+      authToken: 'secret',
+    });
+
+    await expect(client.repositoryExists('owner', 'repo')).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall?.[0]).toBe('http://gitea.local/api/v1/repos/owner/repo');
+    expect(firstCall?.[1]).toMatchObject({
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'token secret',
+      },
+      method: 'GET',
+    });
+    expect(firstCall?.[1]?.signal).toBeDefined();
+  });
+
+  it('surfaces Gitea JSON error messages in provision reports', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 })).mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'repo lookup failed' }), {
+        status: 500,
+      })
+    );
+    const client = new HttpGiteaClient('http://gitea.local', {
+      authToken: 'secret',
+    });
+
+    await expect(
+      provisionGiteaRepositories({
+        client,
+        generatedAt: '2026-05-21T00:00:00.000Z',
+        giteaBaseUrl: 'http://gitea.local',
+        manifest,
+      })
+    ).resolves.toMatchObject({
+      errors: [
+        {
+          error: 'repo lookup failed',
+          repository: 'repo',
+          status: 'error',
+        },
+      ],
+    });
+  });
+});
 
 describe('provisionGiteaRepositories', () => {
   it('plans repository creation without calling Gitea in dry-run mode', async () => {

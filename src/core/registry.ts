@@ -1,4 +1,3 @@
-import axios from 'axios';
 import type { PackageMetadata } from '../types.js';
 
 const blockedRegistries = new Set([
@@ -73,15 +72,15 @@ export class HttpRegistryClient implements RegistryClient {
       headers.Authorization = `Bearer ${this.#authToken}`;
     }
 
-    const response = await axios.get<PackageMetadata>(
-      `${this.#registryUrl}/${encodePackageName(name)}`,
-      {
-        headers,
-        timeout: this.#timeoutMs,
-        validateStatus: (status) => status === 200,
-      }
-    );
+    const response = await fetch(`${this.#registryUrl}/${encodePackageName(name)}`, {
+      headers,
+      signal: AbortSignal.timeout(this.#timeoutMs),
+    });
 
-    return response.data;
+    if (response.status !== 200) {
+      throw new Error(`Registry metadata request failed with status ${String(response.status)}`);
+    }
+
+    return (await response.json()) as PackageMetadata;
   }
 }

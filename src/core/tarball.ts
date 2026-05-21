@@ -1,6 +1,6 @@
 import path from 'node:path';
-import type { Readable } from 'node:stream';
-import axios from 'axios';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import fs from 'fs-extra';
 import * as tar from 'tar';
 import type { PackageManifest, ResolvedRootPackage } from '../types.js';
@@ -34,18 +34,19 @@ export async function downloadResolvedPackage(
 
   await fs.ensureDir(packageDir);
 
-  const response = await axios.get<Readable>(pkg.dist.tarball, {
-    responseType: 'stream',
-    timeout: 60_000,
-    validateStatus: (status) => status === 200,
+  const response = await fetch(pkg.dist.tarball, {
+    signal: AbortSignal.timeout(60_000),
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const writer = fs.createWriteStream(outputPath);
-    response.data.pipe(writer);
-    writer.on('finish', resolve);
-    writer.on('error', reject);
-  });
+  if (response.status !== 200) {
+    throw new Error(`Tarball download failed with status ${String(response.status)}`);
+  }
+
+  if (!response.body) {
+    throw new Error(`Tarball download returned an empty response body: ${pkg.dist.tarball}`);
+  }
+
+  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(outputPath));
 
   return {
     file: path.posix.join('packages', file),
