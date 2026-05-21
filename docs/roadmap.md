@@ -62,6 +62,7 @@ verification.
 - Create a deterministic Gitea mirror plan from discovered Git requirements.
 - Fetch local bare mirrors for Git dependencies discovered in transitive npm package
   manifests.
+- Push local bare mirrors to planned Gitea target URLs and emit `insteadOf` rules.
 - Recursively inspect package manifests from Git dependencies.
 - Decide when URL rewriting is enough and when package/lockfile patching is required.
 

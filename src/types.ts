@@ -83,6 +83,34 @@ export interface GitFetchReport {
   updated: number;
 }
 
+export interface GitConfigRewriteRule {
+  command: string;
+  insteadOf: string;
+  targetUrl: string;
+}
+
+export type GitApplyActionStatus = 'planned' | 'pushed' | 'missing-mirror' | 'error';
+
+export interface GitApplyActionResult {
+  error?: string;
+  repository: string;
+  sourcePath: string;
+  status: GitApplyActionStatus;
+  targetUrl: string;
+}
+
+export interface GitApplyReport {
+  dryRun: boolean;
+  errors: GitApplyActionResult[];
+  generatedAt: string;
+  gitConfigRewriteRules: GitConfigRewriteRule[];
+  mirrorsDir: string;
+  missingMirrors: number;
+  planned: number;
+  pushed: number;
+  totalRepositories: number;
+}
+
 export interface ParseRootSpecsResult {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];

@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import {
+  applyGitMirrors,
   CachedRegistryClient,
   createGitMirrorPlan,
   createBundleDocuments,
@@ -20,6 +21,7 @@ import {
   readDistTagsManifest,
   writeBundleDocuments,
   writeFetchReport,
+  writeGitApplyReport,
   writeGitFetchReport,
   writeGitMirrorPlan,
   writePublishReport,
@@ -48,6 +50,11 @@ interface GitPlanOptions {
 }
 
 interface GitFetchOptions {
+  dryRun?: boolean;
+  mirrorsDir?: string;
+}
+
+interface GitApplyOptions {
   dryRun?: boolean;
   mirrorsDir?: string;
 }
@@ -289,6 +296,34 @@ gitCommand
       });
 
       await writeGitFetchReport(bundle, report);
+      console.log(JSON.stringify(report, null, 2));
+
+      if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+gitCommand
+  .command('apply')
+  .description('Push local bare mirrors into Gitea and report Git rewrite rules')
+  .argument('<bundle>', 'Path to seed bundle directory')
+  .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
+  .option('--dry-run', 'Print planned mirror push operations without running Git')
+  .action(async (bundle: string, options: GitApplyOptions) => {
+    try {
+      const plan = await readGitMirrorPlan(bundle);
+      const report = await applyGitMirrors({
+        bundleDir: bundle,
+        dryRun: options.dryRun === true,
+        plan,
+        ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+      });
+
+      await writeGitApplyReport(bundle, report);
       console.log(JSON.stringify(report, null, 2));
 
       if (report.errors.length > 0) {

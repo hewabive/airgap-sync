@@ -105,3 +105,18 @@ created with `git clone --mirror`; existing mirrors run `git remote set-url orig
 
 This is the online-side collection step only. It does not push to Gitea; that belongs
 to a later offline apply command.
+
+## git apply
+
+```bash
+airgap-sync git apply ./seed
+airgap-sync git apply ./seed --dry-run
+airgap-sync git apply ./seed --mirrors-dir ./git-mirrors
+```
+
+Reads `git-plan.json` and pushes local bare mirrors to the planned Gitea target URLs
+with `git push --mirror`. The target repositories must already exist unless the Gitea
+instance is configured to create repositories on push.
+
+The command writes `git-apply-report.json`, including generated `git config --global
+url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
