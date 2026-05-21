@@ -10,6 +10,7 @@ import {
   createFetchReport,
   fetchGitMirrors,
   fetchSeedBundle,
+  HttpGiteaClient,
   HttpRegistryClient,
   packageName,
   parseRootSpecs,
@@ -22,12 +23,15 @@ import {
   readDistTagsManifest,
   writeBundleDocuments,
   writeFetchReport,
+  writeGiteaRepositoryProvisionReport,
   writeGitApplyReport,
   writeGitConfigReport,
   writeGitFetchReport,
   writeGitMirrorPlan,
   writePublishReport,
+  provisionGiteaRepositories,
 } from './index.js';
+import type { GiteaClient } from './index.js';
 import type { FetchSeedBundleResult, ResolveRootRequirementsResult } from './index.js';
 
 interface FetchOptions {
@@ -65,6 +69,18 @@ interface GitConfigOptions {
   dryRun?: boolean;
   global?: boolean;
 }
+
+interface GitCreateReposOptions {
+  dryRun?: boolean;
+  ownerType: string;
+  public?: boolean;
+  token?: string;
+}
+
+const noopGiteaClient: GiteaClient = {
+  createRepository: () => Promise.resolve(),
+  repositoryExists: () => Promise.resolve(false),
+};
 
 const program = new Command();
 
@@ -357,6 +373,54 @@ gitCommand
       });
 
       await writeGitConfigReport(bundle, report);
+      console.log(JSON.stringify(report, null, 2));
+
+      if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+gitCommand
+  .command('create-repos')
+  .description('Create missing Gitea repositories from git-plan.json')
+  .argument('<bundle>', 'Path to seed bundle directory')
+  .option('--token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
+  .option('--owner-type <type>', 'Gitea owner type: user or org', 'user')
+  .option('--public', 'Create public repositories instead of private repositories')
+  .option('--dry-run', 'Print planned repository creation without calling Gitea')
+  .action(async (bundle: string, options: GitCreateReposOptions) => {
+    try {
+      if (options.ownerType !== 'user' && options.ownerType !== 'org') {
+        console.error('Error: --owner-type must be user or org');
+        process.exitCode = 1;
+        return;
+      }
+
+      const plan = await readGitMirrorPlan(bundle);
+      const token = options.token ?? process.env.GITEA_TOKEN;
+      if (!token && options.dryRun !== true) {
+        console.error('Error: provide --token <token> or set GITEA_TOKEN');
+        process.exitCode = 1;
+        return;
+      }
+
+      const client =
+        options.dryRun === true
+          ? noopGiteaClient
+          : new HttpGiteaClient(plan.giteaBaseUrl, { authToken: token ?? '' });
+      const report = await provisionGiteaRepositories({
+        client,
+        dryRun: options.dryRun === true,
+        ownerType: options.ownerType,
+        plan,
+        private: options.public !== true,
+      });
+
+      await writeGiteaRepositoryProvisionReport(bundle, report);
       console.log(JSON.stringify(report, null, 2));
 
       if (report.errors.length > 0) {

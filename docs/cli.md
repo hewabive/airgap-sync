@@ -121,6 +121,22 @@ instance is configured to create repositories on push.
 The command writes `git-apply-report.json`, including generated `git config --global
 url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
 
+## git create-repos
+
+```bash
+airgap-sync git create-repos ./seed --token "$GITEA_TOKEN"
+airgap-sync git create-repos ./seed --owner-type org --dry-run
+airgap-sync git create-repos ./seed --public
+```
+
+Reads `git-plan.json` and creates missing repositories in Gitea before `git apply`.
+The Gitea base URL and owner are taken from the plan. Tokens can be passed through
+`--token` or `GITEA_TOKEN`; no token is required for `--dry-run`.
+
+By default repositories are created as private user repositories. Use `--owner-type org`
+when the plan owner is a Gitea organization, and `--public` when mirrors should not be
+private.
+
 ## git config
 
 ```bash

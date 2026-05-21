@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import type {
   FetchReport,
+  GiteaRepositoryProvisionReport,
   GitApplyReport,
   GitConfigReport,
   GitFetchReport,
@@ -191,4 +192,12 @@ export async function writeGitConfigReport(
 ): Promise<void> {
   await fs.ensureDir(bundleDir);
   await fs.writeJson(path.join(bundleDir, 'git-config-report.json'), report, { spaces: 2 });
+}
+
+export async function writeGiteaRepositoryProvisionReport(
+  bundleDir: string,
+  report: GiteaRepositoryProvisionReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'gitea-repos-report.json'), report, { spaces: 2 });
 }

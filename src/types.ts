@@ -130,6 +130,31 @@ export interface GitConfigReport {
   totalRules: number;
 }
 
+export type GiteaOwnerType = 'user' | 'org';
+export type GiteaRepositoryActionStatus = 'planned' | 'exists' | 'created' | 'error';
+
+export interface GiteaRepositoryActionResult {
+  error?: string;
+  private: boolean;
+  repository: string;
+  status: GiteaRepositoryActionStatus;
+  targetUrl: string;
+}
+
+export interface GiteaRepositoryProvisionReport {
+  created: number;
+  dryRun: boolean;
+  errors: GiteaRepositoryActionResult[];
+  exists: number;
+  generatedAt: string;
+  giteaBaseUrl: string;
+  owner: string;
+  ownerType: GiteaOwnerType;
+  planned: number;
+  private: boolean;
+  totalRepositories: number;
+}
+
 export interface ParseRootSpecsResult {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];

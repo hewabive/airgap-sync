@@ -13,6 +13,7 @@ export { applyGitMirrors, createGitConfigRewriteRules } from './core/git-apply.j
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
+export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
 export { fetchGitMirrors, runGitCommand } from './core/git-fetch.js';
 export {
   createGitMirrorPlan,
@@ -20,6 +21,7 @@ export {
   readGitMirrorPlan,
   writeGitApplyReport,
   writeGitConfigReport,
+  writeGiteaRepositoryProvisionReport,
   writeGitFetchReport,
   writeGitMirrorPlan,
 } from './core/git-plan.js';
@@ -44,6 +46,11 @@ export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
 export type { ApplyGitMirrorsOptions } from './core/git-apply.js';
 export type { ConfigureGitRewritesOptions } from './core/git-config.js';
+export type {
+  GiteaClient,
+  HttpGiteaClientOptions,
+  ProvisionGiteaRepositoriesOptions,
+} from './core/gitea.js';
 export type {
   FetchGitMirrorsOptions,
   GitCommandInvocation,
@@ -72,6 +79,10 @@ export type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
+  GiteaOwnerType,
+  GiteaRepositoryActionResult,
+  GiteaRepositoryActionStatus,
+  GiteaRepositoryProvisionReport,
   GitApplyActionResult,
   GitApplyActionStatus,
   GitApplyReport,
