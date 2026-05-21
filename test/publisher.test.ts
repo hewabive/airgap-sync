@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import { describe, expect, it } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
 import { packageNamesMissingLatestTags } from '../src/core/publisher.js';
+import type { PublishProgressEvent } from '../src/core/publisher.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
 const manifest: BundleManifest = {
@@ -107,6 +108,7 @@ describe('packageNamesMissingLatestTags', () => {
 describe('publishBundle', () => {
   it('returns a dry-run report without executing npm commands', async () => {
     const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const progress: PublishProgressEvent[] = [];
 
     try {
       await fs.ensureDir(path.join(bundleDir, 'packages'));
@@ -116,6 +118,9 @@ describe('publishBundle', () => {
         publishBundle(manifest, distTags, {
           bundleDir,
           dryRun: true,
+          onProgress(event) {
+            progress.push(event);
+          },
           registryUrl: 'http://localhost:4873',
         })
       ).resolves.toMatchObject({
@@ -127,6 +132,22 @@ describe('publishBundle', () => {
         skipped: 0,
         totalPackages: 1,
       });
+      expect(progress).toEqual([
+        {
+          phase: 'validate',
+          status: 'start',
+        },
+        {
+          phase: 'validate',
+          status: 'done',
+        },
+        {
+          current: 2,
+          phase: 'dry-run',
+          status: 'planned',
+          total: 2,
+        },
+      ]);
     } finally {
       await fs.remove(bundleDir);
     }

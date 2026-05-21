@@ -80,7 +80,12 @@ export type {
   BundleInfoTag,
 } from './core/info.js';
 export type { ReadManifestRequirementsOptions } from './core/manifests.js';
-export type { PublishBundleOptions } from './core/publisher.js';
+export type {
+  PublishBundleOptions,
+  PublishProgressEvent,
+  PublishProgressPhase,
+  PublishProgressStatus,
+} from './core/publisher.js';
 export type {
   GitOutputCommandInvocation,
   GitOutputCommandResult,

@@ -18,8 +18,37 @@ const registryLookupConcurrency = 8;
 export interface PublishBundleOptions {
   bundleDir: string;
   dryRun?: boolean;
+  onProgress?: (event: PublishProgressEvent) => void;
   registryUrl: string;
   skipExisting?: boolean;
+}
+
+export type PublishProgressPhase =
+  | 'cleanup'
+  | 'dist-tags'
+  | 'dry-run'
+  | 'lookup-tags'
+  | 'lookup-versions'
+  | 'publish'
+  | 'validate';
+
+export type PublishProgressStatus =
+  | 'done'
+  | 'error'
+  | 'planned'
+  | 'progress'
+  | 'published'
+  | 'skipped'
+  | 'start'
+  | 'tagged';
+
+export interface PublishProgressEvent {
+  phase: PublishProgressPhase;
+  status: PublishProgressStatus;
+  current?: number;
+  package?: string;
+  tag?: string;
+  total?: number;
 }
 
 function packageId(pkg: { name: string; version: string }): string {
@@ -184,28 +213,78 @@ async function npmPackageDistTags(
 
 async function lookupExistingVersions(
   manifest: BundleManifest,
-  registryUrl: string
+  registryUrl: string,
+  onProgress?: PublishBundleOptions['onProgress']
 ): Promise<Map<string, Set<string>>> {
   const packageNames = [...new Set(manifest.packages.map((pkg) => pkg.name))];
+  let completed = 0;
+  onProgress?.({
+    current: 0,
+    phase: 'lookup-versions',
+    status: 'start',
+    total: packageNames.length,
+  });
   const entries = await mapWithConcurrency(
     packageNames,
     registryLookupConcurrency,
-    async (name) => [name, new Set(await npmPackageVersions(name, registryUrl))] as const
+    async (name) => {
+      const result = [name, new Set(await npmPackageVersions(name, registryUrl))] as const;
+      completed++;
+      onProgress?.({
+        current: completed,
+        package: name,
+        phase: 'lookup-versions',
+        status: 'progress',
+        total: packageNames.length,
+      });
+      return result;
+    }
   );
+  onProgress?.({
+    current: packageNames.length,
+    phase: 'lookup-versions',
+    status: 'done',
+    total: packageNames.length,
+  });
 
   return new Map(entries);
 }
 
 async function lookupCurrentDistTags(
   distTags: DistTagsManifest,
-  registryUrl: string
+  registryUrl: string,
+  onProgress?: PublishBundleOptions['onProgress']
 ): Promise<Map<string, Record<string, string>>> {
   const packageNames = [...new Set(distTags.requirements.map((requirement) => requirement.name))];
+  let completed = 0;
+  onProgress?.({
+    current: 0,
+    phase: 'lookup-tags',
+    status: 'start',
+    total: packageNames.length,
+  });
   const entries = await mapWithConcurrency(
     packageNames,
     registryLookupConcurrency,
-    async (name) => [name, await npmPackageDistTags(name, registryUrl)] as const
+    async (name) => {
+      const result = [name, await npmPackageDistTags(name, registryUrl)] as const;
+      completed++;
+      onProgress?.({
+        current: completed,
+        package: name,
+        phase: 'lookup-tags',
+        status: 'progress',
+        total: packageNames.length,
+      });
+      return result;
+    }
   );
+  onProgress?.({
+    current: packageNames.length,
+    phase: 'lookup-tags',
+    status: 'done',
+    total: packageNames.length,
+  });
 
   return new Map(entries);
 }
@@ -250,7 +329,9 @@ export async function publishBundle(
     throw new Error(`Refusing to publish to public registry: ${options.registryUrl}`);
   }
 
+  options.onProgress?.({ phase: 'validate', status: 'start' });
   throwIfInvalidBundle(await validateBundle(options.bundleDir, manifest, distTags));
+  options.onProgress?.({ phase: 'validate', status: 'done' });
 
   const errors: PublishActionResult[] = [];
   let published = 0;
@@ -259,6 +340,12 @@ export async function publishBundle(
 
   if (options.dryRun) {
     const plan = createPublishPlan(manifest, distTags);
+    options.onProgress?.({
+      current: plan.length,
+      phase: 'dry-run',
+      status: 'planned',
+      total: plan.length,
+    });
     return {
       dryRun: true,
       errors: [],
@@ -275,11 +362,11 @@ export async function publishBundle(
   const existingVersionsByPackage =
     options.skipExisting === false
       ? new Map<string, Set<string>>()
-      : await lookupExistingVersions(manifest, options.registryUrl);
+      : await lookupExistingVersions(manifest, options.registryUrl, options.onProgress);
   const currentDistTags =
     options.skipExisting === false
       ? new Map<string, Record<string, string>>()
-      : await lookupCurrentDistTags(distTags, options.registryUrl);
+      : await lookupCurrentDistTags(distTags, options.registryUrl, options.onProgress);
   const publishedPackageNames = new Set<string>();
 
   const packageNamesWithoutLatest = packageNamesMissingLatestTags(manifest, distTags);
@@ -309,9 +396,24 @@ export async function publishBundle(
     );
   }
 
+  let publishProgress = 0;
+  options.onProgress?.({
+    current: publishProgress,
+    phase: 'publish',
+    status: 'start',
+    total: manifest.packages.length,
+  });
   for (const pkg of manifest.packages) {
     if (existingVersionsByPackage.get(pkg.name)?.has(pkg.version)) {
       skipped++;
+      publishProgress++;
+      options.onProgress?.({
+        current: publishProgress,
+        package: packageId(pkg),
+        phase: 'publish',
+        status: 'skipped',
+        total: manifest.packages.length,
+      });
       continue;
     }
 
@@ -319,12 +421,36 @@ export async function publishBundle(
       await npmPublish(path.join(options.bundleDir, pkg.file), options.registryUrl);
       published++;
       publishedPackageNames.add(pkg.name);
+      publishProgress++;
+      options.onProgress?.({
+        current: publishProgress,
+        package: packageId(pkg),
+        phase: 'publish',
+        status: 'published',
+        total: manifest.packages.length,
+      });
     } catch (error) {
       if (options.skipExisting !== false && isAlreadyExistsError(error)) {
         skipped++;
+        publishProgress++;
+        options.onProgress?.({
+          current: publishProgress,
+          package: packageId(pkg),
+          phase: 'publish',
+          status: 'skipped',
+          total: manifest.packages.length,
+        });
         continue;
       }
 
+      publishProgress++;
+      options.onProgress?.({
+        current: publishProgress,
+        package: packageId(pkg),
+        phase: 'publish',
+        status: 'error',
+        total: manifest.packages.length,
+      });
       errors.push({
         action: 'publish',
         package: packageId(pkg),
@@ -333,18 +459,58 @@ export async function publishBundle(
       });
     }
   }
+  options.onProgress?.({
+    current: publishProgress,
+    phase: 'publish',
+    status: 'done',
+    total: manifest.packages.length,
+  });
 
   if (errors.length === 0) {
+    let tagProgress = 0;
+    options.onProgress?.({
+      current: tagProgress,
+      phase: 'dist-tags',
+      status: 'start',
+      total: distTags.requirements.length,
+    });
     for (const requirement of distTags.requirements) {
       if (currentDistTags.get(requirement.name)?.[requirement.tag] === requirement.version) {
         restoredTags++;
+        tagProgress++;
+        options.onProgress?.({
+          current: tagProgress,
+          package: packageId(requirement),
+          phase: 'dist-tags',
+          status: 'skipped',
+          tag: requirement.tag,
+          total: distTags.requirements.length,
+        });
         continue;
       }
 
       try {
         await npmDistTagAdd(requirement, options.registryUrl);
         restoredTags++;
+        tagProgress++;
+        options.onProgress?.({
+          current: tagProgress,
+          package: packageId(requirement),
+          phase: 'dist-tags',
+          status: 'tagged',
+          tag: requirement.tag,
+          total: distTags.requirements.length,
+        });
       } catch (error) {
+        tagProgress++;
+        options.onProgress?.({
+          current: tagProgress,
+          package: packageId(requirement),
+          phase: 'dist-tags',
+          status: 'error',
+          tag: requirement.tag,
+          total: distTags.requirements.length,
+        });
         errors.push({
           action: 'dist-tag',
           package: packageId(requirement),
@@ -354,14 +520,42 @@ export async function publishBundle(
         });
       }
     }
+    options.onProgress?.({
+      current: tagProgress,
+      phase: 'dist-tags',
+      status: 'done',
+      total: distTags.requirements.length,
+    });
 
+    let cleanupProgress = 0;
+    const cleanupTotal = publishedPackageNames.size;
+    options.onProgress?.({
+      current: cleanupProgress,
+      phase: 'cleanup',
+      status: 'start',
+      total: cleanupTotal,
+    });
     for (const packageName of publishedPackageNames) {
       try {
         await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
       } catch {
         // The temp tag may already be absent if the package existed before this run.
       }
+      cleanupProgress++;
+      options.onProgress?.({
+        current: cleanupProgress,
+        package: packageName,
+        phase: 'cleanup',
+        status: 'progress',
+        total: cleanupTotal,
+      });
     }
+    options.onProgress?.({
+      current: cleanupProgress,
+      phase: 'cleanup',
+      status: 'done',
+      total: cleanupTotal,
+    });
   }
 
   return {

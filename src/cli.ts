@@ -34,7 +34,12 @@ import {
   provisionGiteaRepositories,
 } from './index.js';
 import type { GiteaClient } from './index.js';
-import type { FetchSeedBundleResult, ResolveRootRequirementsResult } from './index.js';
+import type {
+  FetchSeedBundleResult,
+  PublishProgressEvent,
+  PublishProgressPhase,
+  ResolveRootRequirementsResult,
+} from './index.js';
 
 interface FetchOptions {
   dryRun?: boolean;
@@ -78,6 +83,61 @@ interface GitConfigOptions {
   dryRun?: boolean;
   gitea: string;
   global?: boolean;
+}
+
+const publishPhaseLabels: Record<PublishProgressPhase, string> = {
+  cleanup: 'cleanup temp tags',
+  'dist-tags': 'restore dist-tags',
+  'dry-run': 'plan publish',
+  'lookup-tags': 'lookup dist-tags',
+  'lookup-versions': 'lookup existing versions',
+  publish: 'publish packages',
+  validate: 'validate bundle',
+};
+
+function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
+  const lastLogged = new Map<PublishProgressPhase, number>();
+
+  return (event) => {
+    const label = publishPhaseLabels[event.phase];
+
+    if (event.status === 'start') {
+      const total = event.total === undefined ? '' : ` (${event.total})`;
+      console.error(`[publish] ${label}: started${total}`);
+      return;
+    }
+
+    if (event.status === 'done') {
+      const total =
+        event.total === undefined ? '' : ` (${event.current ?? event.total}/${event.total})`;
+      console.error(`[publish] ${label}: done${total}`);
+      return;
+    }
+
+    if (event.status === 'planned') {
+      console.error(`[publish] ${label}: ${event.current ?? 0} actions`);
+      return;
+    }
+
+    if (event.current === undefined || event.total === undefined) {
+      return;
+    }
+
+    const last = lastLogged.get(event.phase) ?? 0;
+    const shouldLog =
+      event.status === 'error' ||
+      event.current === event.total ||
+      event.current === 1 ||
+      event.current - last >= Math.max(1, Math.ceil(event.total / 20));
+
+    if (!shouldLog) {
+      return;
+    }
+
+    lastLogged.set(event.phase, event.current);
+    const subject = event.package ? ` ${event.package}${event.tag ? `#${event.tag}` : ''}` : '';
+    console.error(`[publish] ${label}: ${event.current}/${event.total} ${event.status}${subject}`);
+  };
 }
 
 interface GitCreateReposOptions {
@@ -293,6 +353,7 @@ program
       const report = await publishBundle(manifest, distTags, {
         bundleDir: bundle,
         dryRun: options.dryRun === true,
+        onProgress: createPublishProgressLogger(),
         registryUrl: options.registry,
         skipExisting: options.skipExisting !== false,
       });
