@@ -20,6 +20,7 @@ export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.j
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
+export { readGitSourceManifestRequirements } from './core/git-manifests.js';
 export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
 export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export {
@@ -60,6 +61,10 @@ export type {
   GitCommandInvocation,
   GitCommandRunner,
 } from './core/git-fetch.js';
+export type {
+  GitSourceManifestRequirementsResult,
+  ReadGitSourceManifestRequirementsOptions,
+} from './core/git-manifests.js';
 export type { GitSourcesOptions } from './core/git-sources.js';
 export type {
   BundleInfo,

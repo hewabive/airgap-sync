@@ -27,7 +27,7 @@ export interface ReadManifestRequirementsOptions {
   includePeer?: boolean;
 }
 
-interface ProjectManifestEntry {
+export interface ProjectManifestEntry {
   manifest: ProjectPackageManifest;
   path: string;
 }
@@ -130,6 +130,14 @@ export async function readManifestRequirements(
     });
   }
 
+  return parseManifestRequirementsFromEntries(entries, rootDir, options);
+}
+
+export function parseManifestRequirementsFromEntries(
+  entries: ProjectManifestEntry[],
+  rootDir: string,
+  options: ReadManifestRequirementsOptions = {}
+): ParseRootSpecsResult {
   const localPackageNames = new Set<string>();
   for (const entry of entries) {
     if (entry.manifest.name) {

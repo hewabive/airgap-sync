@@ -1,0 +1,180 @@
+import { describe, expect, it } from 'vitest';
+import { readGitSourceManifestRequirements } from '../src/core/git-manifests.js';
+import type { GitOutputCommandInvocation, GitOutputCommandResult } from '../src/core/repos.js';
+import type { GitSource } from '../src/types.js';
+
+const source: GitSource = {
+  committish: 'main',
+  host: 'github.com',
+  id: 'github.com/owner/repo',
+  localMirrorPath: 'git-mirrors/github.com/owner/repo.git',
+  owner: 'owner',
+  repo: 'repo',
+  requirements: [],
+  sourceUrl: 'https://github.com/owner/repo.git',
+};
+
+describe('readGitSourceManifestRequirements', () => {
+  it('reads package manifests from a bare mirror revision', async () => {
+    const calls: GitOutputCommandInvocation[] = [];
+
+    const result = await readGitSourceManifestRequirements({
+      includeDev: true,
+      mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+      source,
+      runner(invocation): Promise<GitOutputCommandResult> {
+        calls.push(invocation);
+
+        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: [
+              'package.json',
+              'packages/lib/package.json',
+              'node_modules/ignored/package.json',
+              'dist/ignored/package.json',
+            ].join('\n'),
+          });
+        }
+
+        if (invocation.args.join(' ') === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'root',
+              version: '1.0.0',
+              dependencies: {
+                local: 'workspace:*',
+                react: '^19.0.0',
+              },
+              devDependencies: {
+                vitest: '^4.0.0',
+              },
+            }),
+          });
+        }
+
+        if (invocation.args.join(' ') === 'show main:packages/lib/package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'local',
+              version: '1.0.0',
+              dependencies: {
+                gitpkg: 'github:other/repo#main',
+                zod: '^4.0.0',
+              },
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        args: ['ls-tree', '-r', '--name-only', 'main'],
+        cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
+      },
+      {
+        args: ['show', 'main:package.json'],
+        cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
+      },
+      {
+        args: ['show', 'main:packages/lib/package.json'],
+        cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
+      },
+    ]);
+    expect(result.manifestPaths).toEqual(['package.json', 'packages/lib/package.json']);
+    expect(result.requirements).toEqual([
+      {
+        name: 'react',
+        raw: 'react@^19.0.0',
+        requiredBy: 'root@1.0.0',
+        specifier: '^19.0.0',
+        type: 'range',
+      },
+      {
+        name: 'vitest',
+        raw: 'vitest@^4.0.0',
+        requiredBy: 'root@1.0.0',
+        specifier: '^4.0.0',
+        type: 'range',
+      },
+      {
+        name: 'zod',
+        raw: 'zod@^4.0.0',
+        requiredBy: 'local@1.0.0',
+        specifier: '^4.0.0',
+        type: 'range',
+      },
+    ]);
+    expect(result.gitRequirements).toEqual([
+      {
+        committish: 'main',
+        hosted: {
+          domain: 'github.com',
+          project: 'repo',
+          type: 'github',
+          user: 'other',
+        },
+        name: 'gitpkg',
+        raw: 'gitpkg@github:other/repo#main',
+        rawSpec: 'github:other/repo#main',
+        requiredBy: 'local@1.0.0',
+      },
+    ]);
+    expect(result.unsupported).toEqual([
+      {
+        raw: 'gitpkg@github:other/repo#main',
+        reason: 'Unsupported package spec type: git',
+        requiredBy: 'local@1.0.0',
+        type: 'git',
+      },
+    ]);
+  });
+
+  it('limits manifest discovery to gitSubdir when present', async () => {
+    const result = await readGitSourceManifestRequirements({
+      mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+      source: {
+        ...source,
+        gitSubdir: 'packages/plugin',
+      },
+      runner(invocation): Promise<GitOutputCommandResult> {
+        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: ['package.json', 'packages/plugin/package.json'].join('\n'),
+          });
+        }
+
+        if (invocation.args.join(' ') === 'show main:packages/plugin/package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'plugin',
+              dependencies: {
+                lodash: '^4.17.21',
+              },
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(result.manifestPaths).toEqual(['packages/plugin/package.json']);
+    expect(result.requirements).toEqual([
+      {
+        name: 'lodash',
+        raw: 'lodash@^4.17.21',
+        requiredBy: 'plugin',
+        specifier: '^4.17.21',
+        type: 'range',
+      },
+    ]);
+  });
+});
