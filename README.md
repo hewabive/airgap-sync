@@ -47,6 +47,12 @@ pnpm exec airgap-sync init
 After a global install or `pnpm dlx airgap-sync`, the same commands can be run as
 `airgap-sync ...`.
 
+For guided operation, start the interactive menu:
+
+```bash
+pnpm exec airgap-sync menu
+```
+
 ```bash
 # First setup on the portable drive.
 airgap-sync init

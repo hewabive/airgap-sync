@@ -21,10 +21,12 @@ export interface WorkspaceNpmTarget {
 export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget;
 
 export interface WorkspaceConfig {
+  giteaUrl?: string;
   output: string;
   reposDir: string;
   schemaVersion: 1;
   sourceRegistry: string;
+  targetRegistry?: string;
   targets: WorkspaceTarget[];
 }
 
@@ -144,6 +146,10 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
   throw new Error(`Unsupported workspace target type: ${value.type}`);
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   if (!isRecord(value)) {
     throw new Error(`${workspaceConfigFileName} must contain a JSON object`);
@@ -156,8 +162,11 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   const targets = Array.isArray(value.targets)
     ? value.targets.map((target) => normalizeWorkspaceTarget(target))
     : [];
+  const giteaUrl = optionalString(value.giteaUrl);
+  const targetRegistry = optionalString(value.targetRegistry);
 
   return {
+    ...(giteaUrl ? { giteaUrl } : {}),
     output:
       typeof value.output === 'string' && value.output.trim().length > 0
         ? value.output.trim()
@@ -171,6 +180,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       typeof value.sourceRegistry === 'string' && value.sourceRegistry.trim().length > 0
         ? value.sourceRegistry.trim()
         : defaultWorkspaceSourceRegistry,
+    ...(targetRegistry ? { targetRegistry } : {}),
     targets,
   };
 }

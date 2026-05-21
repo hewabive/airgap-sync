@@ -1,4 +1,5 @@
 export const packageName = 'airgap-sync';
+export const packageVersion = '0.1.0';
 
 export {
   createBundleDocuments,

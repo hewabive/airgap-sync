@@ -84,6 +84,28 @@ describe('workspace config', () => {
     ]);
   });
 
+  it('normalizes optional closed-network endpoints', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        giteaUrl: ' http://gitea.local ',
+        output: './airgap-bundle',
+        reposDir: './repos',
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targetRegistry: ' http://verdaccio.local:4873 ',
+        targets: [],
+      },
+      { spaces: 2 }
+    );
+
+    expect(await readWorkspaceConfig(tempDir)).toMatchObject({
+      giteaUrl: 'http://gitea.local',
+      targetRegistry: 'http://verdaccio.local:4873',
+    });
+  });
+
   it('materializes missing Git targets under preserved source paths', async () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     config.targets.push({

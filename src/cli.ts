@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 import {
   addWorkspaceTarget,
@@ -21,6 +23,7 @@ import {
   initWorkspace,
   materializeWorkspaceGitTargets,
   packageName,
+  packageVersion,
   parseRootSpecs,
   publishBundle,
   readBundleInfo,
@@ -43,6 +46,8 @@ import {
   writeGitSourcesManifest,
   writePublishReport,
   writeWorkspaceSnapshot,
+  writeWorkspaceConfig,
+  workspaceConfigFileName,
   provisionGiteaRepositories,
 } from './index.js';
 import type { GiteaClient } from './index.js';
@@ -122,6 +127,10 @@ interface GitSourcesOptions {
   write?: boolean;
 }
 
+interface MenuOptions {
+  once?: boolean;
+}
+
 function parsePositiveInteger(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -145,6 +154,37 @@ function addNpmPublishOptions(command: Command): Command {
       parsePositiveInteger,
       defaultPublishConcurrency
     );
+}
+
+function compactArgs(args: (string | undefined)[]): string[] {
+  return args.filter((arg): arg is string => arg !== undefined && arg.length > 0);
+}
+
+async function runSelfCommand(args: string[], cwd: string): Promise<void> {
+  const cliPath = process.argv[1];
+  if (!cliPath) {
+    throw new Error('Cannot locate current CLI entrypoint');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...args], {
+      cwd,
+      env: process.env,
+      stdio: 'inherit',
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new Error(`Command failed with exit code ${String(code)}: airgap-sync ${args.join(' ')}`)
+      );
+    });
+  });
 }
 
 function collectShouldFail(report: {
@@ -271,8 +311,6 @@ const noopGiteaClient: GiteaClient = {
   repositoryExists: () => Promise.resolve(false),
 };
 
-const program = new Command();
-
 function toFetchPreview(result: ResolveRootRequirementsResult) {
   return {
     resolved: result.resolved.map((pkg) => ({
@@ -333,10 +371,275 @@ function formatVerifyInstallReport(report: VerifyInstallReport): string {
   return lines.join('\n');
 }
 
+async function ask(
+  rl: ReadlineInterface,
+  question: string,
+  defaultValue?: string
+): Promise<string> {
+  const suffix = defaultValue ? ` [${defaultValue}]` : '';
+  const answer = await rl.question(`${question}${suffix}: `).catch((error: unknown) => {
+    if (error instanceof Error && error.message.includes('readline was closed')) {
+      return defaultValue ?? '';
+    }
+    throw error;
+  });
+  const trimmed = answer.trim();
+  return trimmed.length > 0 ? trimmed : (defaultValue ?? '');
+}
+
+async function askYesNo(
+  rl: ReadlineInterface,
+  question: string,
+  defaultValue: boolean
+): Promise<boolean> {
+  const suffix = defaultValue ? ' [Y/n]' : ' [y/N]';
+  const answer = await rl.question(`${question}${suffix}: `).catch((error: unknown) => {
+    if (error instanceof Error && error.message.includes('readline was closed')) {
+      return '';
+    }
+    throw error;
+  });
+  const normalized = answer.trim().toLowerCase();
+  if (!normalized) {
+    return defaultValue;
+  }
+  return normalized === 'y' || normalized === 'yes';
+}
+
+async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
+  try {
+    return await readWorkspaceConfig(workspaceDir);
+  } catch (error) {
+    if (
+      !(await askYesNo(rl, `${workspaceConfigFileName} not found. Initialize workspace?`, true))
+    ) {
+      throw error;
+    }
+    return initWorkspace({ workspaceDir });
+  }
+}
+
+function printMenu(): void {
+  console.log('\nairgap-sync');
+  console.log('1. Show targets');
+  console.log('2. Add Git target');
+  console.log('3. Add npm target');
+  console.log('4. Remove target');
+  console.log('5. Configure registries and Gitea');
+  console.log('6. Collect updates');
+  console.log('7. Verify bundle');
+  console.log('8. Apply bundle');
+  console.log('9. Verify installs');
+  console.log('10. Show bundle info');
+  console.log('0. Exit');
+}
+
+async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
+  const config = await readMenuWorkspace(workspaceDir, rl);
+  const sourceRegistry = await ask(rl, 'Source npm registry', config.sourceRegistry);
+  const targetRegistry = await ask(
+    rl,
+    'Closed-network npm registry',
+    config.targetRegistry ?? 'http://verdaccio.local:4873'
+  );
+  const giteaUrl = await ask(
+    rl,
+    'Closed-network Gitea URL',
+    config.giteaUrl ?? 'http://gitea.local'
+  );
+
+  await writeWorkspaceConfig(workspaceDir, {
+    ...config,
+    sourceRegistry,
+    ...(targetRegistry ? { targetRegistry } : {}),
+    ...(giteaUrl ? { giteaUrl } : {}),
+  });
+  console.log('Saved workspace configuration.');
+}
+
+async function targetRegistryFromMenu(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<string> {
+  const config = await readMenuWorkspace(workspaceDir, rl);
+  const targetRegistry = await ask(
+    rl,
+    'Closed-network npm registry',
+    config.targetRegistry ?? 'http://verdaccio.local:4873'
+  );
+  if (!targetRegistry) {
+    throw new Error('Closed-network npm registry is required');
+  }
+  if (targetRegistry !== config.targetRegistry) {
+    await writeWorkspaceConfig(workspaceDir, { ...config, targetRegistry });
+  }
+  return targetRegistry;
+}
+
+async function giteaUrlFromMenu(workspaceDir: string, rl: ReadlineInterface): Promise<string> {
+  const config = await readMenuWorkspace(workspaceDir, rl);
+  const giteaUrl = await ask(
+    rl,
+    'Closed-network Gitea URL',
+    config.giteaUrl ?? 'http://gitea.local'
+  );
+  if (!giteaUrl) {
+    throw new Error('Closed-network Gitea URL is required');
+  }
+  if (giteaUrl !== config.giteaUrl) {
+    await writeWorkspaceConfig(workspaceDir, { ...config, giteaUrl });
+  }
+  return giteaUrl;
+}
+
+async function runMenuAction(
+  workspaceDir: string,
+  choice: string,
+  rl: ReadlineInterface
+): Promise<boolean> {
+  const config = await readMenuWorkspace(workspaceDir, rl);
+  const bundle = config.output;
+
+  switch (choice) {
+    case '0':
+      return false;
+    case '1':
+      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+      return true;
+    case '2': {
+      const url = await ask(rl, 'Git repository URL');
+      const branch = await ask(rl, 'Branch (optional)');
+      if (url) {
+        await runSelfCommand(
+          compactArgs([
+            'target',
+            'add',
+            'git',
+            url,
+            workspaceDir,
+            branch ? '--branch' : undefined,
+            branch,
+          ]),
+          workspaceDir
+        );
+      }
+      return true;
+    }
+    case '3': {
+      const spec = await ask(rl, 'npm package spec');
+      if (spec) {
+        await runSelfCommand(['target', 'add', 'npm', spec, workspaceDir], workspaceDir);
+      }
+      return true;
+    }
+    case '4': {
+      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+      const index = await ask(rl, 'Target index to remove');
+      if (index) {
+        await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
+      }
+      return true;
+    }
+    case '5':
+      await configureWorkspaceMenu(workspaceDir, rl);
+      return true;
+    case '6': {
+      const includeDev = await askYesNo(rl, 'Include devDependencies?', false);
+      const includePeer = await askYesNo(rl, 'Traverse peerDependencies?', false);
+      await runSelfCommand(
+        compactArgs([
+          'collect',
+          includeDev ? '--include-dev' : undefined,
+          includePeer ? '--include-peer' : undefined,
+        ]),
+        workspaceDir
+      );
+      return true;
+    }
+    case '7':
+      await runSelfCommand(['verify', bundle], workspaceDir);
+      return true;
+    case '8': {
+      const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
+      const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+      const publicRepos = await askYesNo(rl, 'Create public Gitea repositories?', false);
+      const configureGitGlobal = await askYesNo(
+        rl,
+        'Configure global Git rewrites on this machine?',
+        false
+      );
+      const token = process.env.GITEA_TOKEN ?? (await ask(rl, 'Gitea token'));
+      await runSelfCommand(
+        compactArgs([
+          'apply',
+          bundle,
+          '--registry',
+          targetRegistry,
+          '--gitea',
+          giteaUrl,
+          token ? '--gitea-token' : undefined,
+          token,
+          publicRepos ? '--public' : undefined,
+          configureGitGlobal ? '--configure-git-global' : undefined,
+        ]),
+        workspaceDir
+      );
+      return true;
+    }
+    case '9': {
+      const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
+      const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+      await runSelfCommand(
+        ['verify', 'install', bundle, '--registry', targetRegistry, '--gitea', giteaUrl],
+        workspaceDir
+      );
+      return true;
+    }
+    case '10':
+      await runSelfCommand(['info', bundle], workspaceDir);
+      return true;
+    default:
+      console.log('Unknown menu item.');
+      return true;
+  }
+}
+
+async function runInteractiveMenu(workspace: string, options: MenuOptions): Promise<void> {
+  const workspaceDir = path.resolve(workspace);
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    await readMenuWorkspace(workspaceDir, rl);
+    const runOnce = async (): Promise<boolean> => {
+      printMenu();
+      const choice = await ask(rl, 'Choose an action', '0');
+      try {
+        return await runMenuAction(workspaceDir, choice, rl);
+      } catch (error) {
+        console.error(`Error: ${(error as Error).message}`);
+        process.exitCode = 1;
+        return true;
+      }
+    };
+
+    let keepGoing = await runOnce();
+    while (keepGoing && options.once !== true) {
+      keepGoing = await runOnce();
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+const program = new Command();
+
 program
   .name(packageName)
   .description('Sync Git and npm dependencies for airgapped environments')
-  .version('0.0.0');
+  .version(packageVersion);
 
 program
   .command('init')
@@ -359,6 +662,20 @@ program
           2
         )
       );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('menu')
+  .description('Open an interactive workspace menu')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--once', 'Run one selected action and exit')
+  .action(async (workspace: string, options: MenuOptions) => {
+    try {
+      await runInteractiveMenu(workspace, options);
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

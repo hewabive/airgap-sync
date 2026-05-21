@@ -37,6 +37,21 @@ Targets are stored in `airgap-sync.json`. Git targets are cloned into `repos/` u
 preserved source paths such as `repos/github.com/acme/app`. npm targets are treated as
 explicit root package specs during `collect`.
 
+## menu
+
+```bash
+airgap-sync menu
+airgap-sync menu /media/USB/airgap-sync
+```
+
+Opens an interactive prompt menu for common workspace actions: list/add/remove targets,
+configure source and closed-network endpoints, collect updates, verify a bundle, apply
+the bundle, run install verification, and show bundle information.
+
+The menu is intentionally a thin wrapper over the normal CLI commands. It stores
+`targetRegistry` and `giteaUrl` in `airgap-sync.json` when the operator enters them, but
+it does not store Gitea tokens.
+
 ## repos update
 
 ```bash

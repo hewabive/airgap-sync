@@ -40,6 +40,15 @@ airgap-sync target add npm pnpm@latest
 airgap-sync target list
 ```
 
+Operators who prefer prompts can run:
+
+```bash
+airgap-sync menu
+```
+
+The menu covers target management, endpoint configuration, online collection, offline
+apply, verification, and bundle info.
+
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
 

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { packageName } from '../src/index.js';
+import { packageName, packageVersion } from '../src/index.js';
 import type { BundleManifest } from '../src/types.js';
 
 describe('package scaffold', () => {
   it('exports the package name', () => {
     expect(packageName).toBe('airgap-sync');
+    expect(packageVersion).toBe('0.1.0');
   });
 
   it('defines the bundle manifest contract', () => {
