@@ -74,6 +74,44 @@ describe('resolveRootRequirementFromMetadata', () => {
     expect(result.tagRequirement).toBeUndefined();
   });
 
+  it('prefers latest for ranges when latest satisfies the range', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({ raw: 'demo@^1.0.0', specifier: '^1.0.0', type: 'range' }),
+      {
+        ...metadata,
+        'dist-tags': {
+          latest: '1.2.0',
+        },
+        versions: {
+          ...metadata.versions,
+          '1.3.0': {
+            name: 'demo',
+            version: '1.3.0',
+            dist: { tarball: 'https://registry.example/demo/-/demo-1.3.0.tgz' },
+          },
+        },
+      }
+    );
+
+    expect(result.resolved?.version).toBe('1.2.0');
+    expect(result.resolved?.resolvedVia).toBe('range');
+  });
+
+  it('falls back to highest satisfying version when latest does not satisfy the range', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({ raw: 'demo@^1.0.0', specifier: '^1.0.0', type: 'range' }),
+      {
+        ...metadata,
+        'dist-tags': {
+          latest: '2.0.0-beta.1',
+        },
+      }
+    );
+
+    expect(result.resolved?.version).toBe('1.2.0');
+    expect(result.resolved?.resolvedVia).toBe('range');
+  });
+
   it('resolves exact versions', () => {
     const result = resolveRootRequirementFromMetadata(
       requirement({ raw: 'demo@1.0.0', specifier: '1.0.0', type: 'version' }),

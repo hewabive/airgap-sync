@@ -38,6 +38,11 @@ function chooseVersion(
       : { reason: `Version "${requirement.specifier}" does not exist`, resolvedVia };
   }
 
+  const latest = metadata['dist-tags']?.latest;
+  if (latest && semver.satisfies(latest, requirement.specifier)) {
+    return { version: latest, resolvedVia };
+  }
+
   const version = semver.maxSatisfying(Object.keys(metadata.versions), requirement.specifier);
   return version
     ? { version, resolvedVia }
