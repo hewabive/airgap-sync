@@ -155,6 +155,9 @@ missing tarball files, and bundle validation issues.
 ```bash
 airgap-sync verify ./bundle
 airgap-sync verify ./bundle --json
+airgap-sync verify install ./bundle \
+  --registry http://verdaccio.local:4873 \
+  --gitea http://gitea.local
 ```
 
 Checks the bundle without running package-manager installs. It validates bundle
@@ -164,6 +167,22 @@ checks `apply-report.json` when present. The command writes `verify-report.json`
 
 Errors produce a non-zero exit code. Warnings, such as a missing `apply-report.json`
 before the offline import has run, are reported but do not fail the command.
+
+`verify install` runs real package-manager installs for Git targets recorded in
+`workspace-snapshot.json`. It copies each project to a temporary directory, detects the
+package manager from the lockfile, sets the npm registry, and uses a temporary Git
+config with source-host rewrites to the provided Gitea URL. It writes
+`verify-install-report.json`.
+
+Supported install detection:
+
+```text
+pnpm-lock.yaml      pnpm install --frozen-lockfile
+package-lock.json   npm ci
+yarn.lock           yarn install --immutable
+```
+
+Projects without a supported lockfile are skipped.
 
 ## git sources
 

@@ -19,6 +19,7 @@ import type {
   TagRequirement,
   UnsupportedRootPackageRequirement,
   VerifyReport,
+  VerifyInstallReport,
 } from '../types.js';
 import { packageFileName } from './files.js';
 import type { WorkspaceSnapshot } from './workspace.js';
@@ -207,4 +208,12 @@ export async function writeWorkspaceSnapshot(
 export async function writeVerifyReport(bundleDir: string, report: VerifyReport): Promise<void> {
   await fs.ensureDir(bundleDir);
   await fs.writeJson(path.join(bundleDir, 'verify-report.json'), report, { spaces: 2 });
+}
+
+export async function writeVerifyInstallReport(
+  bundleDir: string,
+  report: VerifyInstallReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'verify-install-report.json'), report, { spaces: 2 });
 }

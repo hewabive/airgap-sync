@@ -33,6 +33,7 @@ import {
   removeWorkspaceTarget,
   updateRepositories,
   verifyBundle,
+  verifyInstall,
   writeBundleDocuments,
   writeFetchReport,
   writeGiteaRepositoryProvisionReport,
@@ -51,6 +52,7 @@ import type {
   PublishProgressPhase,
   ResolveRootRequirementsResult,
   VerifyReport,
+  VerifyInstallReport,
 } from './index.js';
 
 interface FetchOptions {
@@ -82,6 +84,14 @@ interface ApplyOptions {
 
 interface VerifyOptions {
   json?: boolean;
+}
+
+interface VerifyInstallOptions {
+  gitea: string;
+  json?: boolean;
+  keepTemp?: boolean;
+  registry: string;
+  timeoutMs: number;
 }
 
 interface CollectOptions {
@@ -274,6 +284,27 @@ function formatVerifyReport(report: VerifyReport): string {
   });
   lines.push(
     `SUMMARY ${String(report.summary.ok)} ok, ${String(report.summary.warnings)} warnings, ${String(report.summary.errors)} errors`
+  );
+  return lines.join('\n');
+}
+
+function formatVerifyInstallReport(report: VerifyInstallReport): string {
+  const lines = report.projects.map((project) => {
+    const label =
+      project.status === 'passed' ? 'OK' : project.status === 'skipped' ? 'SKIP' : 'ERROR';
+    const subject = project.packageManager
+      ? `${project.projectPath} (${project.packageManager})`
+      : project.projectPath;
+    const detail =
+      project.status === 'skipped'
+        ? `: ${project.reason ?? 'skipped'}`
+        : project.exitCode === undefined
+          ? ''
+          : `: exit ${String(project.exitCode)}`;
+    return `${label} ${subject}${detail}`;
+  });
+  lines.push(
+    `SUMMARY ${String(report.passed)} passed, ${String(report.skipped)} skipped, ${String(report.failed)} failed`
   );
   return lines.join('\n');
 }
@@ -694,9 +725,9 @@ program
     }
   });
 
-program
-  .command('verify')
-  .description('Verify an airgap bundle without running package installs')
+const verifyCommand = program.command('verify').description('Verify an airgap bundle');
+
+verifyCommand
   .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--json', 'Print the full JSON verification report')
   .action(async (bundle: string, options: VerifyOptions) => {
@@ -704,6 +735,37 @@ program
       const report = await verifyBundle({ bundleDir: bundle });
       console.log(
         options.json === true ? JSON.stringify(report, null, 2) : formatVerifyReport(report)
+      );
+
+      if (!report.ok) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+verifyCommand
+  .command('install')
+  .description('Verify real package-manager installs from workspace Git targets')
+  .argument('<bundle>', 'Path to airgap bundle directory')
+  .requiredOption('-r, --registry <url>', 'Target npm registry URL')
+  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .option('--timeout-ms <ms>', 'Install timeout per project', parsePositiveInteger, 10 * 60_000)
+  .option('--keep-temp', 'Keep temporary project copies for debugging')
+  .option('--json', 'Print the full JSON verification report')
+  .action(async (bundle: string, options: VerifyInstallOptions) => {
+    try {
+      const report = await verifyInstall({
+        bundleDir: bundle,
+        giteaBaseUrl: options.gitea,
+        keepTemp: options.keepTemp === true,
+        registryUrl: options.registry,
+        timeoutMs: options.timeoutMs,
+      });
+      console.log(
+        options.json === true ? JSON.stringify(report, null, 2) : formatVerifyInstallReport(report)
       );
 
       if (!report.ok) {

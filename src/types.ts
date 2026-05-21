@@ -430,3 +430,33 @@ export interface VerifyReport {
     warnings: number;
   };
 }
+
+export type VerifyInstallPackageManager = 'npm' | 'pnpm' | 'yarn';
+export type VerifyInstallProjectStatus = 'passed' | 'failed' | 'skipped';
+
+export interface VerifyInstallProjectResult {
+  command?: string[];
+  error?: string;
+  exitCode?: number;
+  packageManager?: VerifyInstallPackageManager;
+  projectPath: string;
+  reason?: string;
+  status: VerifyInstallProjectStatus;
+  stderr?: string;
+  stdout?: string;
+  targetUrl: string;
+  tempPath?: string;
+}
+
+export interface VerifyInstallReport {
+  bundle: string;
+  failed: number;
+  generatedAt: string;
+  giteaBaseUrl: string;
+  ok: boolean;
+  passed: number;
+  projects: VerifyInstallProjectResult[];
+  registryUrl: string;
+  skipped: number;
+  totalProjects: number;
+}

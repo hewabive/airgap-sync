@@ -50,6 +50,9 @@ airgap-sync apply ./bundle \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
 airgap-sync verify ./bundle
+airgap-sync verify install ./bundle \
+  --registry http://verdaccio.local:4873 \
+  --gitea http://gitea.local
 ```
 
 The intended Git mirror layout preserves upstream owner/repository paths. For example,

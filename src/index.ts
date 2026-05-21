@@ -15,6 +15,7 @@ export {
   writeGitConfigReport,
   writeGitFetchReport,
   writePublishReport,
+  writeVerifyInstallReport,
   writeVerifyReport,
   writeWorkspaceSnapshot,
 } from './core/bundle.js';
@@ -45,6 +46,7 @@ export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './c
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
 export { throwIfInvalidBundle, validateBundle } from './core/validation.js';
 export { verifyBundle } from './core/verify.js';
+export { runInstallCommand, verifyInstall } from './core/verify-install.js';
 export {
   addWorkspaceTarget,
   createWorkspaceSnapshot,
@@ -120,6 +122,12 @@ export type {
 } from './core/validation.js';
 export type { VerifyBundleOptions } from './core/verify.js';
 export type {
+  InstallCommandInvocation,
+  InstallCommandResult,
+  InstallCommandRunner,
+  VerifyInstallOptions,
+} from './core/verify-install.js';
+export type {
   InitWorkspaceOptions,
   MaterializeWorkspaceGitTargetsOptions,
   WorkspaceConfig,
@@ -188,5 +196,9 @@ export type {
   UnsupportedRootPackageRequirement,
   VerifyCheck,
   VerifyCheckStatus,
+  VerifyInstallPackageManager,
+  VerifyInstallProjectResult,
+  VerifyInstallProjectStatus,
+  VerifyInstallReport,
   VerifyReport,
 } from './types.js';

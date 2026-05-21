@@ -184,6 +184,9 @@ Before running project installs, verify the imported bundle:
 
 ```bash
 airgap-sync verify ./bundle
+airgap-sync verify install ./bundle \
+  --registry http://verdaccio.local:4873 \
+  --gitea http://gitea.local
 ```
 
 ## Current Lower-Level Commands
