@@ -3,6 +3,38 @@
 The final CLI should keep fetch and publish separate so the online and offline phases
 are auditable.
 
+The current commands are lower-level building blocks. The target workflow adds
+`repos update`, fixed-point `collect`, and top-level `apply` orchestration so the online
+side does not need to know the closed-network Gitea URL.
+
+## repos update
+
+```bash
+airgap-sync repos update ./repos
+airgap-sync repos update ./repos --dry-run
+```
+
+Planned command. Scans a directory for nested Git repositories and refreshes each clean
+branch with `git pull --ff-only`. Dirty worktrees, detached HEADs, non-fast-forward
+branches, and authentication failures should be reported without automatic repair.
+
+## collect
+
+```bash
+airgap-sync collect ./repos \
+  --registry https://registry.npmjs.org \
+  --include-dev \
+  --output ./airgap-bundle
+```
+
+Planned command. Refresh-aware collection should scan package manifests from project
+repositories, resolve npm registry packages, mirror Git dependencies, scan package
+manifests from newly mirrored Git repositories, and repeat until no new npm or Git
+inputs are found.
+
+The online bundle should store Git source identities and local mirrors, not
+Gitea-specific target URLs.
+
 ## fetch
 
 ```bash
@@ -86,6 +118,9 @@ Reads `fetch-report.json`, groups discovered Git dependency specs by source
 repository, and creates a deterministic mirror plan for Gitea. `--write` stores the
 plan as `git-plan.json` inside the bundle; without it, the command only prints JSON.
 
+This is a current lower-level command. The target workflow moves Gitea mapping to the
+offline apply phase and preserves upstream owner/repository paths where possible.
+
 The plan is intentionally non-mutating: it does not clone repositories, create Gitea
 projects, or patch package manifests. It records source clone URLs, target Gitea URLs,
 the npm packages that required each Git dependency, and candidate `insteadOf` prefixes
@@ -147,3 +182,21 @@ airgap-sync git config ./airgap-bundle --global --dry-run
 Reads `git-plan.json` and writes the generated URL rewrite rules into the global Git
 configuration with `git config --global url.<gitea-url>.insteadOf <public-url>`. The
 command writes `git-config-report.json`.
+
+## apply
+
+```bash
+airgap-sync apply ./airgap-bundle \
+  --registry http://verdaccio.local:4873 \
+  --gitea http://gitea.local \
+  --gitea-token "$GITEA_TOKEN" \
+  --preserve-git-paths
+```
+
+Planned command. Applies the whole bundle in the closed network: publish npm packages
+to Verdaccio, restore dist-tags, map Git sources to Gitea targets, create missing
+Gitea owners/repositories, push mirrors, and generate install configuration.
+
+When `--preserve-git-paths` is enabled, a source such as
+`https://github.com/antvis/G2.git` should map to `http://gitea.local/antvis/G2.git` so
+consumer machines can use one broad `insteadOf` rule for the source host.

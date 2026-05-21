@@ -1,12 +1,14 @@
 # Workflows
 
-This document describes the current manual end-to-end workflow. The commands are kept
-separate on purpose: each phase writes reports that can be inspected before the next
-phase mutates Verdaccio, Gitea, or Git configuration.
+This document describes the target end-to-end workflow. Some steps are currently
+implemented as lower-level commands; the high-level `repos update`, `collect`, and
+`apply` orchestration commands are the intended contract.
 
 ## Assumptions
 
 - The online machine can reach the source npm registry and public Git hosts.
+- Project Git repositories are on removable media or in a directory that can be
+  refreshed on the online machine.
 - The transfer bundle directory is on removable media or can be copied to it.
 - The closed network has Verdaccio and Gitea running.
 - Verdaccio is populated only through `npm publish` and `npm dist-tag`.
@@ -16,54 +18,61 @@ phase mutates Verdaccio, Gitea, or Git configuration.
 Example names used below:
 
 ```text
-./airgap-bundle                Transfer bundle directory
-https://registry.npmjs.org     Source npm registry
-http://verdaccio.local:4873    Closed-network npm registry
-http://gitea.local             Closed-network Gitea base URL
-npm-mirrors                    Gitea user or organization for dependency mirrors
+./repos                         Project repositories on removable media
+./airgap-bundle                 Transfer bundle directory
+https://registry.npmjs.org      Source npm registry
+http://verdaccio.local:4873     Closed-network npm registry
+http://gitea.local              Closed-network Gitea base URL
 ```
 
 ## Online Phase
 
-Build the airgap bundle from a project manifest:
+Refresh project repositories before dependency collection:
 
 ```bash
-airgap-sync fetch \
-  --manifest ./package.json \
-  --include-dev \
+airgap-sync repos update ./repos
+```
+
+The update step should scan for nested Git repositories and run a conservative
+`git pull --ff-only` in each clean branch. Repositories that cannot be updated safely
+should be recorded in a report rather than repaired automatically.
+
+Collect npm packages and Git dependencies into the transfer bundle:
+
+```bash
+airgap-sync collect ./repos \
   --registry https://registry.npmjs.org \
+  --include-dev \
   --output ./airgap-bundle
 ```
 
-For production-only dependency closure, omit `--include-dev`.
+The collect step should run to a fixed point:
 
-The fetch step writes:
+```text
+scan package.json files from project repositories
+  -> resolve and download npm registry package closure
+  -> discover Git dependencies from package manifests
+  -> clone/update missing Git dependency mirrors
+  -> scan package.json files from newly mirrored Git repositories
+  -> repeat until no new npm requirements or Git repositories appear
+```
+
+If new Git repositories are cloned, the node dependency collection must run again
+before the bundle is complete.
+
+The online bundle should not be tied to a specific closed-network Gitea URL. It should
+store source Git identities such as `https://github.com/antvis/G2.git`, requested refs,
+local mirror paths, and `requiredBy` edges. Mapping those sources to Gitea belongs to
+the offline phase.
+
+The collect step writes npm metadata and Git source metadata:
 
 - `seed-manifest.json`
 - `dist-tags.json`
 - `fetch-report.json`
 - package tarballs under `packages/`
-
-Create the Git mirror plan from Git dependencies found in npm package manifests:
-
-```bash
-airgap-sync git plan ./airgap-bundle \
-  --gitea http://gitea.local \
-  --owner npm-mirrors \
-  --write
-```
-
-If the Gitea owner is an organization, the owner name is still written here; the owner
-type is selected later during repository creation.
-
-Fetch local bare mirrors for the planned Git dependencies:
-
-```bash
-airgap-sync git fetch ./airgap-bundle
-```
-
-This creates or updates local bare repositories under
-`./airgap-bundle/git-mirrors/` and writes `git-fetch-report.json`.
+- local bare Git mirrors under `git-mirrors/`
+- Git source records for offline apply
 
 Before transfer, inspect the bundle:
 
@@ -74,8 +83,7 @@ airgap-sync info ./airgap-bundle
 Also check:
 
 - `fetch-report.json` for unresolved registry packages and unsupported specs;
-- `git-plan.json` for planned Gitea target URLs;
-- `git-fetch-report.json` for clone/update errors.
+- Git source and fetch reports for clone/update errors.
 
 ## Transfer Phase
 
@@ -86,65 +94,50 @@ Copy the whole `./airgap-bundle` directory to the closed network, including:
 - `seed-manifest.json`
 - `dist-tags.json`
 - `fetch-report.json`
-- `git-plan.json`
-- `git-fetch-report.json`
+- Git source metadata
+- Git mirror fetch reports
 
 Do not copy only tarballs. The JSON files are the audit trail and are required by later
 commands.
 
 ## Offline Phase
 
-Publish npm packages and restore dist-tags into Verdaccio:
-
-```bash
-airgap-sync publish ./airgap-bundle \
-  --registry http://verdaccio.local:4873
-```
-
-This writes `publish-report.json`.
-
-Create missing Gitea repositories from the plan:
+Apply the bundle to Verdaccio and Gitea:
 
 ```bash
 export GITEA_TOKEN=...
 
-airgap-sync git create-repos ./airgap-bundle \
-  --token "$GITEA_TOKEN"
+airgap-sync apply ./airgap-bundle \
+  --registry http://verdaccio.local:4873 \
+  --gitea http://gitea.local \
+  --gitea-token "$GITEA_TOKEN" \
+  --preserve-git-paths
 ```
 
-For a Gitea organization:
+The offline apply step should:
+
+- publish npm tarballs into Verdaccio;
+- restore npm dist-tags;
+- map source Git repositories to the closed-network Gitea instance;
+- preserve upstream owner/repository paths when possible;
+- create missing Gitea owners or repositories;
+- push local bare mirrors into Gitea;
+- generate install configuration for consumer machines.
+
+For example:
+
+```text
+https://github.com/antvis/G2.git -> http://gitea.local/antvis/G2.git
+```
+
+This layout allows a broad consumer rewrite rule:
 
 ```bash
-airgap-sync git create-repos ./airgap-bundle \
-  --owner-type org \
-  --token "$GITEA_TOKEN"
+git config --global url."http://gitea.local/".insteadOf "https://github.com/"
 ```
 
-By default repositories are private. Use `--public` only when the mirror repositories
-should be public inside the closed network.
-
-Push local bare mirrors into Gitea:
-
-```bash
-airgap-sync git apply ./airgap-bundle
-```
-
-This writes `git-apply-report.json`.
-
-Configure Git URL rewrites so installs that reference public Git URLs resolve through
-Gitea:
-
-```bash
-airgap-sync git config ./airgap-bundle --global
-```
-
-This writes `git-config-report.json` and applies rules like:
-
-```bash
-git config --global \
-  url."http://gitea.local/npm-mirrors/github.com-owner-repo.git".insteadOf \
-  "https://github.com/owner/repo.git"
-```
+Repository-specific `insteadOf` rules should be a fallback, not the default, because
+they are harder to maintain on every consumer machine.
 
 ## Install Check
 
@@ -157,10 +150,32 @@ pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 
 If install still tries to reach the public internet, inspect:
 
-- Git errors: check `git-plan.json`, `git-apply-report.json`, and
-  `git-config-report.json`.
+- Git errors: check Git source metadata, Gitea apply reports, and consumer rewrite
+  configuration.
 - Missing npm versions or tags: check `publish-report.json` and `dist-tags.json`.
 - Unsupported specs: check `fetch-report.json`.
+
+## Current Lower-Level Commands
+
+Until `repos update`, `collect`, and top-level `apply` are implemented, the current CLI
+uses lower-level commands:
+
+```bash
+# Online
+airgap-sync fetch --manifest ./package.json --include-dev -o ./airgap-bundle
+airgap-sync git plan ./airgap-bundle --gitea http://gitea.local --owner npm-mirrors --write
+airgap-sync git fetch ./airgap-bundle
+
+# Offline
+airgap-sync publish ./airgap-bundle --registry http://verdaccio.local:4873
+airgap-sync git create-repos ./airgap-bundle --token "$GITEA_TOKEN"
+airgap-sync git apply ./airgap-bundle
+airgap-sync git config ./airgap-bundle --global
+```
+
+These commands are useful for testing, but they still bind the Git plan to Gitea during
+the online phase and flatten mirror names. That is the behavior the next workflow
+iteration should replace.
 
 ## Dry Runs
 
@@ -178,9 +193,11 @@ prints the planned npm publish and dist-tag operations without publishing.
 
 ## Current Gaps
 
-- There is no single `collect` command yet; use `fetch`, `git plan`, and `git fetch`.
-- There is no single `apply` command yet; use `publish`, `git create-repos`,
-  `git apply`, and `git config`.
+- There is no `repos update` command yet.
+- There is no fixed-point `collect` command yet.
+- Git source metadata is not yet separated from offline Gitea planning.
+- Gitea paths are not yet preserved as upstream `owner/repo`.
+- There is no single top-level `apply` command yet.
 - There is no automated external-network verification yet. The next milestone is a
   `verify` command that runs installs in a controlled environment and fails on public
   npm or Git access attempts.

@@ -19,7 +19,7 @@ The broader target is an airgap sync workflow for portable media:
 - refresh one or more Git repositories on an online machine;
 - discover Node dependency graphs across those repositories;
 - collect npm registry packages for Verdaccio;
-- collect Git dependencies for a local Gitea mirror;
+- collect Git dependencies as portable source mirrors;
 - apply both sides in the closed network and verify installs do not reach outside.
 
 ## Status
@@ -31,43 +31,52 @@ dependency mirroring is implemented as explicit planning, local mirror fetch, Gi
 repository creation, mirror push, and Git URL rewrite steps. Higher-level repository
 orchestration and automated install verification are still design work.
 
-## Current Workflow
+## Target Workflow
 
 ```bash
-# Online machine: build the transfer bundle and collect Git mirrors.
-airgap-sync fetch --manifest ./package.json --include-dev -o ./airgap-bundle
-airgap-sync git plan ./airgap-bundle --gitea http://gitea.local --owner npm-mirrors --write
-airgap-sync git fetch ./airgap-bundle
+# Online machine: refresh project repositories and collect npm/Git closure.
+airgap-sync repos update ./repos
+airgap-sync collect ./repos -o ./airgap-bundle
 
-# Closed network: populate Verdaccio and Gitea.
-airgap-sync publish ./airgap-bundle -r http://verdaccio.local:4873
-airgap-sync git create-repos ./airgap-bundle --token "$GITEA_TOKEN"
-airgap-sync git apply ./airgap-bundle
-airgap-sync git config ./airgap-bundle --global
+# Closed network: populate Verdaccio and Gitea from the transfer bundle.
+airgap-sync apply ./airgap-bundle \
+  --registry http://verdaccio.local:4873 \
+  --gitea http://gitea.local \
+  --gitea-token "$GITEA_TOKEN" \
+  --preserve-git-paths
 ```
 
-For a Gitea organization, add `--owner-type org` to `git create-repos`.
+The intended Git mirror layout preserves upstream owner/repository paths. For example,
+`https://github.com/antvis/G2.git` should be mirrored as
+`http://gitea.local/antvis/G2.git`. That lets consumer machines use one broad Git
+rewrite rule instead of many repository-specific rules:
 
-After that, normal installs should use the closed-network services:
+```bash
+git config --global url."http://gitea.local/".insteadOf "https://github.com/"
+```
+
+After applying the bundle, normal installs should use the closed-network services:
 
 ```bash
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
-Future commands are expected to cover a larger workflow:
+Current lower-level commands are documented in the [CLI Contract](./docs/cli.md). The
+workflow above is the direction for the next orchestration layer.
+
+The lower-level commands are expected to converge into this larger workflow:
 
 ```bash
-# Online machine: refresh Git repositories on removable media.
-airgap-sync git fetch ./repos
-
-# Online machine: collect npm and Git dependency closure.
+# Online machine: refresh project repositories, then collect npm and Git closure.
+airgap-sync repos update ./repos
 airgap-sync collect ./repos -o ./airgap-bundle
 
-# Closed network: push mirrored Git repositories and publish npm packages.
+# Closed network: publish npm packages and push Git mirrors.
 airgap-sync apply ./airgap-bundle \
+  --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
-  --registry http://verdaccio.local:4873
+  --preserve-git-paths
 ```
 
 ## Design Principles

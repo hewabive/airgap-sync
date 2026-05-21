@@ -5,7 +5,9 @@ through normal npm publishing commands.
 
 The product direction is broader: a portable airgap dependency sync tool for projects
 that combine Git repositories, npm registry dependencies, and npm Git dependencies.
-The npm/Verdaccio bundle is the first implemented subsystem.
+The npm/Verdaccio bundle and lower-level Git mirror commands are implemented first;
+repository refresh, fixed-point collection, and top-level apply orchestration are the
+next architectural layer.
 
 ## Problem
 
@@ -47,17 +49,21 @@ airgap bundle
 ```text
 online removable media
   -> refresh Git repositories
-  -> scan package manifests and lockfiles
+  -> scan package manifests and lockfiles from project repositories
   -> resolve npm registry package closure
   -> resolve Git dependency closure
   -> download npm tarballs
   -> mirror Git repositories or create Git bundles
+  -> scan manifests from newly mirrored Git dependencies
+  -> repeat npm/Git collection until no new inputs are found
   -> write transfer bundle
 
 closed network
-  -> push Git mirrors into Gitea
   -> publish npm tarballs into Verdaccio
   -> restore npm dist-tags
+  -> map Git sources to Gitea targets
+  -> create missing Gitea owners/repositories
+  -> push Git mirrors into Gitea
   -> generate install configuration
   -> verify install without external network access
 ```
@@ -70,6 +76,24 @@ The Git side should use standard Git primitives where possible:
 
 The npm side should continue to populate Verdaccio through `npm publish` and
 `npm dist-tag`, not by mutating Verdaccio storage.
+
+## Repository Update Policy
+
+The transfer workflow starts from one or more project repositories on removable media.
+`airgap-sync` should be able to scan a root directory for nested Git repositories and
+refresh each one before dependency collection.
+
+The default update policy should be conservative:
+
+- find repositories by locating `.git` directories or files;
+- skip nested repositories once the nearest parent repository is selected;
+- refuse to update dirty worktrees unless explicitly overridden;
+- run `git pull --ff-only` for normal branches;
+- record detached HEADs, merge conflicts, authentication failures, and non-fast-forward
+  branches in a report instead of trying to repair them.
+
+Repository update is part of collection because package manifests can change whenever a
+project repository is refreshed.
 
 ## Resolver Policy
 
@@ -129,6 +153,26 @@ Dry-run fetch uses the same traversal policy as a normal fetch, but reads depend
 metadata from the source registry instead of downloading tarballs and extracting
 package.json files.
 
+## Collection Fixed Point
+
+The high-level `collect` command should not run npm collection only once. Git
+dependencies may themselves contain package manifests, and those manifests can introduce
+new npm dependencies or more Git dependencies.
+
+Collection should therefore run to a fixed point:
+
+```text
+scan project package.json files
+  -> resolve and download npm registry packages
+  -> discover Git specs in package manifests
+  -> clone/update missing Git dependency mirrors
+  -> scan package.json files from newly mirrored Git repositories
+  -> repeat until no new npm requirements and no new Git repositories appear
+```
+
+If a new Git repository is cloned or updated in a way that exposes new manifests, the
+npm resolver must run again before the bundle is considered complete.
+
 ## Tag Policy
 
 For shared registries, tags must match the source registry targets at fetch time.
@@ -172,9 +216,45 @@ the package manager may attempt to access GitHub during install. Publishing npm
 tarballs into Verdaccio does not make those Git URLs resolvable.
 
 The preferred strategy is to mirror the referenced Git repository into the closed
-network and make the original spec resolve to that mirror. Possible mechanisms:
+network and make the original spec resolve to that mirror.
 
-- generate `git config url.<gitea-url>.insteadOf <public-url>` rules;
+Online collection should store source Git identities, not Gitea-specific target URLs.
+The bundle should be portable between closed networks. A source record should include:
+
+- canonical source URL;
+- source host;
+- owner/repository path;
+- requested commitish/range/subdirectory;
+- local mirror path inside the bundle;
+- `requiredBy` edges that explain why the repository was included.
+
+Offline apply maps those source identities to the target Gitea instance.
+
+## Git Mirror Naming Policy
+
+Git mirror paths should preserve upstream owner/repository identity whenever possible.
+For GitHub-style sources:
+
+```text
+https://github.com/antvis/G2.git -> http://gitea.local/antvis/G2.git
+```
+
+This keeps consumer configuration simple:
+
+```bash
+git config --global url."http://gitea.local/".insteadOf "https://github.com/"
+```
+
+The closed-network apply phase is responsible for creating missing Gitea owners or
+repositories. Flattened names such as `github.com-antvis-g2` should be treated as a
+temporary implementation detail or fallback for hosts that cannot be mapped cleanly to
+an owner/repository path.
+
+Possible mechanisms for making installs resolve to local mirrors:
+
+- generate broad `git config url.<gitea-url>.insteadOf <public-host-url>` rules when
+  owner/repository paths are preserved;
+- generate repository-specific rewrite rules only as a fallback;
 - rewrite root project specs when the operator owns the repository;
 - as a last resort, patch/repack third-party tarballs only with explicit operator
   approval because that changes package contents and may invalidate lockfile integrity.

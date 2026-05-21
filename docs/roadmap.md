@@ -51,6 +51,7 @@ verification.
 
 - Scan a removable-media directory for Git repositories.
 - Refresh repositories on the online side using safe fetch/pull policies.
+- Run repository refresh before dependency collection.
 - Mirror or bundle repositories for transfer into a closed network.
 - Push mirrors into Gitea without accidentally deleting protected refs.
 - Generate `insteadOf` rules for closed-network installs.
@@ -59,11 +60,16 @@ verification.
 
 - Preserve `requiredBy` for unsupported Git specs in fetch reports.
 - Parse npm Git specs into canonical repository URL and commit/tag selectors.
-- Create a deterministic Gitea mirror plan from discovered Git requirements.
+- Store source Git identities in the online bundle without binding them to a specific
+  Gitea instance.
 - Fetch local bare mirrors for Git dependencies discovered in transitive npm package
   manifests.
-- Create missing Gitea repositories from the mirror plan.
-- Push local bare mirrors to planned Gitea target URLs and emit `insteadOf` rules.
+- Re-run npm dependency collection when newly mirrored Git repositories expose
+  additional package manifests.
+- Preserve upstream owner/repository paths when mapping mirrors into Gitea.
+- Create missing Gitea owners/repositories during the offline apply phase.
+- Push local bare mirrors to planned Gitea target URLs and emit broad `insteadOf` rules
+  when preserved paths make that safe.
 - Configure Git `insteadOf` rewrite rules from the transfer bundle.
 - Recursively inspect package manifests from Git dependencies.
 - Decide when URL rewriting is enough and when package/lockfile patching is required.
