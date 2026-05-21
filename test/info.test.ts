@@ -80,6 +80,15 @@ const publishReport: PublishReport = {
   registry: 'http://localhost:4873',
   restoredTags: 1,
   skipped: 0,
+  timings: {
+    cleanupMs: 0,
+    distTagsMs: 0,
+    dryRunMs: 0,
+    lookupMetadataMs: 0,
+    publishMs: 0,
+    totalMs: 0,
+    validateMs: 0,
+  },
   totalPackages: 2,
 };
 

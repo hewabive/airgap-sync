@@ -132,24 +132,33 @@ describe('publishBundle', () => {
       await fs.ensureDir(path.join(bundleDir, 'packages'));
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
-      await expect(
-        publishBundle(manifest, distTags, {
-          bundleDir,
-          dryRun: true,
-          onProgress(event) {
-            progress.push(event);
-          },
-          registryUrl: 'http://localhost:4873',
-        })
-      ).resolves.toMatchObject({
+      const report = await publishBundle(manifest, distTags, {
+        bundleDir,
+        dryRun: true,
+        onProgress(event) {
+          progress.push(event);
+        },
+        registryUrl: 'http://localhost:4873',
+      });
+
+      expect(report).toMatchObject({
         dryRun: true,
         errors: [],
         published: 1,
         registry: 'http://localhost:4873',
         restoredTags: 1,
         skipped: 0,
+        timings: {
+          cleanupMs: 0,
+          distTagsMs: 0,
+          lookupMetadataMs: 0,
+          publishMs: 0,
+        },
         totalPackages: 1,
       });
+      expect(report.timings.dryRunMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.totalMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.validateMs).toBeGreaterThanOrEqual(0);
       expect(progress).toEqual([
         {
           phase: 'validate',
@@ -208,22 +217,31 @@ describe('publishBundle', () => {
       await fs.ensureDir(path.join(bundleDir, 'packages'));
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
-      await expect(
-        publishBundle(manifest, distTags, {
-          bundleDir,
-          onProgress(event) {
-            progress.push(event);
-          },
-          registryUrl: 'http://localhost:4873',
-        })
-      ).resolves.toMatchObject({
+      const report = await publishBundle(manifest, distTags, {
+        bundleDir,
+        onProgress(event) {
+          progress.push(event);
+        },
+        registryUrl: 'http://localhost:4873',
+      });
+
+      expect(report).toMatchObject({
         dryRun: false,
         errors: [],
         published: 0,
         restoredTags: 1,
         skipped: 1,
+        timings: {
+          dryRunMs: 0,
+        },
         totalPackages: 1,
       });
+      expect(report.timings.cleanupMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.distTagsMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.lookupMetadataMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.publishMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.totalMs).toBeGreaterThanOrEqual(0);
+      expect(report.timings.validateMs).toBeGreaterThanOrEqual(0);
 
       expect(axiosMock.get).toHaveBeenCalledTimes(1);
       const firstCall = axiosMock.get.mock.calls[0];

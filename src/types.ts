@@ -351,6 +351,16 @@ export interface PublishActionResult {
   tag?: string;
 }
 
+export interface PublishTimings {
+  cleanupMs: number;
+  distTagsMs: number;
+  dryRunMs: number;
+  lookupMetadataMs: number;
+  publishMs: number;
+  totalMs: number;
+  validateMs: number;
+}
+
 export interface PublishReport {
   dryRun: boolean;
   errors: PublishActionResult[];
@@ -359,5 +369,6 @@ export interface PublishReport {
   registry: string;
   restoredTags: number;
   skipped: number;
+  timings: PublishTimings;
   totalPackages: number;
 }

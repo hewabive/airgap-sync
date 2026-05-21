@@ -2,6 +2,7 @@ import path from 'node:path';
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import { execFile } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import axios from 'axios';
 import type {
@@ -10,6 +11,7 @@ import type {
   PackageMetadata,
   PublishActionResult,
   PublishReport,
+  PublishTimings,
   TagRequirement,
 } from '../types.js';
 import { encodePackageName, isBlockedPublishRegistry } from './registry.js';
@@ -71,6 +73,22 @@ const emptyPackageSnapshot = (): PackageRegistrySnapshot => ({
   distTags: {},
   versions: new Set(),
 });
+
+function createPublishTimings(): PublishTimings {
+  return {
+    cleanupMs: 0,
+    distTagsMs: 0,
+    dryRunMs: 0,
+    lookupMetadataMs: 0,
+    publishMs: 0,
+    totalMs: 0,
+    validateMs: 0,
+  };
+}
+
+function elapsedMs(start: number): number {
+  return Math.round(performance.now() - start);
+}
 
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
@@ -345,9 +363,14 @@ export async function publishBundle(
     throw new Error(`Refusing to publish to public registry: ${options.registryUrl}`);
   }
 
+  const totalStart = performance.now();
+  const timings = createPublishTimings();
+
+  const validateStart = performance.now();
   options.onProgress?.({ phase: 'validate', status: 'start' });
   throwIfInvalidBundle(await validateBundle(options.bundleDir, manifest, distTags));
   options.onProgress?.({ phase: 'validate', status: 'done' });
+  timings.validateMs = elapsedMs(validateStart);
 
   const errors: PublishActionResult[] = [];
   let published = 0;
@@ -355,6 +378,7 @@ export async function publishBundle(
   let restoredTags = 0;
 
   if (options.dryRun) {
+    const dryRunStart = performance.now();
     const plan = createPublishPlan(manifest, distTags);
     options.onProgress?.({
       current: plan.length,
@@ -362,6 +386,8 @@ export async function publishBundle(
       status: 'planned',
       total: plan.length,
     });
+    timings.dryRunMs = elapsedMs(dryRunStart);
+    timings.totalMs = elapsedMs(totalStart);
     return {
       dryRun: true,
       errors: [],
@@ -370,10 +396,12 @@ export async function publishBundle(
       registry: options.registryUrl,
       restoredTags: plan.filter((item) => item.action === 'dist-tag').length,
       skipped: 0,
+      timings,
       totalPackages: manifest.packages.length,
     };
   }
 
+  const lookupMetadataStart = performance.now();
   const existingPackageNames = new Set<string>();
   const packageSnapshots =
     options.skipExisting === false
@@ -413,7 +441,9 @@ export async function publishBundle(
       ].join(' ')
     );
   }
+  timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
 
+  const publishStart = performance.now();
   let publishProgress = 0;
   options.onProgress?.({
     current: publishProgress,
@@ -483,8 +513,10 @@ export async function publishBundle(
     status: 'done',
     total: manifest.packages.length,
   });
+  timings.publishMs = elapsedMs(publishStart);
 
   if (errors.length === 0) {
+    const distTagsStart = performance.now();
     let tagProgress = 0;
     options.onProgress?.({
       current: tagProgress,
@@ -544,7 +576,9 @@ export async function publishBundle(
       status: 'done',
       total: distTags.requirements.length,
     });
+    timings.distTagsMs = elapsedMs(distTagsStart);
 
+    const cleanupStart = performance.now();
     let cleanupProgress = 0;
     const cleanupTotal = publishedPackageNames.size;
     options.onProgress?.({
@@ -574,8 +608,10 @@ export async function publishBundle(
       status: 'done',
       total: cleanupTotal,
     });
+    timings.cleanupMs = elapsedMs(cleanupStart);
   }
 
+  timings.totalMs = elapsedMs(totalStart);
   return {
     dryRun: false,
     errors,
@@ -584,6 +620,7 @@ export async function publishBundle(
     registry: options.registryUrl,
     restoredTags,
     skipped,
+    timings,
     totalPackages: manifest.packages.length,
   };
 }
