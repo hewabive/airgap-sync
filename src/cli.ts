@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import {
   CachedRegistryClient,
+  createGitMirrorPlan,
   createBundleDocuments,
   createFetchReport,
   fetchSeedBundle,
@@ -11,11 +12,13 @@ import {
   parseRootSpecs,
   publishBundle,
   readBundleInfo,
+  readFetchReport,
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
   writeBundleDocuments,
   writeFetchReport,
+  writeGitMirrorPlan,
   writePublishReport,
 } from './index.js';
 import type { FetchSeedBundleResult, ResolveRootRequirementsResult } from './index.js';
@@ -33,6 +36,12 @@ interface PublishOptions {
   dryRun?: boolean;
   registry: string;
   skipExisting?: boolean;
+}
+
+interface GitPlanOptions {
+  gitea: string;
+  owner: string;
+  write?: boolean;
 }
 
 const program = new Command();
@@ -214,6 +223,41 @@ program
     try {
       const info = await readBundleInfo(bundle);
       console.log(JSON.stringify(info, null, 2));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const gitCommand = program.command('git').description('Plan and operate Git mirrors');
+
+gitCommand
+  .command('plan')
+  .description('Create a Gitea mirror plan from bundle Git requirements')
+  .argument('<bundle>', 'Path to seed bundle directory')
+  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .requiredOption('--owner <owner>', 'Gitea user or organization that will own mirror repositories')
+  .option('--write', 'Write git-plan.json into the bundle')
+  .action(async (bundle: string, options: GitPlanOptions) => {
+    try {
+      const fetchReport = await readFetchReport(bundle);
+      const gitRequirements = Array.isArray(fetchReport.gitRequirements)
+        ? fetchReport.gitRequirements
+        : [];
+      const plan = createGitMirrorPlan(gitRequirements, {
+        giteaBaseUrl: options.gitea,
+        owner: options.owner,
+      });
+
+      if (options.write === true) {
+        await writeGitMirrorPlan(bundle, plan);
+      }
+
+      console.log(JSON.stringify(plan, null, 2));
+
+      if (plan.skipped.length > 0) {
+        process.exitCode = 1;
+      }
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

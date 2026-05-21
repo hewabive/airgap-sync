@@ -72,3 +72,21 @@ airgap-sync info ./seed
 
 Prints a JSON summary with package counts, package names, restored tags, report status,
 missing tarball files, and bundle validation issues.
+
+## git plan
+
+```bash
+airgap-sync git plan ./seed \
+  --gitea http://gitea.local \
+  --owner npm-mirrors \
+  --write
+```
+
+Reads `fetch-report.json`, groups discovered Git dependency specs by source
+repository, and creates a deterministic mirror plan for Gitea. `--write` stores the
+plan as `git-plan.json` inside the bundle; without it, the command only prints JSON.
+
+The plan is intentionally non-mutating: it does not clone repositories, create Gitea
+projects, or patch package manifests. It records source clone URLs, target Gitea URLs,
+the npm packages that required each Git dependency, and candidate `insteadOf` prefixes
+for a later apply/verify phase.
