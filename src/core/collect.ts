@@ -194,6 +194,12 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     parsedManifest.gitRequirements,
     gitRequirementKey
   );
+  addUnique(
+    state.gitRequirements,
+    seenGitRequirements,
+    parsedLockfiles.gitRequirements,
+    gitRequirementKey
+  );
   addUnique(state.unsupported, seenUnsupported, parsedManifest.unsupported, unsupportedKey);
 
   let resolution: FetchSeedBundleResult | undefined;

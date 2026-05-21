@@ -2,7 +2,8 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import semver from 'semver';
 import YAML from 'yaml';
-import type { ParseRootSpecsResult, RootPackageRequirement } from '../types.js';
+import type { GitRequirement, ParseRootSpecsResult, RootPackageRequirement } from '../types.js';
+import { parseGitDependencySpec } from './specs.js';
 
 const supportedLockfileNames = new Set([
   'npm-shrinkwrap.json',
@@ -38,7 +39,20 @@ interface PackageLockDependencyEntry {
 
 interface PackageLockDocument {
   dependencies?: Record<string, PackageLockDependencyEntry>;
+  importers?: Record<string, PnpmImporterEntry>;
   packages?: Record<string, PackageLockPackageEntry>;
+  snapshots?: Record<string, unknown>;
+}
+
+interface PnpmImporterDependencyEntry {
+  specifier?: string;
+  version?: string;
+}
+
+interface PnpmImporterEntry {
+  dependencies?: Record<string, PnpmImporterDependencyEntry | string>;
+  devDependencies?: Record<string, PnpmImporterDependencyEntry | string>;
+  optionalDependencies?: Record<string, PnpmImporterDependencyEntry | string>;
 }
 
 function registryRequirement(
@@ -81,6 +95,36 @@ function requirementFromPackageKey(
   return parsed ? registryRequirement(parsed.name, parsed.version, requiredBy) : undefined;
 }
 
+function splitNameAndSpecifier(value: string): { name: string; specifier: string } | undefined {
+  const normalized = value.replace(/^\//, '').split('(')[0] ?? '';
+
+  if (normalized.startsWith('@')) {
+    const slashIndex = normalized.indexOf('/');
+    const versionSeparator = slashIndex === -1 ? -1 : normalized.indexOf('@', slashIndex + 1);
+    return versionSeparator === -1
+      ? undefined
+      : {
+          name: normalized.slice(0, versionSeparator),
+          specifier: normalized.slice(versionSeparator + 1),
+        };
+  }
+
+  const versionSeparator = normalized.indexOf('@');
+  return versionSeparator <= 0
+    ? undefined
+    : {
+        name: normalized.slice(0, versionSeparator),
+        specifier: normalized.slice(versionSeparator + 1),
+      };
+}
+
+function gitRequirementFromPackageKey(
+  key: string
+): { name: string; specifier: string } | undefined {
+  const parsed = splitNameAndSpecifier(key);
+  return parsed && isGitSpecifier(parsed.specifier) ? parsed : undefined;
+}
+
 function packageNameFromNodeModulesPath(lockPath: string): string | undefined {
   const marker = 'node_modules/';
   const markerIndex = lockPath.lastIndexOf(marker);
@@ -95,12 +139,25 @@ function packageNameFromNodeModulesPath(lockPath: string): string | undefined {
 function isNonRegistryResolved(resolved: string | undefined): boolean {
   return Boolean(
     resolved &&
-    (resolved.startsWith('file:') ||
-      resolved.startsWith('git+') ||
-      resolved.startsWith('git:') ||
-      resolved.startsWith('github:') ||
-      resolved.startsWith('link:'))
+    (resolved.startsWith('file:') || resolved.startsWith('link:') || isGitSpecifier(resolved))
   );
+}
+
+function isGitSpecifier(specifier: string | undefined): specifier is string {
+  return Boolean(
+    specifier &&
+    (specifier.startsWith('git+') ||
+      specifier.startsWith('git:') ||
+      specifier.startsWith('github:') ||
+      specifier.startsWith('gitlab:') ||
+      specifier.startsWith('bitbucket:') ||
+      specifier.startsWith('gist:') ||
+      specifier.startsWith('ssh://git@'))
+  );
+}
+
+function gitSpecifierFromValues(...values: Array<string | undefined>): string | undefined {
+  return values.find(isGitSpecifier);
 }
 
 function addRequirement(
@@ -121,14 +178,66 @@ function addRequirement(
   requirements.push(requirement);
 }
 
+function addGitRequirement(
+  gitRequirements: GitRequirement[],
+  seen: Set<string>,
+  name: string | undefined,
+  specifier: string | undefined,
+  requiredBy: string
+): void {
+  if (!name || !specifier) {
+    return;
+  }
+
+  const requirement = parseGitDependencySpec(name, specifier, requiredBy);
+  if (!requirement) {
+    return;
+  }
+
+  const id = `${requirement.requiredBy}\0${requirement.raw}\0${requirement.rawSpec}`;
+  if (seen.has(id)) {
+    return;
+  }
+
+  seen.add(id);
+  gitRequirements.push(requirement);
+}
+
+function sortGitRequirements(requirements: GitRequirement[]): GitRequirement[] {
+  return requirements.sort((left, right) => {
+    const byRequiredBy = left.requiredBy.localeCompare(right.requiredBy);
+    return byRequiredBy === 0 ? left.raw.localeCompare(right.raw) : byRequiredBy;
+  });
+}
+
 export function parsePnpmLockRequirementsFromContent(
   content: string,
   requiredBy: string
 ): ParseRootSpecsResult {
-  const parsed = YAML.parse(content) as { packages?: unknown; snapshots?: unknown } | null;
+  const parsed = YAML.parse(content) as PackageLockDocument | null;
   const packageKeys = new Set<string>();
   const requirements: RootPackageRequirement[] = [];
   const seen = new Set<string>();
+  const gitRequirements: GitRequirement[] = [];
+  const seenGit = new Set<string>();
+
+  function visitDependencyMap(
+    dependencies: Record<string, PnpmImporterDependencyEntry | string> = {}
+  ): void {
+    for (const [name, entry] of Object.entries(dependencies)) {
+      const specifier =
+        typeof entry === 'string'
+          ? gitSpecifierFromValues(entry)
+          : gitSpecifierFromValues(entry.specifier, entry.version);
+      addGitRequirement(gitRequirements, seenGit, name, specifier, requiredBy);
+    }
+  }
+
+  for (const importer of Object.values(parsed?.importers ?? {})) {
+    visitDependencyMap(importer.dependencies);
+    visitDependencyMap(importer.devDependencies);
+    visitDependencyMap(importer.optionalDependencies);
+  }
 
   for (const section of [parsed?.packages, parsed?.snapshots]) {
     if (!section || typeof section !== 'object' || Array.isArray(section)) {
@@ -142,10 +251,13 @@ export function parsePnpmLockRequirementsFromContent(
 
   for (const key of packageKeys) {
     addRequirement(requirements, seen, requirementFromPackageKey(key, requiredBy));
+
+    const parsedGit = gitRequirementFromPackageKey(key);
+    addGitRequirement(gitRequirements, seenGit, parsedGit?.name, parsedGit?.specifier, requiredBy);
   }
 
   requirements.sort((left, right) => left.raw.localeCompare(right.raw));
-  return { gitRequirements: [], requirements, unsupported: [] };
+  return { gitRequirements: sortGitRequirements(gitRequirements), requirements, unsupported: [] };
 }
 
 export function parseNpmLockRequirementsFromContent(
@@ -155,13 +267,27 @@ export function parseNpmLockRequirementsFromContent(
   const parsed = JSON.parse(content) as PackageLockDocument;
   const requirements: RootPackageRequirement[] = [];
   const seen = new Set<string>();
+  const gitRequirements: GitRequirement[] = [];
+  const seenGit = new Set<string>();
 
   for (const [lockPath, entry] of Object.entries(parsed.packages ?? {})) {
-    if (!lockPath || entry.link === true || isNonRegistryResolved(entry.resolved)) {
+    if (!lockPath || entry.link === true) {
       continue;
     }
 
     const name = packageNameFromNodeModulesPath(lockPath);
+    addGitRequirement(
+      gitRequirements,
+      seenGit,
+      name,
+      gitSpecifierFromValues(entry.resolved, entry.version),
+      requiredBy
+    );
+
+    if (isNonRegistryResolved(entry.resolved)) {
+      continue;
+    }
+
     if (name && entry.version) {
       addRequirement(requirements, seen, registryRequirement(name, entry.version, requiredBy));
     }
@@ -169,6 +295,14 @@ export function parseNpmLockRequirementsFromContent(
 
   function visitDependencies(dependencies: Record<string, PackageLockDependencyEntry> = {}): void {
     for (const [name, entry] of Object.entries(dependencies)) {
+      addGitRequirement(
+        gitRequirements,
+        seenGit,
+        name,
+        gitSpecifierFromValues(entry.resolved, entry.version),
+        requiredBy
+      );
+
       if (!isNonRegistryResolved(entry.resolved) && entry.version) {
         addRequirement(requirements, seen, registryRequirement(name, entry.version, requiredBy));
       }
@@ -179,7 +313,7 @@ export function parseNpmLockRequirementsFromContent(
 
   visitDependencies(parsed.dependencies);
   requirements.sort((left, right) => left.raw.localeCompare(right.raw));
-  return { gitRequirements: [], requirements, unsupported: [] };
+  return { gitRequirements: sortGitRequirements(gitRequirements), requirements, unsupported: [] };
 }
 
 function firstYarnSelector(descriptor: string): string {
@@ -193,15 +327,13 @@ function firstYarnSelector(descriptor: string): string {
 
 function packageNameFromYarnDescriptor(descriptor: string): string | undefined {
   const selector = firstYarnSelector(descriptor).replace(/^"|"$/g, '');
+  return splitNameAndSpecifier(selector)?.name;
+}
 
-  if (selector.startsWith('@')) {
-    const slashIndex = selector.indexOf('/');
-    const versionSeparator = slashIndex === -1 ? -1 : selector.indexOf('@', slashIndex + 1);
-    return versionSeparator === -1 ? undefined : selector.slice(0, versionSeparator);
-  }
-
-  const versionSeparator = selector.indexOf('@');
-  return versionSeparator <= 0 ? undefined : selector.slice(0, versionSeparator);
+function gitSpecifierFromYarnDescriptor(descriptor: string): string | undefined {
+  const selector = firstYarnSelector(descriptor).replace(/^"|"$/g, '');
+  const specifier = splitNameAndSpecifier(selector)?.specifier;
+  return isGitSpecifier(specifier) ? specifier : undefined;
 }
 
 function packageNameFromYarnResolution(resolution: unknown): string | undefined {
@@ -215,6 +347,15 @@ function packageNameFromYarnResolution(resolution: unknown): string | undefined 
   }
 
   return resolution.slice(0, npmProtocolIndex);
+}
+
+function gitSpecifierFromYarnResolution(resolution: unknown): string | undefined {
+  if (typeof resolution !== 'string') {
+    return undefined;
+  }
+
+  const parsed = splitNameAndSpecifier(resolution);
+  return parsed && isGitSpecifier(parsed.specifier) ? parsed.specifier : undefined;
 }
 
 function packageNameFromResolvedTarball(resolved: unknown): string | undefined {
@@ -286,7 +427,7 @@ function parseYarnClassicEntries(content: string): Array<{
 function parseYarnBerryRequirementsFromContent(
   content: string,
   requiredBy: string
-): RootPackageRequirement[] | undefined {
+): { gitRequirements: GitRequirement[]; requirements: RootPackageRequirement[] } | undefined {
   let parsed: unknown;
 
   try {
@@ -301,6 +442,8 @@ function parseYarnBerryRequirementsFromContent(
 
   const requirements: RootPackageRequirement[] = [];
   const seen = new Set<string>();
+  const gitRequirements: GitRequirement[] = [];
+  const seenGit = new Set<string>();
 
   for (const [descriptor, value] of Object.entries(parsed)) {
     if (
@@ -319,23 +462,36 @@ function parseYarnBerryRequirementsFromContent(
 
     const name =
       packageNameFromYarnResolution(entry.resolution) ?? packageNameFromYarnDescriptor(descriptor);
-    addRequirement(
-      requirements,
-      seen,
-      name ? registryRequirement(name, entry.version, requiredBy) : undefined
-    );
+    const gitSpecifier =
+      gitSpecifierFromYarnResolution(entry.resolution) ??
+      gitSpecifierFromYarnDescriptor(descriptor);
+    addGitRequirement(gitRequirements, seenGit, name, gitSpecifier, requiredBy);
+    if (!gitSpecifier) {
+      addRequirement(
+        requirements,
+        seen,
+        name ? registryRequirement(name, entry.version, requiredBy) : undefined
+      );
+    }
   }
 
-  return requirements;
+  return { gitRequirements, requirements };
 }
 
 export function parseYarnLockRequirementsFromContent(
   content: string,
   requiredBy: string
 ): ParseRootSpecsResult {
-  const requirements = parseYarnBerryRequirementsFromContent(content, requiredBy) ?? [];
+  const berry = parseYarnBerryRequirementsFromContent(content, requiredBy);
+  const requirements = berry?.requirements ?? [];
   const seen = new Set(
     requirements.map((requirement) => `${requirement.name}\0${requirement.specifier}`)
+  );
+  const gitRequirements: GitRequirement[] = berry?.gitRequirements ?? [];
+  const seenGit = new Set(
+    gitRequirements.map(
+      (requirement) => `${requirement.requiredBy}\0${requirement.raw}\0${requirement.rawSpec}`
+    )
   );
 
   for (const entry of parseYarnClassicEntries(content)) {
@@ -346,15 +502,22 @@ export function parseYarnLockRequirementsFromContent(
     const name =
       packageNameFromResolvedTarball(entry.resolved) ??
       packageNameFromYarnDescriptor(entry.descriptor);
-    addRequirement(
-      requirements,
-      seen,
-      name ? registryRequirement(name, entry.version, requiredBy) : undefined
+    const gitSpecifier = gitSpecifierFromValues(
+      entry.resolved,
+      gitSpecifierFromYarnDescriptor(entry.descriptor)
     );
+    addGitRequirement(gitRequirements, seenGit, name, gitSpecifier, requiredBy);
+    if (!gitSpecifier) {
+      addRequirement(
+        requirements,
+        seen,
+        name ? registryRequirement(name, entry.version, requiredBy) : undefined
+      );
+    }
   }
 
   requirements.sort((left, right) => left.raw.localeCompare(right.raw));
-  return { gitRequirements: [], requirements, unsupported: [] };
+  return { gitRequirements: sortGitRequirements(gitRequirements), requirements, unsupported: [] };
 }
 
 async function findLockfiles(rootDir: string): Promise<string[]> {
@@ -410,6 +573,8 @@ export async function readLockfileRequirements(root: string): Promise<ParseRootS
   const files = await findLockfiles(searchRoot);
   const requirements: RootPackageRequirement[] = [];
   const seen = new Set<string>();
+  const gitRequirements: GitRequirement[] = [];
+  const seenGit = new Set<string>();
 
   for (const file of files) {
     const relativePath = path.relative(searchRoot, file) || path.basename(file);
@@ -422,8 +587,18 @@ export async function readLockfileRequirements(root: string): Promise<ParseRootS
     for (const requirement of parsed.requirements) {
       addRequirement(requirements, seen, requirement);
     }
+
+    for (const requirement of parsed.gitRequirements) {
+      addGitRequirement(
+        gitRequirements,
+        seenGit,
+        requirement.name,
+        requirement.rawSpec,
+        requirement.requiredBy
+      );
+    }
   }
 
   requirements.sort((left, right) => left.raw.localeCompare(right.raw));
-  return { gitRequirements: [], requirements, unsupported: [] };
+  return { gitRequirements: sortGitRequirements(gitRequirements), requirements, unsupported: [] };
 }
