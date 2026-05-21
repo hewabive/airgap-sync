@@ -236,6 +236,9 @@ describe('collectBundle', () => {
         if (invocation.args.join(' ') === 'pull --ff-only') {
           return Promise.resolve({ stderr: '', stdout: 'Already up to date.\n' });
         }
+        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
         if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
           return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
         }
@@ -321,6 +324,7 @@ describe('collectBundle', () => {
       'status --porcelain',
       'rev-parse --abbrev-ref HEAD',
       'pull --ff-only',
+      'rev-parse --verify main^{tree}',
       'ls-tree -r --name-only main',
       'show main:package.json',
     ]);

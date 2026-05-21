@@ -25,6 +25,10 @@ describe('readGitSourceManifestRequirements', () => {
       runner(invocation): Promise<GitOutputCommandResult> {
         calls.push(invocation);
 
+        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+
         if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
           return Promise.resolve({
             stderr: '',
@@ -73,6 +77,10 @@ describe('readGitSourceManifestRequirements', () => {
     });
 
     expect(calls).toEqual([
+      {
+        args: ['rev-parse', '--verify', 'main^{tree}'],
+        cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
+      },
       {
         args: ['ls-tree', '-r', '--name-only', 'main'],
         cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
@@ -143,6 +151,10 @@ describe('readGitSourceManifestRequirements', () => {
         gitSubdir: 'packages/plugin',
       },
       runner(invocation): Promise<GitOutputCommandResult> {
+        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+
         if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
           return Promise.resolve({
             stderr: '',
@@ -176,5 +188,26 @@ describe('readGitSourceManifestRequirements', () => {
         type: 'range',
       },
     ]);
+  });
+
+  it('reports a clear error when the requested revision is missing', async () => {
+    await expect(
+      readGitSourceManifestRequirements({
+        mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+        source: {
+          ...source,
+          committish: 'missing-sha',
+        },
+        runner(invocation): Promise<GitOutputCommandResult> {
+          if (invocation.args.join(' ') === 'rev-parse --verify missing-sha^{tree}') {
+            return Promise.reject(new Error('fatal: Needed a single revision'));
+          }
+
+          throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+        },
+      })
+    ).rejects.toThrow(
+      'Git source github.com/owner/repo does not contain requested revision missing-sha'
+    );
   });
 });

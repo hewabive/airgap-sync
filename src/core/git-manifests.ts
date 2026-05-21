@@ -60,6 +60,25 @@ function isInsideSubdir(filePath: string, subdir: string): boolean {
   );
 }
 
+async function assertRevisionExists(options: {
+  mirrorPath: string;
+  revision: string;
+  runner: GitOutputCommandRunner;
+  source: GitSource;
+}): Promise<void> {
+  try {
+    await options.runner({
+      args: ['rev-parse', '--verify', `${options.revision}^{tree}`],
+      cwd: options.mirrorPath,
+    });
+  } catch {
+    throw new Error(
+      `Git source ${options.source.id} does not contain requested revision ${options.revision}. ` +
+        'The upstream repository may have rewritten history or removed the referenced object.'
+    );
+  }
+}
+
 async function listPackageJsonPaths(options: {
   mirrorPath: string;
   revision: string;
@@ -107,6 +126,12 @@ export async function readGitSourceManifestRequirements(
   const runner = options.runner ?? runGitOutputCommand;
   const revision = revisionFromSource(options.source);
   const subdir = normalizeGitSubdir(options.source);
+  await assertRevisionExists({
+    mirrorPath,
+    revision,
+    runner,
+    source: options.source,
+  });
   const manifestPaths = await listPackageJsonPaths({
     mirrorPath,
     revision,
