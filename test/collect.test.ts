@@ -527,4 +527,50 @@ __metadata:
       },
     ]);
   });
+
+  it('includes explicit initial npm requirements', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'package.json'),
+      {
+        name: 'root',
+        version: '1.0.0',
+      },
+      { spaces: 2 }
+    );
+
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      initialRequirements: [
+        {
+          name: 'extra',
+          raw: 'extra@latest',
+          requiredBy: 'root',
+          specifier: 'latest',
+          type: 'tag',
+        },
+      ],
+      outputDir: path.join(tempDir, 'airgap-bundle'),
+      registry: {
+        getPackageMetadata(name) {
+          expect(name).toBe('extra');
+          return Promise.resolve(extraMetadata);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      root: tempDir,
+      runGitOutputCommand: cleanRepositoryRunner(tempDir),
+    });
+
+    expect(report.fetch).toMatchObject({
+      errors: [],
+      resolved: 1,
+    });
+    expect(report.wroteBundle).toBe(true);
+    expect(
+      tarballMocks.downloadResolvedPackage.mock.calls.map((call) => {
+        const pkg = call[0] as ResolvedRootPackage;
+        return `${pkg.name}@${pkg.version}`;
+      })
+    ).toEqual(['extra@1.0.0']);
+  });
 });

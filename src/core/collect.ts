@@ -35,6 +35,9 @@ export interface CollectBundleOptions {
   generatedAt?: string;
   includeDev?: boolean;
   includePeer?: boolean;
+  initialGitRequirements?: GitRequirement[];
+  initialRequirements?: RootPackageRequirement[];
+  initialUnsupported?: UnsupportedRootPackageRequirement[];
   maxIterations?: number;
   outputDir: string;
   registry: RegistryClient;
@@ -218,6 +221,12 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   addUnique(state.requirements, seenRequirements, parsedManifest.requirements, requirementKey);
   addUnique(state.requirements, seenRequirements, parsedLockfiles.requirements, requirementKey);
   addUnique(
+    state.requirements,
+    seenRequirements,
+    options.initialRequirements ?? [],
+    requirementKey
+  );
+  addUnique(
     state.gitRequirements,
     seenGitRequirements,
     parsedManifest.gitRequirements,
@@ -229,7 +238,14 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     parsedLockfiles.gitRequirements,
     gitRequirementKey
   );
+  addUnique(
+    state.gitRequirements,
+    seenGitRequirements,
+    options.initialGitRequirements ?? [],
+    gitRequirementKey
+  );
   addUnique(state.unsupported, seenUnsupported, parsedManifest.unsupported, unsupportedKey);
+  addUnique(state.unsupported, seenUnsupported, options.initialUnsupported ?? [], unsupportedKey);
 
   let resolution: FetchSeedBundleResult | undefined;
   let fetch = createFetchReport({

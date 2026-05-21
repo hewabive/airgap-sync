@@ -35,12 +35,16 @@ still design work.
 ## Target Workflow
 
 ```bash
-# Online machine: refresh project repositories and collect npm/Git closure.
-airgap-sync repos update ./repos
-airgap-sync collect ./repos -o ./airgap-bundle
+# First setup on the portable drive.
+airgap-sync init
+airgap-sync target add git https://github.com/acme/app.git --branch main
+airgap-sync target add npm eslint@latest
+
+# Online machine: refresh configured targets and collect npm/Git closure.
+airgap-sync collect
 
 # Closed network: populate Verdaccio and Gitea from the transfer bundle.
-airgap-sync apply ./airgap-bundle \
+airgap-sync apply ./bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN" \
@@ -66,7 +70,17 @@ pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 Current lower-level commands are documented in the [CLI Contract](./docs/cli.md). The
 workflow above is the direction for the next orchestration layer.
 
-The lower-level commands are expected to converge into this larger workflow:
+The configured workspace lives on removable media:
+
+```text
+airgap-sync.json          Target list and defaults
+repos/                    Working clones for configured Git targets
+bundle/                   Transfer bundle for Verdaccio and Gitea
+cache/                    Reserved for local caches
+reports/                  Reserved for operator-facing reports
+```
+
+The lower-level commands remain available for debugging and one-off use:
 
 ```bash
 # Online machine: refresh project repositories, then collect npm and Git closure.

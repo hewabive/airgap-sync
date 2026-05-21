@@ -18,26 +18,44 @@ orchestration command, while top-level offline `apply` is still planned.
 Example names used below:
 
 ```text
-./repos                         Project repositories on removable media
-./airgap-bundle                 Transfer bundle directory
+./repos                         Working clones for configured Git targets
+./bundle                        Transfer bundle directory
 https://registry.npmjs.org      Source npm registry
 http://verdaccio.local:4873     Closed-network npm registry
 http://gitea.local              Closed-network Gitea base URL
 ```
 
-## Online Phase
+## First Setup
 
-Refresh project repositories before dependency collection:
+Create a workspace on removable media and describe the things that must stay fresh:
 
 ```bash
-airgap-sync repos update ./repos
+airgap-sync init /media/USB/airgap-sync
+cd /media/USB/airgap-sync
+
+airgap-sync target add git https://github.com/acme/app.git --branch main
+airgap-sync target add git https://github.com/acme/service.git
+airgap-sync target add npm eslint@latest
+airgap-sync target add npm pnpm@latest
+airgap-sync target list
 ```
 
-The update step should scan for nested Git repositories and run a conservative
-`git pull --ff-only` in each clean branch. Repositories that cannot be updated safely
-should be recorded in a report rather than repaired automatically.
+The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
+operators can review or change the sync set without learning hidden state.
 
-Collect npm packages and Git dependencies into the transfer bundle:
+## Online Phase
+
+Refresh configured targets and collect npm/Git dependency closure:
+
+```bash
+airgap-sync collect
+```
+
+The collect step clones missing configured Git targets under `repos/`, refreshes clean
+repositories with conservative `git pull --ff-only`, includes configured npm targets as
+root package specs, and writes the transfer bundle under `bundle/` by default.
+
+Lower-level collection from an explicit repository directory is still available:
 
 ```bash
 airgap-sync collect ./repos \
@@ -78,7 +96,7 @@ The collect step writes npm metadata and Git source metadata:
 Before transfer, inspect the bundle:
 
 ```bash
-airgap-sync info ./airgap-bundle
+airgap-sync info ./bundle
 ```
 
 Also check:
@@ -88,7 +106,7 @@ Also check:
 
 ## Transfer Phase
 
-Copy the whole `./airgap-bundle` directory to the closed network, including:
+Copy the whole `./bundle` directory to the closed network, including:
 
 - `packages/`
 - `git-mirrors/`
@@ -108,7 +126,7 @@ Apply the bundle to Verdaccio and Gitea:
 ```bash
 export GITEA_TOKEN=...
 
-airgap-sync apply ./airgap-bundle \
+airgap-sync apply ./bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN" \

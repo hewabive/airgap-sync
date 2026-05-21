@@ -41,6 +41,20 @@ export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './c
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
 export { throwIfInvalidBundle, validateBundle } from './core/validation.js';
 export {
+  addWorkspaceTarget,
+  defaultWorkspaceOutputDir,
+  defaultWorkspaceReposDir,
+  defaultWorkspaceSourceRegistry,
+  gitTargetLocalPath,
+  initWorkspace,
+  materializeWorkspaceGitTargets,
+  readWorkspaceConfig,
+  removeWorkspaceTarget,
+  workspaceConfigFileName,
+  workspaceConfigPath,
+  writeWorkspaceConfig,
+} from './core/workspace.js';
+export {
   dependencySpecsFromManifest,
   downloadResolvedPackage,
   readPackageManifest,
@@ -97,6 +111,17 @@ export type {
   BundleValidationResult,
   BundleValidationSeverity,
 } from './core/validation.js';
+export type {
+  InitWorkspaceOptions,
+  MaterializeWorkspaceGitTargetsOptions,
+  WorkspaceConfig,
+  WorkspaceGitTarget,
+  WorkspaceGitTargetResult,
+  WorkspaceGitTargetsReport,
+  WorkspaceGitTargetStatus,
+  WorkspaceNpmTarget,
+  WorkspaceTarget,
+} from './core/workspace.js';
 
 export type { DownloadedTarball } from './core/tarball.js';
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import path from 'node:path';
 import { Command } from 'commander';
 import {
+  addWorkspaceTarget,
   applyGitSources,
   CachedRegistryClient,
   collectBundle,
@@ -9,10 +11,13 @@ import {
   createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
+  defaultWorkspaceSourceRegistry,
   fetchGitSources,
   fetchSeedBundle,
   HttpGiteaClient,
   HttpRegistryClient,
+  initWorkspace,
+  materializeWorkspaceGitTargets,
   packageName,
   parseRootSpecs,
   publishBundle,
@@ -22,6 +27,8 @@ import {
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
+  readWorkspaceConfig,
+  removeWorkspaceTarget,
   updateRepositories,
   writeBundleDocuments,
   writeFetchReport,
@@ -62,8 +69,16 @@ interface CollectOptions {
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
-  output: string;
-  registry: string;
+  output?: string;
+  registry?: string;
+}
+
+interface InitOptions {
+  force?: boolean;
+}
+
+interface TargetGitOptions {
+  branch?: string;
 }
 
 interface GitSourcesOptions {
@@ -76,6 +91,37 @@ function parsePositiveInteger(value: string): number {
     throw new Error(`Expected a positive integer, got: ${value}`);
   }
   return parsed;
+}
+
+function collectShouldFail(report: {
+  fetch: { errors: unknown[] };
+  gitFetch: { errors: unknown[] };
+  gitManifestScanErrors: unknown[];
+  gitSources: { skipped: unknown[] };
+  maxIterationsReached: boolean;
+  repositoryUpdate: { errors: unknown[] };
+}): boolean {
+  return (
+    report.repositoryUpdate.errors.length > 0 ||
+    report.fetch.errors.length > 0 ||
+    report.gitSources.skipped.length > 0 ||
+    report.gitFetch.errors.length > 0 ||
+    report.gitManifestScanErrors.length > 0 ||
+    report.maxIterationsReached
+  );
+}
+
+function targetToDisplay(target: { branch?: string; spec?: string; type: string; url?: string }) {
+  return target.type === 'git'
+    ? {
+        branch: target.branch,
+        type: target.type,
+        url: target.url,
+      }
+    : {
+        spec: target.spec,
+        type: target.type,
+      };
 }
 
 interface GitFetchOptions {
@@ -207,11 +253,157 @@ program
   .version('0.0.0');
 
 program
+  .command('init')
+  .description('Create an airgap-sync workspace on portable media')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--force', 'Overwrite an existing airgap-sync.json')
+  .action(async (workspace: string, options: InitOptions) => {
+    try {
+      const config = await initWorkspace({
+        force: options.force === true,
+        workspaceDir: workspace,
+      });
+      console.log(
+        JSON.stringify(
+          {
+            config,
+            workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const targetCommand = program.command('target').description('Manage workspace sync targets');
+
+targetCommand
+  .command('list')
+  .description('List targets from airgap-sync.json')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (workspace: string) => {
+    try {
+      const config = await readWorkspaceConfig(workspace);
+      console.log(
+        JSON.stringify(
+          {
+            targets: config.targets.map((target, index) => ({
+              index: index + 1,
+              ...targetToDisplay(target),
+            })),
+            workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const targetAddCommand = targetCommand.command('add').description('Add a workspace target');
+
+targetAddCommand
+  .command('git')
+  .description('Add a Git repository target')
+  .argument('<url>', 'Git repository URL')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--branch <name>', 'Branch to clone on first materialization')
+  .action(async (url: string, workspace: string, options: TargetGitOptions) => {
+    try {
+      const result = await addWorkspaceTarget(workspace, {
+        ...(options.branch ? { branch: options.branch } : {}),
+        type: 'git',
+        url,
+      });
+      console.log(
+        JSON.stringify(
+          {
+            added: result.added,
+            target: targetToDisplay({
+              ...(options.branch ? { branch: options.branch } : {}),
+              type: 'git',
+              url,
+            }),
+            totalTargets: result.config.targets.length,
+            workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetAddCommand
+  .command('npm')
+  .description('Add an npm package spec target')
+  .argument('<spec>', 'Package spec, e.g. eslint@latest')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (spec: string, workspace: string) => {
+    try {
+      const result = await addWorkspaceTarget(workspace, {
+        spec,
+        type: 'npm',
+      });
+      console.log(
+        JSON.stringify(
+          {
+            added: result.added,
+            target: targetToDisplay({ spec, type: 'npm' }),
+            totalTargets: result.config.targets.length,
+            workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetCommand
+  .command('remove')
+  .description('Remove a target by its one-based list index')
+  .argument('<index>', 'Target index from target list')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (index: string, workspace: string) => {
+    try {
+      const result = await removeWorkspaceTarget(workspace, parsePositiveInteger(index));
+      console.log(
+        JSON.stringify(
+          {
+            removed: targetToDisplay(result.removed),
+            totalTargets: result.config.targets.length,
+            workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command('collect')
   .description('Update repositories and build an online airgap bundle')
-  .argument('<root>', 'Directory containing project Git repositories or package manifests')
-  .option('-o, --output <dir>', 'Bundle output directory', './airgap-bundle')
-  .option('-r, --registry <url>', 'Source registry URL', 'https://registry.npmjs.org')
+  .argument('[root]', 'Directory containing project Git repositories or package manifests')
+  .option('-o, --output <dir>', 'Bundle output directory')
+  .option('-r, --registry <url>', 'Source registry URL')
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option(
@@ -221,30 +413,70 @@ program
     16
   )
   .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
-  .action(async (root: string, options: CollectOptions) => {
+  .action(async (root: string | undefined, options: CollectOptions) => {
     try {
-      const registry = new CachedRegistryClient(new HttpRegistryClient(options.registry));
+      if (!root) {
+        const workspaceDir = process.cwd();
+        const config = await readWorkspaceConfig(workspaceDir);
+        const targetSync = await materializeWorkspaceGitTargets({
+          config,
+          dryRun: options.dryRun === true,
+          workspaceDir,
+        });
+        const parsedTargets = parseRootSpecs(
+          config.targets.filter((target) => target.type === 'npm').map((target) => target.spec)
+        );
+        const registryUrl = options.registry ?? config.sourceRegistry;
+        const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
+        const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
+        const report = await collectBundle({
+          dryRun: options.dryRun === true,
+          concurrency: options.concurrency,
+          includeDev: options.includeDev === true,
+          includePeer: options.includePeer === true,
+          initialGitRequirements: parsedTargets.gitRequirements,
+          initialRequirements: parsedTargets.requirements,
+          initialUnsupported: parsedTargets.unsupported,
+          outputDir,
+          registry,
+          registryUrl,
+          root: path.resolve(workspaceDir, config.reposDir),
+        });
+
+        console.log(
+          JSON.stringify(
+            {
+              targetSync,
+              ...report,
+            },
+            null,
+            2
+          )
+        );
+
+        if (targetSync.errors.length > 0 || collectShouldFail(report)) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
+      const registryUrl = options.registry ?? defaultWorkspaceSourceRegistry;
+      const outputDir = options.output ?? './airgap-bundle';
+      const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
       const report = await collectBundle({
         dryRun: options.dryRun === true,
         concurrency: options.concurrency,
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
-        outputDir: options.output,
+        outputDir,
         registry,
-        registryUrl: options.registry,
+        registryUrl,
         root,
       });
 
       console.log(JSON.stringify(report, null, 2));
 
-      if (
-        report.repositoryUpdate.errors.length > 0 ||
-        report.fetch.errors.length > 0 ||
-        report.gitSources.skipped.length > 0 ||
-        report.gitFetch.errors.length > 0 ||
-        report.gitManifestScanErrors.length > 0 ||
-        report.maxIterationsReached
-      ) {
+      if (collectShouldFail(report)) {
         process.exitCode = 1;
       }
     } catch (error) {

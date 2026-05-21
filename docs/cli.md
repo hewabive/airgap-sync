@@ -3,9 +3,39 @@
 The final CLI should keep fetch and publish separate so the online and offline phases
 are auditable.
 
-The current commands are lower-level building blocks. The target workflow adds
-`repos update`, fixed-point `collect`, and top-level `apply` orchestration so the online
-side does not need to know the closed-network Gitea URL.
+The preferred user workflow is workspace-based: initialize a directory on removable
+media, add Git/npm targets once, then run `collect` online and `apply` offline.
+
+## init
+
+```bash
+airgap-sync init
+airgap-sync init /media/USB/airgap-sync
+```
+
+Creates `airgap-sync.json` plus the default workspace directories:
+
+```text
+repos/
+bundle/
+cache/
+reports/
+```
+
+The default config uses `https://registry.npmjs.org`, `./repos`, and `./bundle`.
+
+## target
+
+```bash
+airgap-sync target add git https://github.com/acme/app.git --branch main
+airgap-sync target add npm eslint@latest
+airgap-sync target list
+airgap-sync target remove 1
+```
+
+Targets are stored in `airgap-sync.json`. Git targets are cloned into `repos/` using
+preserved source paths such as `repos/github.com/acme/app`. npm targets are treated as
+explicit root package specs during `collect`.
 
 ## repos update
 
@@ -21,6 +51,9 @@ authentication failures are reported without automatic repair.
 ## collect
 
 ```bash
+airgap-sync collect
+
+# Lower-level mode without airgap-sync.json:
 airgap-sync collect ./repos \
   --registry https://registry.npmjs.org \
   --include-dev \
@@ -28,10 +61,14 @@ airgap-sync collect ./repos \
   --output ./airgap-bundle
 ```
 
-Scans package manifests from project repositories, runs safe repository refresh
-checks/pulls, resolves npm registry packages, writes portable Git source metadata,
-clones or updates Git dependency mirrors, scans package manifests from those mirrors,
-and repeats until no new npm or Git inputs are found.
+Without a root argument, reads `airgap-sync.json` from the current directory, clones
+missing configured Git targets into `repos/`, scans those repositories, includes
+configured npm targets as root package specs, resolves npm registry packages, writes
+portable Git source metadata, clones or updates Git dependency mirrors, scans package
+manifests from those mirrors, and repeats until no new npm or Git inputs are found.
+
+With an explicit root argument, keeps the lower-level behavior and scans that directory
+directly.
 
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
