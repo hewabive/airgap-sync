@@ -14,9 +14,9 @@ airgap-sync repos update ./repos
 airgap-sync repos update ./repos --dry-run
 ```
 
-Planned command. Scans a directory for nested Git repositories and refreshes each clean
-branch with `git pull --ff-only`. Dirty worktrees, detached HEADs, non-fast-forward
-branches, and authentication failures should be reported without automatic repair.
+Scans a directory for Git repositories and refreshes each clean branch with
+`git pull --ff-only`. Dirty worktrees, detached HEADs, non-fast-forward branches, and
+authentication failures are reported without automatic repair.
 
 ## collect
 

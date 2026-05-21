@@ -21,6 +21,7 @@ import {
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
+  updateRepositories,
   writeBundleDocuments,
   writeFetchReport,
   writeGiteaRepositoryProvisionReport,
@@ -75,6 +76,10 @@ interface GitCreateReposOptions {
   ownerType: string;
   public?: boolean;
   token?: string;
+}
+
+interface ReposUpdateOptions {
+  dryRun?: boolean;
 }
 
 const noopGiteaClient: GiteaClient = {
@@ -261,6 +266,31 @@ program
     try {
       const info = await readBundleInfo(bundle);
       console.log(JSON.stringify(info, null, 2));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const reposCommand = program.command('repos').description('Manage project Git repositories');
+
+reposCommand
+  .command('update')
+  .description('Update Git repositories under a directory with safe fast-forward pulls')
+  .argument('<root>', 'Directory containing Git repositories')
+  .option('--dry-run', 'Check repositories without running git pull')
+  .action(async (root: string, options: ReposUpdateOptions) => {
+    try {
+      const report = await updateRepositories({
+        dryRun: options.dryRun === true,
+        root,
+      });
+
+      console.log(JSON.stringify(report, null, 2));
+
+      if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

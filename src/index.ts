@@ -27,6 +27,7 @@ export {
 } from './core/git-plan.js';
 export { readBundleInfo } from './core/info.js';
 export { readManifestRequirements } from './core/manifests.js';
+export { findGitRepositories, runGitOutputCommand, updateRepositories } from './core/repos.js';
 export {
   CachedRegistryClient,
   HttpRegistryClient,
@@ -65,6 +66,12 @@ export type {
 } from './core/info.js';
 export type { ReadManifestRequirementsOptions } from './core/manifests.js';
 export type { PublishBundleOptions } from './core/publisher.js';
+export type {
+  GitOutputCommandInvocation,
+  GitOutputCommandResult,
+  GitOutputCommandRunner,
+  UpdateRepositoriesOptions,
+} from './core/repos.js';
 export type {
   BundleValidationIssue,
   BundleValidationResult,
@@ -105,6 +112,9 @@ export type {
   PublishActionResult,
   PublishActionStatus,
   PublishReport,
+  RepositoryUpdateReport,
+  RepositoryUpdateResult,
+  RepositoryUpdateStatus,
   ResolutionError,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,

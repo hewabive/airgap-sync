@@ -155,6 +155,33 @@ export interface GiteaRepositoryProvisionReport {
   totalRepositories: number;
 }
 
+export type RepositoryUpdateStatus =
+  | 'planned'
+  | 'updated'
+  | 'dirty'
+  | 'detached'
+  | 'not-git-repository'
+  | 'error';
+
+export interface RepositoryUpdateResult {
+  error?: string;
+  repository: string;
+  status: RepositoryUpdateStatus;
+}
+
+export interface RepositoryUpdateReport {
+  detached: number;
+  dirty: number;
+  dryRun: boolean;
+  errors: RepositoryUpdateResult[];
+  generatedAt: string;
+  planned: number;
+  repositories: RepositoryUpdateResult[];
+  root: string;
+  totalRepositories: number;
+  updated: number;
+}
+
 export interface ParseRootSpecsResult {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];

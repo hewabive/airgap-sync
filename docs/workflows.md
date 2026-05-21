@@ -193,7 +193,6 @@ prints the planned npm publish and dist-tag operations without publishing.
 
 ## Current Gaps
 
-- There is no `repos update` command yet.
 - There is no fixed-point `collect` command yet.
 - Git source metadata is not yet separated from offline Gitea planning.
 - Gitea paths are not yet preserved as upstream `owner/repo`.
