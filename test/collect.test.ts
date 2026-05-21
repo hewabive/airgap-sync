@@ -54,6 +54,45 @@ const extraMetadata: PackageMetadata = {
   },
 };
 
+function packageMetadata(name: string, versions: string[], latest: string): PackageMetadata {
+  return {
+    name,
+    'dist-tags': {
+      latest,
+    },
+    versions: Object.fromEntries(
+      versions.map((version) => [
+        version,
+        {
+          name,
+          version,
+          dist: {
+            tarball: `https://registry.example/${name}/-/${name}-${version}.tgz`,
+          },
+        },
+      ])
+    ),
+  };
+}
+
+function cleanRepositoryRunner(
+  root: string
+): (invocation: GitOutputCommandInvocation) => Promise<GitOutputCommandResult> {
+  return (invocation) => {
+    if (invocation.args.join(' ') === 'status --porcelain') {
+      return Promise.resolve({ stderr: '', stdout: '' });
+    }
+    if (invocation.args.join(' ') === 'rev-parse --abbrev-ref HEAD') {
+      return Promise.resolve({ stderr: '', stdout: 'main\n' });
+    }
+    if (invocation.args.join(' ') === 'pull --ff-only') {
+      return Promise.resolve({ stderr: '', stdout: 'Already up to date.\n' });
+    }
+
+    throw new Error(`Unexpected git call in ${root}: ${invocation.args.join(' ')}`);
+  };
+}
+
 describe('collectBundle', () => {
   beforeEach(async () => {
     tarballMocks.manifests.clear();
@@ -327,6 +366,165 @@ describe('collectBundle', () => {
       'rev-parse --verify main^{tree}',
       'ls-tree -r --name-only main',
       'show main:package.json',
+    ]);
+  });
+
+  it.each([
+    {
+      fileName: 'package-lock.json',
+      lockfile: JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          'node_modules/locked': { version: '1.0.0' },
+        },
+      }),
+      label: 'npm package-lock',
+    },
+    {
+      fileName: 'pnpm-lock.yaml',
+      label: 'pnpm lockfile',
+      lockfile: `
+lockfileVersion: '9.0'
+packages:
+  locked@1.0.0: {}
+`,
+    },
+    {
+      fileName: 'yarn.lock',
+      label: 'Yarn classic lockfile',
+      lockfile: `
+locked@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/locked/-/locked-1.0.0.tgz"
+`,
+    },
+    {
+      fileName: 'yarn.lock',
+      label: 'Yarn Berry lockfile',
+      lockfile: `
+__metadata:
+  version: 8
+
+"locked@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "locked@npm:1.0.0"
+`,
+    },
+  ])(
+    'includes exact versions from $label while preserving latest tags',
+    async ({ fileName, lockfile }) => {
+      await fs.writeJson(
+        path.join(tempDir, 'package.json'),
+        {
+          name: 'root',
+          version: '1.0.0',
+        },
+        { spaces: 2 }
+      );
+      await fs.writeFile(path.join(tempDir, fileName), lockfile);
+
+      const report = await collectBundle({
+        generatedAt: '2026-05-21T00:00:00.000Z',
+        outputDir: path.join(tempDir, 'airgap-bundle'),
+        registry: {
+          getPackageMetadata(name) {
+            expect(name).toBe('locked');
+            return Promise.resolve(packageMetadata('locked', ['1.0.0', '1.1.0'], '1.1.0'));
+          },
+        },
+        registryUrl: 'https://registry.example',
+        root: tempDir,
+        runGitOutputCommand: cleanRepositoryRunner(tempDir),
+      });
+
+      expect(report.fetch).toMatchObject({
+        errors: [],
+        resolved: 2,
+      });
+      expect(report.fixedPoint).toBe(true);
+      expect(report.wroteBundle).toBe(true);
+      expect(
+        tarballMocks.downloadResolvedPackage.mock.calls.map((call) => {
+          const pkg = call[0] as ResolvedRootPackage;
+          return `${pkg.name}@${pkg.version}`;
+        })
+      ).toEqual(['locked@1.0.0', 'locked@1.1.0']);
+    }
+  );
+
+  it('adds git dependencies found only in lockfiles to git sources', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'package.json'),
+      {
+        name: 'root',
+        version: '1.0.0',
+      },
+      { spaces: 2 }
+    );
+    await fs.writeJson(
+      path.join(tempDir, 'package-lock.json'),
+      {
+        lockfileVersion: 3,
+        packages: {
+          'node_modules/git-only': {
+            resolved: 'git+https://github.com/acme/git-only.git#abc123',
+            version: '1.0.0',
+          },
+        },
+      },
+      { spaces: 2 }
+    );
+
+    const report = await collectBundle({
+      dryRun: true,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      outputDir: path.join(tempDir, 'airgap-bundle'),
+      registry: {
+        getPackageMetadata(name) {
+          throw new Error(`Unexpected registry lookup for ${name}`);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      root: tempDir,
+      runGitOutputCommand: cleanRepositoryRunner(tempDir),
+    });
+
+    expect(report.fetch).toMatchObject({
+      errors: [],
+      resolved: 0,
+    });
+    expect(report.gitFetch).toMatchObject({
+      dryRun: true,
+      planned: 1,
+      totalRepositories: 1,
+    });
+    expect(report.gitSources.sources).toEqual([
+      {
+        committish: 'abc123',
+        fetchSpec: 'https://github.com/acme/git-only.git',
+        host: 'github.com',
+        id: 'github.com/acme/git-only',
+        localMirrorPath: 'git-mirrors/github.com/acme/git-only.git',
+        owner: 'acme',
+        repo: 'git-only',
+        requirements: [
+          {
+            committish: 'abc123',
+            fetchSpec: 'https://github.com/acme/git-only.git',
+            hosted: {
+              domain: 'github.com',
+              project: 'git-only',
+              type: 'github',
+              user: 'acme',
+            },
+            name: 'git-only',
+            raw: 'git-only@git+https://github.com/acme/git-only.git#abc123',
+            rawSpec: 'git+https://github.com/acme/git-only.git#abc123',
+            requiredBy: 'lockfile:package-lock.json',
+          },
+        ],
+        sourceUrl: 'https://github.com/acme/git-only.git',
+      },
     ]);
   });
 });
