@@ -11,7 +11,14 @@ export {
 } from './core/bundle.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
-export { createGitMirrorPlan, readFetchReport, writeGitMirrorPlan } from './core/git-plan.js';
+export { fetchGitMirrors, runGitCommand } from './core/git-fetch.js';
+export {
+  createGitMirrorPlan,
+  readFetchReport,
+  readGitMirrorPlan,
+  writeGitFetchReport,
+  writeGitMirrorPlan,
+} from './core/git-plan.js';
 export { readBundleInfo } from './core/info.js';
 export { readManifestRequirements } from './core/manifests.js';
 export {
@@ -31,6 +38,11 @@ export {
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
+export type {
+  FetchGitMirrorsOptions,
+  GitCommandInvocation,
+  GitCommandRunner,
+} from './core/git-fetch.js';
 export type { GitMirrorPlanOptions } from './core/git-plan.js';
 export type {
   BundleInfo,
@@ -54,6 +66,9 @@ export type {
   BundleManifest,
   DistTagsManifest,
   FetchReport,
+  GitFetchActionResult,
+  GitFetchActionStatus,
+  GitFetchReport,
   GitMirrorPlan,
   GitMirrorRepositoryPlan,
   GitRequirement,

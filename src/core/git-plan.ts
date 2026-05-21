@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import type {
   FetchReport,
+  GitFetchReport,
   GitMirrorPlan,
   GitMirrorRepositoryPlan,
   GitRequirement,
@@ -160,4 +161,16 @@ export async function readFetchReport(bundleDir: string): Promise<FetchReport> {
 export async function writeGitMirrorPlan(bundleDir: string, plan: GitMirrorPlan): Promise<void> {
   await fs.ensureDir(bundleDir);
   await fs.writeJson(path.join(bundleDir, 'git-plan.json'), plan, { spaces: 2 });
+}
+
+export async function readGitMirrorPlan(bundleDir: string): Promise<GitMirrorPlan> {
+  return (await fs.readJson(path.join(bundleDir, 'git-plan.json'))) as GitMirrorPlan;
+}
+
+export async function writeGitFetchReport(
+  bundleDir: string,
+  report: GitFetchReport
+): Promise<void> {
+  await fs.ensureDir(bundleDir);
+  await fs.writeJson(path.join(bundleDir, 'git-fetch-report.json'), report, { spaces: 2 });
 }

@@ -62,6 +62,27 @@ export interface GitMirrorPlan {
   skipped: SkippedGitRequirement[];
 }
 
+export type GitFetchActionStatus = 'planned' | 'cloned' | 'updated' | 'error';
+
+export interface GitFetchActionResult {
+  error?: string;
+  repository: string;
+  sourceUrl: string;
+  status: GitFetchActionStatus;
+  targetPath: string;
+}
+
+export interface GitFetchReport {
+  cloned: number;
+  dryRun: boolean;
+  errors: GitFetchActionResult[];
+  generatedAt: string;
+  mirrorsDir: string;
+  planned: number;
+  totalRepositories: number;
+  updated: number;
+}
+
 export interface ParseRootSpecsResult {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];

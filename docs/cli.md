@@ -90,3 +90,18 @@ The plan is intentionally non-mutating: it does not clone repositories, create G
 projects, or patch package manifests. It records source clone URLs, target Gitea URLs,
 the npm packages that required each Git dependency, and candidate `insteadOf` prefixes
 for a later apply/verify phase.
+
+## git fetch
+
+```bash
+airgap-sync git fetch ./seed
+airgap-sync git fetch ./seed --dry-run
+airgap-sync git fetch ./seed --mirrors-dir ./git-mirrors
+```
+
+Reads `git-plan.json` and stores local bare mirror repositories. Missing mirrors are
+created with `git clone --mirror`; existing mirrors run `git remote set-url origin` and
+`git remote update --prune`. The command writes `git-fetch-report.json`.
+
+This is the online-side collection step only. It does not push to Gitea; that belongs
+to a later offline apply command.

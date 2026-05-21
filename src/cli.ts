@@ -6,6 +6,7 @@ import {
   createGitMirrorPlan,
   createBundleDocuments,
   createFetchReport,
+  fetchGitMirrors,
   fetchSeedBundle,
   HttpRegistryClient,
   packageName,
@@ -13,11 +14,13 @@ import {
   publishBundle,
   readBundleInfo,
   readFetchReport,
+  readGitMirrorPlan,
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
   writeBundleDocuments,
   writeFetchReport,
+  writeGitFetchReport,
   writeGitMirrorPlan,
   writePublishReport,
 } from './index.js';
@@ -42,6 +45,11 @@ interface GitPlanOptions {
   gitea: string;
   owner: string;
   write?: boolean;
+}
+
+interface GitFetchOptions {
+  dryRun?: boolean;
+  mirrorsDir?: string;
 }
 
 const program = new Command();
@@ -256,6 +264,34 @@ gitCommand
       console.log(JSON.stringify(plan, null, 2));
 
       if (plan.skipped.length > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+gitCommand
+  .command('fetch')
+  .description('Clone or update local bare mirrors from git-plan.json')
+  .argument('<bundle>', 'Path to seed bundle directory')
+  .option('--mirrors-dir <dir>', 'Directory for bare Git mirrors')
+  .option('--dry-run', 'Print planned mirror fetch operations without running Git')
+  .action(async (bundle: string, options: GitFetchOptions) => {
+    try {
+      const plan = await readGitMirrorPlan(bundle);
+      const report = await fetchGitMirrors({
+        bundleDir: bundle,
+        dryRun: options.dryRun === true,
+        plan,
+        ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+      });
+
+      await writeGitFetchReport(bundle, report);
+      console.log(JSON.stringify(report, null, 2));
+
+      if (report.errors.length > 0) {
         process.exitCode = 1;
       }
     } catch (error) {

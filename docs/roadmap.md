@@ -60,7 +60,8 @@ verification.
 - Preserve `requiredBy` for unsupported Git specs in fetch reports.
 - Parse npm Git specs into canonical repository URL and commit/tag selectors.
 - Create a deterministic Gitea mirror plan from discovered Git requirements.
-- Mirror Git dependencies discovered in transitive npm package manifests.
+- Fetch local bare mirrors for Git dependencies discovered in transitive npm package
+  manifests.
 - Recursively inspect package manifests from Git dependencies.
 - Decide when URL rewriting is enough and when package/lockfile patching is required.
 
