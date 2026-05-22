@@ -3,15 +3,14 @@
 ## Setup
 
 ```bash
-corepack enable
-pnpm install
+npm ci
 ```
 
 ## Checks
 
 ```bash
-pnpm check
-pnpm format:check
+npm run check
+npm run format:check
 ```
 
 ## Local End-To-End Test
@@ -23,7 +22,7 @@ repositories and a temporary Verdaccio instance:
 GITEA_URL=http://127.0.0.1:3000 \
 GITEA_USER=maxim \
 GITEA_PASSWORD=11111111 \
-pnpm e2e:local
+npm run e2e:local
 ```
 
 The script creates a Gitea token, creates public test repositories, adds a Git
@@ -36,7 +35,7 @@ dependency into Gitea, restores dist-tags, and runs `verify install`.
 The repository includes a Verdaccio config for integration testing:
 
 ```bash
-pnpm registry:start
+npm run registry:start
 ```
 
 This config has no uplinks and no package `proxy` rules. The registry is populated only

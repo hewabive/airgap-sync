@@ -434,7 +434,7 @@ async function main() {
 
   try {
     log(`workdir ${workDir}`);
-    await run('pnpm', ['build']);
+    await run('npm', ['run', 'build']);
 
     tokenInfo = await createGiteaToken(tokenName);
     token = tokenInfo.token;

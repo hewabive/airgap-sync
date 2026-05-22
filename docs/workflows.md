@@ -29,15 +29,21 @@ http://gitea.local              Closed-network Gitea base URL
 Create a workspace on removable media and describe the things that must stay fresh:
 
 ```bash
-airgap-sync init /media/USB/airgap-sync
+mkdir -p /media/USB/airgap-sync
 cd /media/USB/airgap-sync
+npm init -y
+npm install airgap-sync --omit=dev
+npm exec -- airgap-sync init
 
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
-airgap-sync target add npm pnpm@latest
+airgap-sync target add npm typescript@latest
 airgap-sync target list
 ```
+
+The examples below use `airgap-sync` directly. In a local npm install on removable
+media, prefix the same commands with `npm exec --`.
 
 Operators who prefer prompts can run:
 

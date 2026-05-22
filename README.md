@@ -51,18 +51,19 @@ Install it in the workspace on removable media:
 ```bash
 mkdir -p /media/USB/airgap-sync
 cd /media/USB/airgap-sync
-pnpm add -D airgap-sync
-pnpm exec airgap-sync init
+npm init -y
+npm install airgap-sync --omit=dev
+npm exec -- airgap-sync init
 ```
 
-After a global install or `pnpm dlx airgap-sync`, the same commands can be run as
-`airgap-sync ...`.
+After a global install, the same commands can be run as `airgap-sync ...`.
+The examples below omit the `npm exec --` prefix for readability.
 
 For guided operation, start the interactive menu. With no command, `airgap-sync`
 opens the menu by default; `airgap-sync -h` still prints the command reference.
 
 ```bash
-pnpm exec airgap-sync
+npm exec -- airgap-sync
 ```
 
 ```bash
@@ -145,25 +146,24 @@ airgap-sync apply ./airgap-bundle \
 Requirements:
 
 - Node.js 22 or newer
-- pnpm 11 or newer
+- npm 11 or newer
 
 Setup:
 
 ```bash
-corepack enable
-pnpm install
-pnpm check
+npm ci
+npm run check
 ```
 
 Useful commands:
 
 ```bash
-pnpm build       # Type-check and build dist/
-pnpm test        # Run tests
-pnpm lint        # Run ESLint
-pnpm format      # Format source and docs
-pnpm check       # Lint, type-check, and test
-pnpm e2e:local   # Run the local Gitea/Verdaccio integration test
+npm run build       # Type-check and build dist/
+npm test            # Run tests
+npm run lint        # Run ESLint
+npm run format      # Format source and docs
+npm run check       # Lint, type-check, and test
+npm run e2e:local   # Run the local Gitea/Verdaccio integration test
 ```
 
 ## Documentation

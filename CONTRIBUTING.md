@@ -6,16 +6,15 @@ documented before it becomes code.
 ## Local Workflow
 
 ```bash
-corepack enable
-pnpm install
-pnpm check
+npm ci
+npm run check
 ```
 
 Before opening a change, run:
 
 ```bash
-pnpm format
-pnpm check
+npm run format
+npm run check
 ```
 
 ## Branches

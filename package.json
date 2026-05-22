@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "build": "tsc --noEmit && tsup",
-    "check": "pnpm lint && pnpm typecheck && pnpm test:run && pnpm knip",
+    "check": "npm run lint && npm run typecheck && npm run test:run && npm run knip",
     "dev": "tsup --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -62,7 +62,7 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@11.2.2",
+  "packageManager": "npm@11.10.1",
   "dependencies": {
     "commander": "^14.0.2",
     "npm-package-arg": "^13.0.0",
