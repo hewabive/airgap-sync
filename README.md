@@ -121,7 +121,8 @@ airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 workspace configuration for repeated syncs, not part of a single transfer bundle. It
 stores endpoints, target lists, bundle output, and menu defaults such as whether to
 include dev dependencies or ask each time. Menu defaults are grouped by workflow step:
-`defaults.download`, `defaults.publish`, and `defaults.verifyInstall`.
+`defaults.download`, `defaults.publish`, and `defaults.verifyInstall`. The interactive
+menu asks for these defaults while initializing a new workspace.
 If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.
 
 The lower-level commands remain available for debugging and one-off use:

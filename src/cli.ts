@@ -666,7 +666,7 @@ async function configureBundleDirectory(
   return nextConfig;
 }
 
-async function configureCollectDefaults(
+async function configureDownloadDefaults(
   workspaceDir: string,
   rl: ReadlineInterface,
   config: WorkspaceConfig
@@ -695,7 +695,7 @@ async function configureCollectDefaults(
   return nextConfig;
 }
 
-async function configureApplyDefaults(
+async function configurePublishDefaults(
   workspaceDir: string,
   rl: ReadlineInterface,
   config: WorkspaceConfig
@@ -754,7 +754,17 @@ async function configureInitialWorkspace(
 ): Promise<WorkspaceConfig> {
   console.log('Configure workspace defaults.');
   const withBundle = await configureBundleDirectory(workspaceDir, rl, config);
-  return await configureConnectionSettings(workspaceDir, rl, withBundle);
+  const withConnections = await configureConnectionSettings(workspaceDir, rl, withBundle);
+  console.log('Configure download defaults.');
+  const withDownloadDefaults = await configureDownloadDefaults(workspaceDir, rl, withConnections);
+  console.log('Configure publish defaults.');
+  const withPublishDefaults = await configurePublishDefaults(
+    workspaceDir,
+    rl,
+    withDownloadDefaults
+  );
+  console.log('Configure install verification defaults.');
+  return await configureVerifyInstallDefaults(workspaceDir, rl, withPublishDefaults);
 }
 
 async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
@@ -858,10 +868,10 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
       await configureBundleDirectory(workspaceDir, rl, config);
       break;
     case '3':
-      await configureCollectDefaults(workspaceDir, rl, config);
+      await configureDownloadDefaults(workspaceDir, rl, config);
       break;
     case '4':
-      await configureApplyDefaults(workspaceDir, rl, config);
+      await configurePublishDefaults(workspaceDir, rl, config);
       break;
     case '5':
       await configureVerifyInstallDefaults(workspaceDir, rl, config);

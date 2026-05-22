@@ -52,6 +52,7 @@ specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry`, `giteaUrl`, bundle output, and default answers in `airgap-sync.json`.
+When the menu initializes a new workspace, it asks for these values up front.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. They can be `yes`, `no`, or `ask`; `ask` keeps the prompt for
 that action.

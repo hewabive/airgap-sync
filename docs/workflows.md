@@ -63,7 +63,8 @@ Keep this file in the workspace root on removable media, next to `airgap-bundle/
 is long-lived workspace state rather than a file inside one generated bundle. The same
 file stores endpoint URLs, bundle output, and menu defaults; boolean defaults can be
 set to `true`, `false`, or `ask` under `defaults.download`, `defaults.publish`, and
-`defaults.verifyInstall`.
+`defaults.verifyInstall`. When the interactive menu initializes a workspace, it asks
+for these defaults during setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
