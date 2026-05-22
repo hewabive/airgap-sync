@@ -32,12 +32,22 @@ export interface ApplyBundleOptions {
   giteaBaseUrl: string;
   giteaClient: GiteaClient;
   mirrorsDir?: string;
+  onProgress?: (event: ApplyProgressEvent) => void;
   onPublishProgress?: PublishBundleOptions['onProgress'];
   private?: boolean;
   publishConcurrency?: number;
   registryUrl: string;
   runGitCommand?: GitCommandRunner;
   skipExisting?: boolean;
+}
+
+export type ApplyProgressPhase = 'publish' | 'gitea' | 'git-apply' | 'git-config' | 'report';
+
+export type ApplyProgressStatus = 'start' | 'done';
+
+export interface ApplyProgressEvent {
+  phase: ApplyProgressPhase;
+  status: ApplyProgressStatus;
 }
 
 function emptyGitSourcesManifest(generatedAt: string): GitSourcesManifest {
@@ -84,6 +94,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const distTags = await readDistTagsManifest(bundleDir);
   const gitSources = await readOptionalGitSourcesManifest(bundleDir, generatedAt);
 
+  options.onProgress?.({ phase: 'publish', status: 'start' });
   const publish = await publishBundle(manifest, distTags, {
     bundleDir,
     ...(options.distTagConcurrency === undefined
@@ -98,7 +109,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ...(options.skipExisting === undefined ? {} : { skipExisting: options.skipExisting }),
   });
   await writePublishReport(bundleDir, publish);
+  options.onProgress?.({ phase: 'publish', status: 'done' });
 
+  options.onProgress?.({ phase: 'gitea', status: 'start' });
   const gitea = await provisionGiteaRepositories({
     client: options.giteaClient,
     dryRun,
@@ -108,7 +121,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     private: options.private ?? true,
   });
   await writeGiteaRepositoryProvisionReport(bundleDir, gitea);
+  options.onProgress?.({ phase: 'gitea', status: 'done' });
 
+  options.onProgress?.({ phase: 'git-apply', status: 'start' });
   const gitApply = await applyGitSources({
     bundleDir,
     dryRun,
@@ -119,15 +134,21 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
   });
   await writeGitApplyReport(bundleDir, gitApply);
+  options.onProgress?.({ phase: 'git-apply', status: 'done' });
 
   const gitConfig = options.configureGitGlobal
-    ? await configureGitRewrites({
-        dryRun,
-        generatedAt,
-        giteaBaseUrl: options.giteaBaseUrl,
-        manifest: gitSources,
-        ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
-      })
+    ? await (async () => {
+        options.onProgress?.({ phase: 'git-config', status: 'start' });
+        const report = await configureGitRewrites({
+          dryRun,
+          generatedAt,
+          giteaBaseUrl: options.giteaBaseUrl,
+          manifest: gitSources,
+          ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
+        });
+        options.onProgress?.({ phase: 'git-config', status: 'done' });
+        return report;
+      })()
     : undefined;
   if (gitConfig) {
     await writeGitConfigReport(bundleDir, gitConfig);
@@ -143,7 +164,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     registryUrl: options.registryUrl,
     succeeded: applySucceeded({ gitApply, ...(gitConfig ? { gitConfig } : {}), gitea, publish }),
   };
+  options.onProgress?.({ phase: 'report', status: 'start' });
   await writeApplyReport(bundleDir, report);
+  options.onProgress?.({ phase: 'report', status: 'done' });
 
   return report;
 }

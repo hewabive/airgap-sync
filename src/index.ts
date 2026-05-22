@@ -76,7 +76,12 @@ export {
 } from './core/lockfiles.js';
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
-export type { ApplyBundleOptions } from './core/apply.js';
+export type {
+  ApplyBundleOptions,
+  ApplyProgressEvent,
+  ApplyProgressPhase,
+  ApplyProgressStatus,
+} from './core/apply.js';
 export type {
   CollectBundleOptions,
   CollectProgressEvent,

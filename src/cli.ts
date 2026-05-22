@@ -53,6 +53,8 @@ import {
 } from './index.js';
 import type { GiteaClient } from './index.js';
 import type {
+  ApplyProgressEvent,
+  ApplyProgressPhase,
   CollectProgressEvent,
   FetchSeedBundleResult,
   PublishProgressEvent,
@@ -173,6 +175,7 @@ async function runSelfCommand(
     throw new Error('Cannot locate current CLI entrypoint');
   }
 
+  console.error(`[menu] running: airgap-sync ${args.join(' ')}`);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
       cwd,
@@ -183,6 +186,7 @@ async function runSelfCommand(
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
+        console.error('[menu] command finished');
         resolve();
         return;
       }
@@ -260,6 +264,21 @@ const collectPhaseLabels: Record<CollectProgressEvent['phase'], string> = {
   'npm-fetch': 'resolve/download npm',
   'repository-update': 'update repositories',
 };
+
+const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
+  gitea: 'provision Gitea repositories',
+  'git-apply': 'push Git mirrors',
+  'git-config': 'configure Git rewrites',
+  publish: 'publish npm packages',
+  report: 'write apply report',
+};
+
+function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
+  return (event) => {
+    const label = applyPhaseLabels[event.phase];
+    console.error(`[apply] ${label}: ${event.status === 'start' ? 'started' : 'done'}`);
+  };
+}
 
 function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
   const lastLogged = new Map<string, number>();
@@ -692,6 +711,9 @@ async function runMenuAction(
         false
       );
       const token = process.env.GITEA_TOKEN ?? (await askSecret(rl, 'Gitea token'));
+      if (!token) {
+        throw new Error('Gitea token is required for apply; set GITEA_TOKEN or enter a token');
+      }
       await runSelfCommand(
         compactArgs([
           'apply',
@@ -1472,6 +1494,7 @@ addNpmPublishOptions(
         giteaClient: client,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
         onPublishProgress: createPublishProgressLogger(),
+        onProgress: createApplyProgressLogger(),
         private: options.public !== true,
         publishConcurrency: options.publishConcurrency,
         registryUrl: options.registry,
