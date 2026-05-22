@@ -1,7 +1,7 @@
 # Workflows
 
-This document describes the end-to-end workflow. `collect` handles the online side, and
-`apply` handles the closed-network import side. Lower-level commands remain available
+This document describes the end-to-end workflow. `download` handles the online side, and
+`publish` handles the closed-network import side. Lower-level commands remain available
 for debugging individual phases.
 
 ## Assumptions
@@ -54,8 +54,8 @@ Operators who prefer prompts can run:
 airgap-sync
 ```
 
-The menu covers target management, endpoint configuration, online collection, offline
-apply, verification, and bundle info.
+The menu covers target management, endpoint configuration, online download, offline
+publish, verification, and bundle info.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
@@ -69,13 +69,13 @@ removable media.
 
 ## Online Phase
 
-Refresh configured targets and collect npm/Git dependency closure:
+Refresh configured targets and download npm/Git dependency closure:
 
 ```bash
-airgap-sync collect
+airgap-sync download
 ```
 
-The collect step fetches configured Git targets as bare mirrors under
+The download step fetches configured Git targets as bare mirrors under
 `airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
 configured npm targets as root package specs, and writes the transfer bundle under
 `airgap-bundle/` by default.
@@ -83,13 +83,13 @@ configured npm targets as root package specs, and writes the transfer bundle und
 Lower-level collection from an explicit repository directory is still available:
 
 ```bash
-airgap-sync collect ./repos \
+airgap-sync download ./repos \
   --registry https://registry.npmjs.org \
   --include-dev \
   --output ./airgap-bundle
 ```
 
-The collect step runs to a fixed point:
+The download step runs to a fixed point:
 
 ```text
 fetch configured Git targets into bundle-local mirrors
@@ -109,7 +109,7 @@ store source Git identities such as `https://github.com/antvis/G2.git`, requeste
 local mirror paths, and `requiredBy` edges. Mapping those sources to Gitea belongs to
 the offline phase.
 
-The collect step writes npm metadata and Git source metadata:
+The download step writes npm metadata and Git source metadata:
 
 - `seed-manifest.json`
 - `dist-tags.json`
@@ -117,7 +117,7 @@ The collect step writes npm metadata and Git source metadata:
 - `fetch-report.json`
 - package tarballs under `packages/`
 - local bare Git mirrors under `git-mirrors/`
-- Git source records for offline apply
+- Git source records for offline publish
 
 Before transfer, inspect the bundle:
 
@@ -149,12 +149,12 @@ commands.
 
 ## Offline Phase
 
-Apply the bundle to Verdaccio and Gitea:
+Publish the bundle to Verdaccio and Gitea:
 
 ```bash
 export GITEA_TOKEN=...
 
-airgap-sync apply ./airgap-bundle \
+airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
@@ -167,7 +167,7 @@ once:
 airgap-sync secrets set-gitea-token
 ```
 
-The offline apply step should:
+The offline publish step should:
 
 - publish npm tarballs into Verdaccio;
 - restore npm dist-tags;
@@ -177,7 +177,7 @@ The offline apply step should:
 - push local bare mirrors into Gitea using the provided Gitea token;
 - generate install configuration for consumer machines.
 
-By default `apply` reports the Git rewrite rules without changing global Git config.
+By default `publish` reports the Git rewrite rules without changing global Git config.
 Pass `--configure-git-global` on the import machine when that machine should also be
 configured as a consumer.
 
@@ -233,7 +233,7 @@ airgap-sync git sources ./airgap-bundle --write
 airgap-sync git fetch ./airgap-bundle
 
 # Offline
-airgap-sync publish ./airgap-bundle --registry http://verdaccio.local:4873
+airgap-sync npm publish ./airgap-bundle --registry http://verdaccio.local:4873
 airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
 airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global
@@ -254,9 +254,9 @@ airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --dry-run
 airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global --dry-run
 ```
 
-`airgap-sync publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873`
+`airgap-sync npm publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873`
 prints the planned npm publish and dist-tag operations without publishing.
-`airgap-sync apply ./airgap-bundle --dry-run --registry http://verdaccio.local:4873 --gitea http://gitea.local`
+`airgap-sync publish ./airgap-bundle --dry-run --registry http://verdaccio.local:4873 --gitea http://gitea.local`
 plans the whole offline import without publishing, creating Gitea repositories, pushing
 mirrors, or writing global Git config.
 

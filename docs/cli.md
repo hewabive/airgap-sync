@@ -1,10 +1,10 @@
 # CLI Reference
 
-The CLI keeps collection and application separate so the online and offline phases are
+The CLI keeps download and publish phases separate so the online and offline phases are
 auditable.
 
 The preferred user workflow is workspace-based: initialize a directory on removable
-media, add Git/npm targets once, then run `collect` online and `apply` offline.
+media, add Git/npm targets once, then run `download` online and `publish` offline.
 
 ## init
 
@@ -31,7 +31,7 @@ airgap-sync target remove 1
 ```
 
 Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirrors into
-`airgap-bundle/git-mirrors/` during `collect`. npm targets are treated as explicit root
+`airgap-bundle/git-mirrors/` during `download`. npm targets are treated as explicit root
 package specs.
 
 ## menu
@@ -43,7 +43,7 @@ airgap-sync menu /media/USB/airgap-sync
 ```
 
 Opens an interactive prompt menu for common workspace actions. The top level keeps the
-regular workflow compact: targets, collect, apply, install verification, diagnostics,
+regular workflow compact: targets, download, publish, install verification, diagnostics,
 and settings. Target management, bundle checks, bundle info, and saved credentials
 live in submenus.
 
@@ -66,7 +66,7 @@ airgap-sync secrets clear-gitea-token
 
 Manages local workspace secrets in `airgap-sync.secrets.json`. This file is ignored by
 Git and is separate from `airgap-sync.json`, but it is still plaintext on the removable
-media. A saved Gitea token is used by `apply`, `git create-repos`, and `git apply` when
+media. A saved Gitea token is used by `publish`, `git create-repos`, and `git apply` when
 no command-line token or `GITEA_TOKEN` environment variable is provided.
 
 ## repos update
@@ -80,13 +80,13 @@ Scans a directory for Git repositories and refreshes each clean branch with
 `git pull --ff-only`. Dirty worktrees, detached HEADs, non-fast-forward branches, and
 authentication failures are reported without automatic repair.
 
-## collect
+## download
 
 ```bash
-airgap-sync collect
+airgap-sync download
 
 # Lower-level mode without airgap-sync.json:
-airgap-sync collect ./repos \
+airgap-sync download ./repos \
   --registry https://registry.npmjs.org \
   --include-dev \
   --concurrency 16 \
@@ -150,10 +150,10 @@ package.json files are included so monorepositories can be seeded from the repos
 root. Local workspace dependencies are skipped when their package names are discovered
 inside the same scan root.
 
-## publish
+## npm publish
 
 ```bash
-airgap-sync publish ./airgap-bundle \
+airgap-sync npm publish ./airgap-bundle \
   --registry http://192.168.0.10:4873
 ```
 
@@ -247,8 +247,8 @@ source paths such as `git-mirrors/github.com/antvis/G2.git`. Missing mirrors are
 created with `git clone --mirror`; existing mirrors run `git remote set-url origin` and
 `git remote update --prune`. The command writes `git-fetch-report.json`.
 
-This is the online-side collection step only. It does not push to Gitea; that belongs
-to a later offline apply command.
+This is the online-side download step only. It does not push to Gitea; that belongs
+to a later offline publish command.
 
 ## git apply
 
@@ -299,17 +299,17 @@ configuration, for example
 `git config --global url.http://gitea.local/.insteadOf https://github.com/`. The command
 writes `git-config-report.json`.
 
-## apply
+## publish
 
 ```bash
-airgap-sync apply ./airgap-bundle \
+airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local
 ```
 
-Applies the whole bundle in the closed network: publish npm packages to Verdaccio,
+Publishes the whole bundle in the closed network: publish npm packages to Verdaccio,
 restore dist-tags, map Git sources to Gitea targets, create missing Gitea
-owners/repositories, push mirrors, and write apply reports.
+owners/repositories, push mirrors, and write import reports.
 
 Supported options:
 
@@ -323,7 +323,7 @@ Supported options:
 --dist-tag-concurrency <n> Concurrent npm dist-tag operations, default 4
 --publish-concurrency <n> Concurrent npm publish operations, default 4
 --configure-git-global    Write Git URL rewrite rules into global Git config
---dry-run                 Print planned apply operations without publishing or pushing
+--dry-run                 Print planned publish operations without publishing or pushing
 ```
 
 Prefer the `GITEA_TOKEN` environment variable or a saved token over `--gitea-token` so
@@ -334,6 +334,6 @@ push authentication.
 
 Git target paths preserve source owner/repository names by default. For example,
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`, so
-consumer machines can use one broad `insteadOf` rule for the source host. `apply`
+consumer machines can use one broad `insteadOf` rule for the source host. `publish`
 writes those rewrite rules into `git-apply-report.json`; it only mutates global Git
 config when `--configure-git-global` is passed.

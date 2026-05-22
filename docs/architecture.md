@@ -6,7 +6,7 @@ through normal npm publishing commands.
 The product direction is broader: a portable airgap dependency sync tool for projects
 that combine Git repositories, npm registry dependencies, and npm Git dependencies.
 The npm/Verdaccio bundle, Git mirror transfer, fixed-point collection, and top-level
-apply orchestration are the main architectural layers.
+publish orchestration are the main architectural layers.
 
 ## Problem
 
@@ -132,7 +132,7 @@ The primary operator workflow is workspace-based:
 ```bash
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
-airgap-sync collect
+airgap-sync download
 ```
 
 Direct package specs are also supported:
@@ -169,7 +169,7 @@ package.json files.
 
 ## Collection Fixed Point
 
-The high-level `collect` command should not run npm collection only once. Git
+The high-level `download` command should not run npm collection only once. Git
 dependencies may themselves contain package manifests, and those manifests can introduce
 new npm dependencies or more Git dependencies.
 
@@ -242,7 +242,7 @@ The bundle should be portable between closed networks. A source record should in
 - local mirror path inside the bundle;
 - `requiredBy` edges that explain why the repository was included.
 
-Offline apply maps those source identities to the target Gitea instance.
+Offline publish maps those source identities to the target Gitea instance.
 
 ## Git Mirror Naming Policy
 
@@ -259,7 +259,7 @@ This keeps consumer configuration simple:
 git config --global url."http://gitea.local/".insteadOf "https://github.com/"
 ```
 
-The closed-network apply phase is responsible for creating missing Gitea owners or
+The closed-network publish phase is responsible for creating missing Gitea owners or
 repositories. Flattened names such as `github.com-antvis-g2` should be treated as a
 temporary implementation detail or fallback for hosts that cannot be mapped cleanly to
 an owner/repository path.

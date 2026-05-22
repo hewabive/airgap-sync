@@ -17,7 +17,7 @@ The tool is designed to avoid storing credentials in workspace config files. Pas
 Gitea tokens through `GITEA_TOKEN` where possible; command-line token arguments
 can be visible through shell history and process listings.
 
-`airgap-sync apply` pushes Git mirrors with mirror semantics. Use it only against
+`airgap-sync publish` pushes Git mirrors with mirror semantics. Use it only against
 Gitea repositories that are intended to be managed as mirrors of the source
 repositories.
 

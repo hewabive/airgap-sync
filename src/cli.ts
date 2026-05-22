@@ -283,13 +283,13 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
   'git-apply': 'push Git mirrors',
   'git-config': 'configure Git rewrites',
   publish: 'publish npm packages',
-  report: 'write apply report',
+  report: 'write publish report',
 };
 
 function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
   return (event) => {
     const label = applyPhaseLabels[event.phase];
-    console.error(`[apply] ${label}: ${event.status === 'start' ? 'started' : 'done'}`);
+    console.error(`[publish] ${label}: ${event.status === 'start' ? 'started' : 'done'}`);
   };
 }
 
@@ -299,7 +299,7 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
   return (event) => {
     const label = collectPhaseLabels[event.phase];
     const prefix =
-      event.iteration === undefined ? '[collect]' : `[collect:${String(event.iteration)}]`;
+      event.iteration === undefined ? '[download]' : `[download:${String(event.iteration)}]`;
     const key = `${String(event.iteration ?? 0)}:${event.phase}`;
 
     if (event.status === 'start') {
@@ -358,7 +358,7 @@ function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
 
     if (event.status === 'start') {
       const total = event.total === undefined ? '' : ` (${String(event.total)})`;
-      console.error(`[publish] ${label}: started${total}`);
+      console.error(`[npm publish] ${label}: started${total}`);
       return;
     }
 
@@ -367,12 +367,12 @@ function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
         event.total === undefined
           ? ''
           : ` (${String(event.current ?? event.total)}/${String(event.total)})`;
-      console.error(`[publish] ${label}: done${total}`);
+      console.error(`[npm publish] ${label}: done${total}`);
       return;
     }
 
     if (event.status === 'planned') {
-      console.error(`[publish] ${label}: ${String(event.current ?? 0)} actions`);
+      console.error(`[npm publish] ${label}: ${String(event.current ?? 0)} actions`);
       return;
     }
 
@@ -394,7 +394,9 @@ function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
     lastLogged.set(event.phase, event.current);
     const subject = event.package ? ` ${event.package}${event.tag ? `#${event.tag}` : ''}` : '';
     console.error(
-      `[publish] ${label}: ${String(event.current)}/${String(event.total)} ${event.status}${subject}`
+      `[npm publish] ${label}: ${String(event.current)}/${String(
+        event.total
+      )} ${event.status}${subject}`
     );
   };
 }
@@ -596,13 +598,15 @@ async function giteaTokenFromMenu(workspaceDir: string, rl: ReadlineInterface): 
 
   const savedToken = await readSavedGiteaToken(workspaceDir);
   if (savedToken) {
-    console.error(`[menu] apply: using saved Gitea token from ${workspaceSecretsFileName}`);
+    console.error(
+      `[menu] publish updates: using saved Gitea token from ${workspaceSecretsFileName}`
+    );
     return savedToken;
   }
 
   const token = await ask(rl, 'Gitea token (visible input)');
   if (!token) {
-    throw new Error('Gitea token is required for apply');
+    throw new Error('Gitea token is required for publish');
   }
 
   if (await askYesNo(rl, `Save Gitea token in ${workspaceSecretsFileName}?`, false)) {
@@ -769,8 +773,8 @@ async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
 function printMenu(): void {
   console.log('\nairgap-sync');
   console.log('1. Targets');
-  console.log('2. Collect updates');
-  console.log('3. Apply bundle');
+  console.log('2. Download updates');
+  console.log('3. Publish updates');
   console.log('4. Verify installs');
   console.log('5. Diagnostics');
   console.log('6. Settings');
@@ -836,8 +840,8 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
   console.log('\nSettings');
   console.log('1. Registries and Gitea');
   console.log('2. Bundle directory');
-  console.log('3. Collect defaults');
-  console.log('4. Apply defaults');
+  console.log('3. Download defaults');
+  console.log('4. Publish defaults');
   console.log('5. Verify install defaults');
   console.log('6. Saved credentials');
   console.log('7. Show current config');
@@ -1015,7 +1019,7 @@ async function runMenuAction(
       );
       await runSelfCommand(
         compactArgs([
-          'collect',
+          'download',
           includeDev ? '--include-dev' : undefined,
           includePeer ? '--include-peer' : undefined,
         ]),
@@ -1024,7 +1028,7 @@ async function runMenuAction(
       return true;
     }
     case '3': {
-      console.error(`[menu] apply: bundle ${bundle}`);
+      console.error(`[menu] publish updates: bundle ${bundle}`);
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
       const publicRepos = await resolvePromptBoolean(
@@ -1040,15 +1044,15 @@ async function runMenuAction(
         false
       );
       console.error(
-        `[menu] apply: registry=${targetRegistry} gitea=${giteaUrl} public=${String(
+        `[menu] publish updates: registry=${targetRegistry} gitea=${giteaUrl} public=${String(
           publicRepos
         )} configureGitGlobal=${String(configureGitGlobal)}`
       );
       const token = await giteaTokenFromMenu(workspaceDir, rl);
-      console.error('[menu] apply: Gitea token is set');
+      console.error('[menu] publish updates: Gitea token is set');
       await runSelfCommand(
         compactArgs([
-          'apply',
+          'publish',
           bundle,
           '--registry',
           targetRegistry,
@@ -1399,8 +1403,8 @@ targetCommand
   });
 
 program
-  .command('collect')
-  .description('Update repositories and build an online airgap bundle')
+  .command('download')
+  .description('Download updates into an airgap bundle')
   .argument('[root]', 'Directory containing project Git repositories or package manifests')
   .option('-o, --output <dir>', 'Bundle output directory')
   .option('-r, --registry <url>', 'Source registry URL')
@@ -1613,10 +1617,12 @@ program
     }
   });
 
+const npmCommand = program.command('npm').description('Operate on npm packages in a bundle');
+
 addNpmPublishOptions(
-  program
+  npmCommand
     .command('publish')
-    .description('Publish an airgap bundle into an npm-compatible registry')
+    .description('Publish bundle npm packages into an npm-compatible registry')
     .argument('<bundle>', 'Path to airgap bundle directory')
     .requiredOption('-r, --registry <url>', 'Target registry URL')
 )
@@ -1921,8 +1927,8 @@ gitCommand
 
 addNpmPublishOptions(
   program
-    .command('apply')
-    .description('Apply an airgap bundle to Verdaccio and Gitea')
+    .command('publish')
+    .description('Publish an airgap bundle to Verdaccio and Gitea')
     .argument('<bundle>', 'Path to airgap bundle directory')
     .requiredOption('-r, --registry <url>', 'Target npm registry URL')
     .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
@@ -1934,7 +1940,7 @@ addNpmPublishOptions(
     .option('--public', 'Create public Gitea repositories instead of private repositories')
 )
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
-  .option('--dry-run', 'Print planned apply operations without publishing or pushing')
+  .option('--dry-run', 'Print planned publish operations without publishing or pushing')
   .action(async (bundle: string, options: ApplyOptions) => {
     try {
       const token =

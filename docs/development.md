@@ -83,11 +83,11 @@ Suggested test groups:
 - manifest and nested package.json input;
 - dependency graph traversal and cycle prevention;
 - bundle manifest generation;
-- publish command construction.
+- npm publish command construction.
 
 ## Safety Rules
 
-- Never publish to public npm registries from `publish`.
+- Never publish to public npm registries from npm publishing code paths.
 - Publish tarballs with a temporary tag, then restore source registry tags recorded in
   the bundle.
 - Generated bundle files should be deterministic where practical.

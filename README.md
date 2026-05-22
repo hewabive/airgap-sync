@@ -16,11 +16,11 @@ for safe registry behavior, and later restores those tags after publishing.
 
 The broader target is an airgap sync workflow for portable media:
 
-- fetch or update configured Git repositories into a portable bundle;
+- download or update configured Git repositories into a portable bundle;
 - discover Node dependency graphs across those repositories;
-- collect npm registry packages for Verdaccio;
-- collect target repositories and Git dependencies as portable source mirrors;
-- apply both sides in the closed network and verify installs do not reach outside.
+- download npm registry packages for Verdaccio;
+- download target repositories and Git dependencies as portable source mirrors;
+- publish both sides in the closed network and verify installs do not reach outside.
 
 ## Status
 
@@ -73,12 +73,12 @@ airgap-sync init
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
 
-# Online machine: update bundle-local mirrors and collect npm/Git closure.
-airgap-sync collect
+# Online machine: update bundle-local mirrors and download npm/Git closure.
+airgap-sync download
 airgap-sync verify ./airgap-bundle
 
 # Closed network: populate Verdaccio and Gitea from the transfer bundle.
-airgap-sync apply ./airgap-bundle \
+airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
@@ -98,7 +98,7 @@ rewrite rule instead of many repository-specific rules:
 git config --global url."http://gitea.local/".insteadOf "https://github.com/"
 ```
 
-After applying the bundle, normal installs should use the closed-network services:
+After publishing the bundle, normal installs should use the closed-network services:
 
 ```bash
 npm ci --registry http://verdaccio.local:4873
@@ -126,12 +126,12 @@ If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`
 The lower-level commands remain available for debugging and one-off use:
 
 ```bash
-# Online machine: refresh project repositories, then collect npm and Git closure.
+# Online machine: refresh project repositories, then download npm and Git closure.
 airgap-sync repos update ./repos
-airgap-sync collect ./repos -o ./airgap-bundle
+airgap-sync download ./repos -o ./airgap-bundle
 
 # Closed network: publish npm packages and push Git mirrors.
-airgap-sync apply ./airgap-bundle \
+airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local
 ```
