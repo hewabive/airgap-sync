@@ -42,10 +42,9 @@ airgap-sync menu
 airgap-sync menu /media/USB/airgap-sync
 ```
 
-Opens an interactive prompt menu for common workspace actions: list/add/remove targets,
-configure source and closed-network endpoints, tune run defaults, collect updates,
-verify a bundle, apply the bundle, run install verification, and show bundle
-information.
+Opens an interactive prompt menu for common workspace actions. The top level keeps the
+regular workflow compact: targets, collect, apply, verification, bundle info, and
+settings. Target management and saved credentials live in submenus.
 
 Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
 specific command's `-h` option for non-interactive help.

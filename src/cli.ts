@@ -768,18 +768,68 @@ async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
 
 function printMenu(): void {
   console.log('\nairgap-sync');
+  console.log('1. Targets');
+  console.log('2. Collect updates');
+  console.log('3. Apply bundle');
+  console.log('4. Verify bundle');
+  console.log('5. Verify installs');
+  console.log('6. Show bundle info');
+  console.log('7. Settings');
+  console.log('0. Exit');
+}
+
+async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
+  console.log('\nTargets');
   console.log('1. Show targets');
   console.log('2. Add Git target');
   console.log('3. Add npm target');
   console.log('4. Remove target');
-  console.log('5. Settings');
-  console.log('6. Collect updates');
-  console.log('7. Verify bundle');
-  console.log('8. Apply bundle');
-  console.log('9. Verify installs');
-  console.log('10. Show bundle info');
-  console.log('11. Saved credentials');
-  console.log('0. Exit');
+  console.log('0. Back');
+
+  const choice = await ask(rl, 'Choose an action', '0');
+  switch (choice) {
+    case '0':
+      return;
+    case '1':
+      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+      return;
+    case '2': {
+      const url = await ask(rl, 'Git repository URL');
+      const branch = await ask(rl, 'Branch (optional)');
+      if (url) {
+        await runSelfCommand(
+          compactArgs([
+            'target',
+            'add',
+            'git',
+            url,
+            workspaceDir,
+            branch ? '--branch' : undefined,
+            branch,
+          ]),
+          workspaceDir
+        );
+      }
+      return;
+    }
+    case '3': {
+      const spec = await ask(rl, 'npm package spec');
+      if (spec) {
+        await runSelfCommand(['target', 'add', 'npm', spec, workspaceDir], workspaceDir);
+      }
+      return;
+    }
+    case '4': {
+      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+      const index = await ask(rl, 'Target index to remove');
+      if (index) {
+        await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
+      }
+      return;
+    }
+    default:
+      console.log('Unknown menu item.');
+  }
 }
 
 async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
@@ -790,7 +840,8 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
   console.log('3. Collect defaults');
   console.log('4. Apply defaults');
   console.log('5. Verify install defaults');
-  console.log('6. Show current config');
+  console.log('6. Saved credentials');
+  console.log('7. Show current config');
   console.log('0. Back');
 
   const choice = await ask(rl, 'Choose an action', '0');
@@ -813,6 +864,9 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
       await configureVerifyInstallDefaults(workspaceDir, rl, config);
       break;
     case '6':
+      await configureCredentialsMenu(workspaceDir, rl);
+      return;
+    case '7':
       console.log(JSON.stringify(config, null, 2));
       return;
     default:
@@ -913,46 +967,9 @@ async function runMenuAction(
     case '0':
       return false;
     case '1':
-      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+      await configureTargetsMenu(workspaceDir, rl);
       return true;
     case '2': {
-      const url = await ask(rl, 'Git repository URL');
-      const branch = await ask(rl, 'Branch (optional)');
-      if (url) {
-        await runSelfCommand(
-          compactArgs([
-            'target',
-            'add',
-            'git',
-            url,
-            workspaceDir,
-            branch ? '--branch' : undefined,
-            branch,
-          ]),
-          workspaceDir
-        );
-      }
-      return true;
-    }
-    case '3': {
-      const spec = await ask(rl, 'npm package spec');
-      if (spec) {
-        await runSelfCommand(['target', 'add', 'npm', spec, workspaceDir], workspaceDir);
-      }
-      return true;
-    }
-    case '4': {
-      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
-      const index = await ask(rl, 'Target index to remove');
-      if (index) {
-        await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
-      }
-      return true;
-    }
-    case '5':
-      await configureWorkspaceMenu(workspaceDir, rl);
-      return true;
-    case '6': {
       const includeDev = await resolvePromptBoolean(
         rl,
         'Include devDependencies?',
@@ -975,10 +992,7 @@ async function runMenuAction(
       );
       return true;
     }
-    case '7':
-      await runSelfCommand(['verify', bundle], workspaceDir);
-      return true;
-    case '8': {
+    case '3': {
       console.error(`[menu] apply: bundle ${bundle}`);
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
@@ -1017,7 +1031,10 @@ async function runMenuAction(
       );
       return true;
     }
-    case '9': {
+    case '4':
+      await runSelfCommand(['verify', bundle], workspaceDir);
+      return true;
+    case '5': {
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
       const ignoreScripts = await resolvePromptBoolean(
@@ -1041,11 +1058,11 @@ async function runMenuAction(
       );
       return true;
     }
-    case '10':
+    case '6':
       await runSelfCommand(['info', bundle], workspaceDir);
       return true;
-    case '11':
-      await configureCredentialsMenu(workspaceDir, rl);
+    case '7':
+      await configureWorkspaceMenu(workspaceDir, rl);
       return true;
     default:
       console.log('Unknown menu item.');
