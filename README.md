@@ -16,7 +16,7 @@ for safe registry behavior, and later restores those tags after publishing.
 
 The broader target is an airgap sync workflow for portable media:
 
-- refresh one or more Git repositories on an online machine;
+- fetch or update configured Git repositories into a portable bundle;
 - discover Node dependency graphs across those repositories;
 - collect npm registry packages for Verdaccio;
 - collect target repositories and Git dependencies as portable source mirrors;
@@ -32,6 +32,15 @@ install verification.
 
 It still needs real-environment hardening around large repositories, authentication
 variants, performance tuning, and operator ergonomics.
+
+Current limitations:
+
+- Source registry and Git host authentication is still explicit; there is no automatic
+  credential discovery yet.
+- Verification proves package-manager installs for configured Git targets, but it does
+  not yet enforce a network-deny sandbox around the process.
+- Git mirrors are pushed with broad mirror semantics; protected branch policies in a
+  target Gitea instance may need manual handling.
 
 ## Target Workflow
 
@@ -60,7 +69,7 @@ airgap-sync init
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
 
-# Online machine: refresh configured targets and collect npm/Git closure.
+# Online machine: update bundle-local mirrors and collect npm/Git closure.
 airgap-sync collect
 airgap-sync verify ./airgap-bundle
 
@@ -160,7 +169,6 @@ pnpm e2e:local   # Run the local Gitea/Verdaccio integration test
 - [CLI Reference](./docs/cli.md)
 - [Bundle Format](./docs/bundle-format.md)
 - [Development Guide](./docs/development.md)
-- [Roadmap](./docs/roadmap.md)
 - [Workflows](./docs/workflows.md)
 - [Changelog](./CHANGELOG.md)
 - [Security Policy](./SECURITY.md)

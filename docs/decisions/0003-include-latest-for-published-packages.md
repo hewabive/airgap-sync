@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-The original tag policy restored only tags that appeared in package specs. During
+An earlier internal policy restored only tags that appeared in package specs. During
 Verdaccio testing we found that `npm publish --tag <temporary>` can still leave `latest`
 on a newly published package. Removing `latest` is not a reliable safety mechanism in
 Verdaccio, because the registry can keep or recreate it.

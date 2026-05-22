@@ -31,16 +31,21 @@ contain Git dependencies such as `github:owner/repo#sha` or `git+https://...#sha
 ## Data Flow
 
 ```text
-package specs / package.json / package list
+workspace targets / package specs / package.json / package list
+  -> fetch configured Git targets as bundle-local mirrors
+  -> scan package manifests from Git mirrors
   -> resolve specs through source registry metadata
   -> download tarballs
   -> inspect package manifests from tarballs
+  -> fetch Git dependencies as bundle-local mirrors
   -> recurse dependencies
   -> write airgap bundle
 
 airgap bundle
   -> npm publish tarballs
   -> npm dist-tag add required tags
+  -> create Gitea owners/repositories
+  -> push Git mirrors
 ```
 
 ## Target Airgap Flow
@@ -83,7 +88,8 @@ Configured targets and Git dependencies use the same storage model: local bare m
 under `airgap-bundle/git-mirrors/`, preserving source host and owner/repository paths.
 
 Lower-level collection from an explicit directory is still available for diagnostics
-and one-off use. Its repository update policy is conservative:
+and one-off use. If that directory contains Git repositories, its update policy is
+conservative:
 
 - find repositories by locating `.git` directories or files;
 - skip nested repositories once the nearest parent repository is selected;
@@ -121,16 +127,24 @@ therefore be an explicit option before the first stable release.
 
 ## Input Modes
 
-The first implementation target is direct package specs:
+The primary operator workflow is workspace-based:
+
+```bash
+airgap-sync target add git https://github.com/acme/app.git --branch main
+airgap-sync target add npm eslint@latest
+airgap-sync collect
+```
+
+Direct package specs are also supported:
 
 ```bash
 airgap-sync fetch react@latest @types/node@^22
 ```
 
-This is the smallest useful workflow: it lets an operator seed a registry with one or
-more packages and their transitive dependencies without creating a temporary project.
+This lets an operator seed a registry with one or more packages and their transitive
+dependencies without creating a temporary project.
 
-Manifest input is the second target:
+Manifest input is available for lower-level package collection:
 
 ```bash
 airgap-sync fetch --manifest ./package.json
