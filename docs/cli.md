@@ -43,8 +43,9 @@ airgap-sync menu /media/USB/airgap-sync
 ```
 
 Opens an interactive prompt menu for common workspace actions. The top level keeps the
-regular workflow compact: targets, collect, apply, verification, bundle info, and
-settings. Target management and saved credentials live in submenus.
+regular workflow compact: targets, collect, apply, install verification, diagnostics,
+and settings. Target management, bundle checks, bundle info, and saved credentials
+live in submenus.
 
 Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
 specific command's `-h` option for non-interactive help.

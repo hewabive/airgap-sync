@@ -771,10 +771,9 @@ function printMenu(): void {
   console.log('1. Targets');
   console.log('2. Collect updates');
   console.log('3. Apply bundle');
-  console.log('4. Verify bundle');
-  console.log('5. Verify installs');
-  console.log('6. Show bundle info');
-  console.log('7. Settings');
+  console.log('4. Verify installs');
+  console.log('5. Diagnostics');
+  console.log('6. Settings');
   console.log('0. Exit');
 }
 
@@ -874,6 +873,38 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
       return;
   }
   console.log('Saved workspace configuration.');
+}
+
+async function diagnosticsMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
+  const config = await readMenuWorkspace(workspaceDir, rl);
+  const bundle = config.output;
+
+  console.log('\nDiagnostics');
+  console.log('1. Verify bundle');
+  console.log('2. Show bundle info');
+  console.log('3. Check Gitea token');
+  console.log('0. Back');
+
+  const choice = await ask(rl, 'Choose an action', '0');
+  switch (choice) {
+    case '0':
+      return;
+    case '1':
+      await runSelfCommand(['verify', bundle], workspaceDir);
+      return;
+    case '2':
+      await runSelfCommand(['info', bundle], workspaceDir);
+      return;
+    case '3': {
+      const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+      const token = await giteaTokenFromMenu(workspaceDir, rl);
+      const login = await checkGiteaToken(giteaUrl, token);
+      console.log(`Gitea token is valid for user: ${login}`);
+      return;
+    }
+    default:
+      console.log('Unknown menu item.');
+  }
 }
 
 async function targetRegistryFromMenu(
@@ -1031,10 +1062,7 @@ async function runMenuAction(
       );
       return true;
     }
-    case '4':
-      await runSelfCommand(['verify', bundle], workspaceDir);
-      return true;
-    case '5': {
+    case '4': {
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
       const ignoreScripts = await resolvePromptBoolean(
@@ -1058,10 +1086,10 @@ async function runMenuAction(
       );
       return true;
     }
-    case '6':
-      await runSelfCommand(['info', bundle], workspaceDir);
+    case '5':
+      await diagnosticsMenu(workspaceDir, rl);
       return true;
-    case '7':
+    case '6':
       await configureWorkspaceMenu(workspaceDir, rl);
       return true;
     default:
