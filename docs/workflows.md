@@ -61,6 +61,9 @@ The target list is stored in `airgap-sync.json`. It is intentionally editable JS
 operators can review or change the sync set without learning hidden state.
 Keep this file in the workspace root on removable media, next to `airgap-bundle/`; it
 is long-lived workspace state rather than a file inside one generated bundle.
+If the operator saves a Gitea token, it is stored separately in
+`airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
+removable media.
 
 ## Online Phase
 
@@ -153,6 +156,13 @@ airgap-sync apply ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
+```
+
+Instead of exporting `GITEA_TOKEN` every time, the closed-network operator can save it
+once:
+
+```bash
+airgap-sync secrets set-gitea-token
 ```
 
 The offline apply step should:

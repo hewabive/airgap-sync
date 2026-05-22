@@ -4,6 +4,7 @@ import { createGitSourceFromUrl } from './git-sources.js';
 import type { GitSource } from '../types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
+export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
 
@@ -27,6 +28,11 @@ export interface WorkspaceConfig {
   sourceRegistry: string;
   targetRegistry?: string;
   targets: WorkspaceTarget[];
+}
+
+export interface WorkspaceSecrets {
+  giteaToken?: string;
+  schemaVersion: 1;
 }
 
 interface WorkspaceGitTargetSnapshot {
@@ -75,8 +81,18 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
   };
 }
 
+function createDefaultWorkspaceSecrets(): WorkspaceSecrets {
+  return {
+    schemaVersion: 1,
+  };
+}
+
 export function workspaceConfigPath(workspaceDir: string): string {
   return path.join(path.resolve(workspaceDir), workspaceConfigFileName);
+}
+
+export function workspaceSecretsPath(workspaceDir: string): string {
+  return path.join(path.resolve(workspaceDir), workspaceSecretsFileName);
 }
 
 function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
@@ -147,6 +163,22 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   };
 }
 
+function normalizeWorkspaceSecrets(value: unknown): WorkspaceSecrets {
+  if (!isRecord(value)) {
+    throw new Error(`${workspaceSecretsFileName} must contain a JSON object`);
+  }
+
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${workspaceSecretsFileName} schemaVersion must be 1`);
+  }
+
+  const giteaToken = optionalString(value.giteaToken);
+  return {
+    ...(giteaToken ? { giteaToken } : {}),
+    schemaVersion: 1,
+  };
+}
+
 export async function initWorkspace(options: InitWorkspaceOptions): Promise<WorkspaceConfig> {
   const workspaceDir = path.resolve(options.workspaceDir);
   const configPath = workspaceConfigPath(workspaceDir);
@@ -164,11 +196,52 @@ export async function readWorkspaceConfig(workspaceDir: string): Promise<Workspa
   return normalizeWorkspaceConfig(await fs.readJson(workspaceConfigPath(workspaceDir)));
 }
 
+export async function readWorkspaceSecrets(workspaceDir: string): Promise<WorkspaceSecrets> {
+  const secretsPath = workspaceSecretsPath(workspaceDir);
+  if (!(await fs.pathExists(secretsPath))) {
+    return createDefaultWorkspaceSecrets();
+  }
+
+  return normalizeWorkspaceSecrets(await fs.readJson(secretsPath));
+}
+
 export async function writeWorkspaceConfig(
   workspaceDir: string,
   config: WorkspaceConfig
 ): Promise<void> {
   await fs.writeJson(workspaceConfigPath(workspaceDir), config, { spaces: 2 });
+}
+
+export async function writeWorkspaceSecrets(
+  workspaceDir: string,
+  secrets: WorkspaceSecrets
+): Promise<void> {
+  await fs.writeJson(workspaceSecretsPath(workspaceDir), normalizeWorkspaceSecrets(secrets), {
+    spaces: 2,
+  });
+}
+
+export async function saveWorkspaceGiteaToken(
+  workspaceDir: string,
+  token: string
+): Promise<WorkspaceSecrets> {
+  const secrets: WorkspaceSecrets = {
+    ...(await readWorkspaceSecrets(workspaceDir)),
+    giteaToken: token,
+    schemaVersion: 1,
+  };
+  await writeWorkspaceSecrets(workspaceDir, secrets);
+  return secrets;
+}
+
+export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<WorkspaceSecrets> {
+  const secrets: WorkspaceSecrets = {
+    ...(await readWorkspaceSecrets(workspaceDir)),
+    schemaVersion: 1,
+  };
+  delete secrets.giteaToken;
+  await writeWorkspaceSecrets(workspaceDir, secrets);
+  return secrets;
 }
 
 function targetKey(target: WorkspaceTarget): string {

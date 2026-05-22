@@ -111,6 +111,7 @@ The configured workspace lives on removable media:
 
 ```text
 airgap-sync.json          Target list and defaults
+airgap-sync.secrets.json  Optional local secrets, ignored by Git
 airgap-bundle/            Transfer bundle for Verdaccio and Gitea
 airgap-bundle/git-mirrors/ Git mirrors for target repositories and Git dependencies
 airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
@@ -118,6 +119,7 @@ airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 
 `airgap-sync.json` belongs next to `airgap-bundle/` on the removable media. It is the
 workspace configuration for repeated syncs, not part of a single transfer bundle.
+If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.
 
 The lower-level commands remain available for debugging and one-off use:
 

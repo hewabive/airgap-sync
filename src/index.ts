@@ -51,16 +51,22 @@ export { verifyBundle } from './core/verify.js';
 export { runInstallCommand, verifyInstall } from './core/verify-install.js';
 export {
   addWorkspaceTarget,
+  clearWorkspaceGiteaToken,
   createWorkspaceGitSources,
   createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
   initWorkspace,
   readWorkspaceConfig,
+  readWorkspaceSecrets,
   removeWorkspaceTarget,
+  saveWorkspaceGiteaToken,
   workspaceConfigFileName,
   workspaceConfigPath,
+  workspaceSecretsFileName,
+  workspaceSecretsPath,
   writeWorkspaceConfig,
+  writeWorkspaceSecrets,
 } from './core/workspace.js';
 export {
   dependencySpecsFromManifest,
@@ -152,6 +158,7 @@ export type {
   WorkspaceConfig,
   WorkspaceGitTarget,
   WorkspaceNpmTarget,
+  WorkspaceSecrets,
   WorkspaceSnapshot,
   WorkspaceTarget,
   WorkspaceTargetSnapshot,

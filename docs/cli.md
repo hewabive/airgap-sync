@@ -51,7 +51,21 @@ specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry` and `giteaUrl` in `airgap-sync.json` when the operator enters them, but
-it does not store Gitea tokens.
+it stores Gitea tokens only when explicitly requested, in `airgap-sync.secrets.json`.
+
+## secrets
+
+```bash
+airgap-sync secrets status
+airgap-sync secrets set-gitea-token
+airgap-sync secrets check-gitea-token
+airgap-sync secrets clear-gitea-token
+```
+
+Manages local workspace secrets in `airgap-sync.secrets.json`. This file is ignored by
+Git and is separate from `airgap-sync.json`, but it is still plaintext on the removable
+media. A saved Gitea token is used by `apply`, `git create-repos`, and `git apply` when
+no command-line token or `GITEA_TOKEN` environment variable is provided.
 
 ## repos update
 
@@ -249,8 +263,8 @@ Reads `git-sources.json` and pushes local bare mirrors to Gitea with
 The target repositories must already exist unless the Gitea instance is configured to
 create repositories on push.
 
-When `--token` or `GITEA_TOKEN` is set, the command uses that token for Git HTTP
-push authentication instead of relying on an interactive credential helper.
+When `--token`, `GITEA_TOKEN`, or a saved token is available, the command uses it for
+Git HTTP push authentication instead of relying on an interactive credential helper.
 
 The command writes `git-apply-report.json`, including generated `git config --global
 url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
@@ -264,8 +278,8 @@ airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --public
 ```
 
 Reads `git-sources.json` and creates missing repositories in Gitea before
-`git apply`. Tokens can be passed through `--token` or `GITEA_TOKEN`; no token is
-required for `--dry-run`.
+`git apply`. Tokens can be passed through `--token`, `GITEA_TOKEN`, or saved secrets;
+no token is required for `--dry-run`.
 
 By default repositories are created as private organization repositories, preserving
 the original owner name as the Gitea organization. Missing organizations are created
@@ -300,7 +314,7 @@ Supported options:
 ```text
 -r, --registry <url>      Target npm registry URL
 --gitea <url>             Closed-network Gitea base URL
---gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN
+--gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN or saved secrets
 --mirrors-dir <dir>       Directory containing bare Git mirrors
 --public                  Create public Gitea repositories instead of private repositories
 --no-skip-existing        Attempt to publish npm versions that already exist
@@ -310,8 +324,8 @@ Supported options:
 --dry-run                 Print planned apply operations without publishing or pushing
 ```
 
-Prefer the `GITEA_TOKEN` environment variable over `--gitea-token` so the token
-does not appear in shell history or process listings.
+Prefer the `GITEA_TOKEN` environment variable or a saved token over `--gitea-token` so
+the token does not appear in shell history or process listings.
 
 The Gitea token is used for both API repository provisioning and Git HTTP mirror
 push authentication.

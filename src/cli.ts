@@ -9,6 +9,7 @@ import {
   applyBundle,
   applyGitSources,
   CachedRegistryClient,
+  clearWorkspaceGiteaToken,
   collectBundle,
   configureGitRewrites,
   createGitSourcesManifest,
@@ -33,7 +34,9 @@ import {
   readBundleManifest,
   readDistTagsManifest,
   readWorkspaceConfig,
+  readWorkspaceSecrets,
   removeWorkspaceTarget,
+  saveWorkspaceGiteaToken,
   updateRepositories,
   verifyBundle,
   verifyInstall,
@@ -47,6 +50,7 @@ import {
   writePublishReport,
   writeWorkspaceSnapshot,
   writeWorkspaceConfig,
+  workspaceSecretsFileName,
   workspaceConfigFileName,
   provisionGiteaRepositories,
 } from './index.js';
@@ -244,6 +248,11 @@ interface GitConfigOptions {
   dryRun?: boolean;
   gitea: string;
   global?: boolean;
+}
+
+interface SecretsCheckOptions {
+  gitea?: string;
+  token?: string;
 }
 
 const publishPhaseLabels: Record<PublishProgressPhase, string> = {
@@ -499,6 +508,63 @@ async function askYesNo(
   return normalized === 'y' || normalized === 'yes';
 }
 
+async function readSavedGiteaToken(workspaceDir: string): Promise<string | undefined> {
+  return (await readWorkspaceSecrets(workspaceDir)).giteaToken;
+}
+
+async function resolveGiteaToken(options: {
+  cliToken: string | undefined;
+  workspaceDir: string;
+}): Promise<string | undefined> {
+  return (
+    options.cliToken ?? process.env.GITEA_TOKEN ?? (await readSavedGiteaToken(options.workspaceDir))
+  );
+}
+
+async function requireGiteaToken(options: {
+  cliToken: string | undefined;
+  optionName: string;
+  workspaceDir: string;
+}): Promise<string> {
+  const token = await resolveGiteaToken(options);
+  if (!token) {
+    throw new Error(
+      `provide ${options.optionName}, set GITEA_TOKEN, or save a token in ${workspaceSecretsFileName}`
+    );
+  }
+
+  return token;
+}
+
+async function giteaTokenFromMenu(workspaceDir: string, rl: ReadlineInterface): Promise<string> {
+  const envToken = process.env.GITEA_TOKEN;
+  if (envToken) {
+    return envToken;
+  }
+
+  const savedToken = await readSavedGiteaToken(workspaceDir);
+  if (savedToken) {
+    console.error(`[menu] apply: using saved Gitea token from ${workspaceSecretsFileName}`);
+    return savedToken;
+  }
+
+  const token = await ask(rl, 'Gitea token (visible input)');
+  if (!token) {
+    throw new Error('Gitea token is required for apply');
+  }
+
+  if (await askYesNo(rl, `Save Gitea token in ${workspaceSecretsFileName}?`, false)) {
+    await saveWorkspaceGiteaToken(workspaceDir, token);
+    console.log(`Saved Gitea token in ${workspaceSecretsFileName}.`);
+  }
+
+  return token;
+}
+
+async function checkGiteaToken(giteaUrl: string, token: string): Promise<string> {
+  return await new HttpGiteaClient(giteaUrl, { authToken: token }).currentUserLogin();
+}
+
 async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
   try {
     return await readWorkspaceConfig(workspaceDir);
@@ -524,6 +590,7 @@ function printMenu(): void {
   console.log('8. Apply bundle');
   console.log('9. Verify installs');
   console.log('10. Show bundle info');
+  console.log('11. Saved credentials');
   console.log('0. Exit');
 }
 
@@ -583,6 +650,50 @@ async function giteaUrlFromMenu(workspaceDir: string, rl: ReadlineInterface): Pr
     await writeWorkspaceConfig(workspaceDir, { ...config, giteaUrl });
   }
   return giteaUrl;
+}
+
+async function configureCredentialsMenu(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<void> {
+  console.log('\nSaved credentials');
+  console.log('1. Save Gitea token');
+  console.log('2. Clear Gitea token');
+  console.log('3. Check Gitea token');
+  console.log('0. Back');
+
+  const choice = await ask(rl, 'Choose an action', '0');
+  switch (choice) {
+    case '0':
+      return;
+    case '1': {
+      const token = await ask(rl, 'Gitea token (visible input)');
+      if (!token) {
+        throw new Error('Gitea token is required');
+      }
+      await saveWorkspaceGiteaToken(workspaceDir, token);
+      console.log(`Saved Gitea token in ${workspaceSecretsFileName}.`);
+      return;
+    }
+    case '2':
+      await clearWorkspaceGiteaToken(workspaceDir);
+      console.log(`Cleared Gitea token from ${workspaceSecretsFileName}.`);
+      return;
+    case '3': {
+      const config = await readMenuWorkspace(workspaceDir, rl);
+      const giteaUrl = await ask(
+        rl,
+        'Closed-network Gitea URL',
+        config.giteaUrl ?? 'http://gitea.local'
+      );
+      const token = await giteaTokenFromMenu(workspaceDir, rl);
+      const login = await checkGiteaToken(giteaUrl, token);
+      console.log(`Gitea token is valid for user: ${login}`);
+      return;
+    }
+    default:
+      console.log('Unknown menu item.');
+  }
 }
 
 async function runMenuAction(
@@ -667,12 +778,7 @@ async function runMenuAction(
           publicRepos
         )} configureGitGlobal=${String(configureGitGlobal)}`
       );
-      const token =
-        process.env.GITEA_TOKEN ??
-        (await ask(rl, 'Gitea token (visible input; set GITEA_TOKEN to avoid prompt)'));
-      if (!token) {
-        throw new Error('Gitea token is required for apply; set GITEA_TOKEN or enter a token');
-      }
+      const token = await giteaTokenFromMenu(workspaceDir, rl);
       console.error('[menu] apply: Gitea token is set');
       await runSelfCommand(
         compactArgs([
@@ -715,6 +821,9 @@ async function runMenuAction(
     }
     case '10':
       await runSelfCommand(['info', bundle], workspaceDir);
+      return true;
+    case '11':
+      await configureCredentialsMenu(workspaceDir, rl);
       return true;
     default:
       console.log('Unknown menu item.');
@@ -883,6 +992,109 @@ targetAddCommand
             target: targetToDisplay({ spec, type: 'npm' }),
             totalTargets: result.config.targets.length,
             workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const secretsCommand = program
+  .command('secrets')
+  .description(`Manage local secrets in ${workspaceSecretsFileName}`);
+
+secretsCommand
+  .command('status')
+  .description('Show whether local workspace secrets are configured')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (workspace: string) => {
+    try {
+      const secrets = await readWorkspaceSecrets(workspace);
+      console.log(
+        JSON.stringify(
+          {
+            giteaToken: secrets.giteaToken ? 'saved' : 'missing',
+            secretsFile: path.resolve(workspace, workspaceSecretsFileName),
+            workspace: path.resolve(workspace),
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+secretsCommand
+  .command('set-gitea-token')
+  .description('Save a Gitea token in the local workspace secrets file')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (workspace: string) => {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    try {
+      const token = await ask(rl, 'Gitea token (visible input)');
+      if (!token) {
+        throw new Error('Gitea token is required');
+      }
+      await saveWorkspaceGiteaToken(workspace, token);
+      console.log(`Saved Gitea token in ${path.resolve(workspace, workspaceSecretsFileName)}.`);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    } finally {
+      rl.close();
+    }
+  });
+
+secretsCommand
+  .command('clear-gitea-token')
+  .description('Remove the saved Gitea token from the local workspace secrets file')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (workspace: string) => {
+    try {
+      await clearWorkspaceGiteaToken(workspace);
+      console.log(`Cleared Gitea token from ${path.resolve(workspace, workspaceSecretsFileName)}.`);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+secretsCommand
+  .command('check-gitea-token')
+  .description('Validate the saved or provided Gitea token')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--gitea <url>', 'Closed-network Gitea base URL; defaults to airgap-sync.json')
+  .option('--token <token>', `Gitea token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`)
+  .action(async (workspace: string, options: SecretsCheckOptions) => {
+    try {
+      const config = options.gitea ? undefined : await readWorkspaceConfig(workspace);
+      const giteaUrl = options.gitea ?? config?.giteaUrl;
+      if (!giteaUrl) {
+        throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
+      }
+      const token = await requireGiteaToken({
+        cliToken: options.token,
+        optionName: '--token <token>',
+        workspaceDir: workspace,
+      });
+      const login = await checkGiteaToken(giteaUrl, token);
+      console.log(
+        JSON.stringify(
+          {
+            giteaUrl,
+            ok: true,
+            user: login,
           },
           null,
           2
@@ -1324,13 +1536,19 @@ gitCommand
   .description('Push local bare mirrors into Gitea and report Git rewrite rules')
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
-  .option('--token <token>', 'Gitea API token for Git push auth, defaults to GITEA_TOKEN')
+  .option(
+    '--token <token>',
+    `Gitea API token for Git push auth, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
+  )
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
     try {
       const manifest = await readGitSourcesManifest(bundle);
-      const token = options.token ?? process.env.GITEA_TOKEN;
+      const token = await resolveGiteaToken({
+        cliToken: options.token,
+        workspaceDir: process.cwd(),
+      });
       const httpClient =
         options.dryRun === true || !token
           ? undefined
@@ -1392,18 +1610,23 @@ gitCommand
   .description('Create missing Gitea repositories from git-sources.json')
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
-  .option('--token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
+  .option(
+    '--token <token>',
+    `Gitea API token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
+  )
   .option('--public', 'Create public repositories instead of private repositories')
   .option('--dry-run', 'Print planned repository creation without calling Gitea')
   .action(async (bundle: string, options: GitCreateReposOptions) => {
     try {
       const manifest = await readGitSourcesManifest(bundle);
-      const token = options.token ?? process.env.GITEA_TOKEN;
-      if (!token && options.dryRun !== true) {
-        console.error('Error: provide --token <token> or set GITEA_TOKEN');
-        process.exitCode = 1;
-        return;
-      }
+      const token =
+        options.dryRun === true
+          ? undefined
+          : await requireGiteaToken({
+              cliToken: options.token,
+              optionName: '--token <token>',
+              workspaceDir: process.cwd(),
+            });
 
       const client =
         options.dryRun === true
@@ -1436,7 +1659,10 @@ addNpmPublishOptions(
     .argument('<bundle>', 'Path to airgap bundle directory')
     .requiredOption('-r, --registry <url>', 'Target npm registry URL')
     .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
-    .option('--gitea-token <token>', 'Gitea API token, defaults to GITEA_TOKEN')
+    .option(
+      '--gitea-token <token>',
+      `Gitea API token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
+    )
     .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
     .option('--public', 'Create public Gitea repositories instead of private repositories')
 )
@@ -1444,12 +1670,14 @@ addNpmPublishOptions(
   .option('--dry-run', 'Print planned apply operations without publishing or pushing')
   .action(async (bundle: string, options: ApplyOptions) => {
     try {
-      const token = options.giteaToken ?? process.env.GITEA_TOKEN;
-      if (!token && options.dryRun !== true) {
-        console.error('Error: provide --gitea-token <token> or set GITEA_TOKEN');
-        process.exitCode = 1;
-        return;
-      }
+      const token =
+        options.dryRun === true
+          ? undefined
+          : await requireGiteaToken({
+              cliToken: options.giteaToken,
+              optionName: '--gitea-token <token>',
+              workspaceDir: process.cwd(),
+            });
 
       const httpClient =
         options.dryRun === true

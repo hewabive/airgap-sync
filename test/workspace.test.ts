@@ -4,11 +4,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from '../src/core/fs.js';
 import {
   addWorkspaceTarget,
+  clearWorkspaceGiteaToken,
   createWorkspaceGitSources,
   createWorkspaceSnapshot,
   initWorkspace,
   readWorkspaceConfig,
+  readWorkspaceSecrets,
   removeWorkspaceTarget,
+  saveWorkspaceGiteaToken,
+  workspaceSecretsFileName,
 } from '../src/core/workspace.js';
 
 let tempDir: string;
@@ -98,6 +102,29 @@ describe('workspace config', () => {
     expect(await readWorkspaceConfig(tempDir)).toMatchObject({
       giteaUrl: 'http://gitea.local',
       targetRegistry: 'http://verdaccio.local:4873',
+    });
+  });
+
+  it('stores local secrets outside the workspace config', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+
+    expect(await readWorkspaceSecrets(tempDir)).toEqual({
+      schemaVersion: 1,
+    });
+
+    await saveWorkspaceGiteaToken(tempDir, 'secret-token');
+
+    expect(await readWorkspaceSecrets(tempDir)).toEqual({
+      giteaToken: 'secret-token',
+      schemaVersion: 1,
+    });
+    expect(await fs.pathExists(path.join(tempDir, workspaceSecretsFileName))).toBe(true);
+    expect(await readWorkspaceConfig(tempDir)).not.toHaveProperty('giteaToken');
+
+    await clearWorkspaceGiteaToken(tempDir);
+
+    expect(await readWorkspaceSecrets(tempDir)).toEqual({
+      schemaVersion: 1,
     });
   });
 
