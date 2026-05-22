@@ -2,7 +2,6 @@
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { emitKeypressEvents } from 'node:readline';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 import {
@@ -480,55 +479,6 @@ async function ask(
   return trimmed.length > 0 ? trimmed : (defaultValue ?? '');
 }
 
-async function askSecret(rl: ReadlineInterface, question: string): Promise<string> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    return ask(rl, question);
-  }
-
-  rl.pause();
-  emitKeypressEvents(process.stdin);
-  const wasRaw = process.stdin.isRaw;
-  process.stdin.setRawMode(true);
-  process.stdout.write(`${question}: `);
-
-  return await new Promise<string>((resolve, reject) => {
-    let value = '';
-
-    const cleanup = () => {
-      process.stdin.off('keypress', onKeypress);
-      process.stdin.setRawMode(wasRaw);
-      rl.resume();
-    };
-
-    const onKeypress = (chunk: string, key: { ctrl?: boolean; name?: string }) => {
-      if (key.ctrl === true && key.name === 'c') {
-        cleanup();
-        process.stdout.write('\n');
-        reject(new Error('Interrupted'));
-        return;
-      }
-
-      if (key.name === 'return' || key.name === 'enter') {
-        cleanup();
-        process.stdout.write('\n');
-        resolve(value.trim());
-        return;
-      }
-
-      if (key.name === 'backspace') {
-        value = value.slice(0, -1);
-        return;
-      }
-
-      if (chunk && chunk >= ' ') {
-        value += chunk;
-      }
-    };
-
-    process.stdin.on('keypress', onKeypress);
-  });
-}
-
 async function askYesNo(
   rl: ReadlineInterface,
   question: string,
@@ -702,6 +652,7 @@ async function runMenuAction(
       await runSelfCommand(['verify', bundle], workspaceDir);
       return true;
     case '8': {
+      console.error(`[menu] apply: bundle ${bundle}`);
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
       const publicRepos = await askYesNo(rl, 'Create public Gitea repositories?', false);
@@ -710,10 +661,18 @@ async function runMenuAction(
         'Configure global Git rewrites on this machine?',
         false
       );
-      const token = process.env.GITEA_TOKEN ?? (await askSecret(rl, 'Gitea token'));
+      console.error(
+        `[menu] apply: registry=${targetRegistry} gitea=${giteaUrl} public=${String(
+          publicRepos
+        )} configureGitGlobal=${String(configureGitGlobal)}`
+      );
+      const token =
+        process.env.GITEA_TOKEN ??
+        (await ask(rl, 'Gitea token (visible input; set GITEA_TOKEN to avoid prompt)'));
       if (!token) {
         throw new Error('Gitea token is required for apply; set GITEA_TOKEN or enter a token');
       }
+      console.error('[menu] apply: Gitea token is set');
       await runSelfCommand(
         compactArgs([
           'apply',
