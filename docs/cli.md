@@ -171,7 +171,8 @@ airgap-sync verify ./airgap-bundle
 airgap-sync verify ./airgap-bundle --json
 airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local
+  --gitea http://gitea.local \
+  --ignore-scripts
 ```
 
 Checks the bundle without running package-manager installs. It validates bundle
@@ -188,6 +189,10 @@ mirror into a temporary directory, detects the package manager from the lockfile
 the npm registry, and uses a temporary Git config with source-host rewrites to the
 provided Gitea URL. It writes `verify-install-report.json`.
 
+By default `verify install` runs the same lifecycle scripts that a normal install
+would run. Add `--ignore-scripts` to check dependency resolution and Git/npm
+rewrites without running package scripts.
+
 Supported install detection:
 
 ```text
@@ -195,6 +200,9 @@ pnpm-lock.yaml      pnpm install --frozen-lockfile
 package-lock.json   npm ci
 yarn.lock           yarn install --immutable
 ```
+
+With `--ignore-scripts`, npm and pnpm receive `--ignore-scripts`; Yarn receives
+`--mode=skip-builds`.
 
 Projects without a supported lockfile are skipped.
 
@@ -276,8 +284,7 @@ writes `git-config-report.json`.
 ```bash
 airgap-sync apply ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local \
-  --gitea-token "$GITEA_TOKEN"
+  --gitea http://gitea.local
 ```
 
 Applies the whole bundle in the closed network: publish npm packages to Verdaccio,
@@ -298,6 +305,9 @@ Supported options:
 --configure-git-global    Write Git URL rewrite rules into global Git config
 --dry-run                 Print planned apply operations without publishing or pushing
 ```
+
+Prefer the `GITEA_TOKEN` environment variable over `--gitea-token` so the token
+does not appear in shell history or process listings.
 
 Git target paths preserve source owner/repository names by default. For example,
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`, so

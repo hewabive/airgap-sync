@@ -38,7 +38,9 @@ Current limitations:
 - Source registry and Git host authentication is still explicit; there is no automatic
   credential discovery yet.
 - Verification proves package-manager installs for configured Git targets, but it does
-  not yet enforce a network-deny sandbox around the process.
+  not yet enforce a network-deny sandbox around the process. Use
+  `verify install --ignore-scripts` when install scripts should not execute during
+  verification.
 - Git mirrors are pushed with broad mirror semantics; protected branch policies in a
   target Gitea instance may need manual handling.
 
@@ -81,7 +83,8 @@ airgap-sync apply ./airgap-bundle \
 airgap-sync verify ./airgap-bundle
 airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local
+  --gitea http://gitea.local \
+  --ignore-scripts
 ```
 
 The intended Git mirror layout preserves upstream owner/repository paths. For example,

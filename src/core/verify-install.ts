@@ -37,6 +37,7 @@ export interface VerifyInstallOptions {
   generatedAt?: string;
   giteaBaseUrl: string;
   gitRunner?: GitCommandRunner;
+  ignoreScripts?: boolean;
   keepTemp?: boolean;
   registryUrl: string;
   runner?: InstallCommandRunner;
@@ -116,10 +117,17 @@ async function readOptionalGitSources(bundleDir: string): Promise<GitSourcesMani
   return fs.readJson<GitSourcesManifest>(filePath);
 }
 
-async function detectInstallCommand(projectPath: string): Promise<InstallCommand | undefined> {
+async function detectInstallCommand(
+  projectPath: string,
+  options: { ignoreScripts?: boolean } = {}
+): Promise<InstallCommand | undefined> {
   if (await fs.pathExists(path.join(projectPath, 'pnpm-lock.yaml'))) {
     return {
-      args: ['install', '--frozen-lockfile'],
+      args: [
+        'install',
+        '--frozen-lockfile',
+        ...(options.ignoreScripts === true ? ['--ignore-scripts'] : []),
+      ],
       command: 'pnpm',
       packageManager: 'pnpm',
     };
@@ -127,7 +135,7 @@ async function detectInstallCommand(projectPath: string): Promise<InstallCommand
 
   if (await fs.pathExists(path.join(projectPath, 'package-lock.json'))) {
     return {
-      args: ['ci'],
+      args: ['ci', ...(options.ignoreScripts === true ? ['--ignore-scripts'] : [])],
       command: 'npm',
       packageManager: 'npm',
     };
@@ -135,7 +143,11 @@ async function detectInstallCommand(projectPath: string): Promise<InstallCommand
 
   if (await fs.pathExists(path.join(projectPath, 'yarn.lock'))) {
     return {
-      args: ['install', '--immutable'],
+      args: [
+        'install',
+        '--immutable',
+        ...(options.ignoreScripts === true ? ['--mode=skip-builds'] : []),
+      ],
       command: 'yarn',
       packageManager: 'yarn',
     };
@@ -203,6 +215,7 @@ function summarize(
 async function verifyProjectInstall(options: {
   checkoutPath: string;
   env: NodeJS.ProcessEnv;
+  ignoreScripts?: boolean;
   runner: InstallCommandRunner;
   sourceId: string;
   targetUrl: string;
@@ -217,7 +230,9 @@ async function verifyProjectInstall(options: {
     };
   }
 
-  const command = await detectInstallCommand(options.checkoutPath);
+  const command = await detectInstallCommand(options.checkoutPath, {
+    ignoreScripts: options.ignoreScripts === true,
+  });
   if (!command) {
     return {
       projectPath: options.sourceId,
@@ -324,6 +339,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
         await verifyProjectInstall({
           checkoutPath: checkout.checkoutPath,
           env,
+          ignoreScripts: options.ignoreScripts === true,
           runner,
           sourceId: target.sourceId,
           targetUrl: target.url,
@@ -342,6 +358,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
     bundle: bundleDir,
     generatedAt,
     giteaBaseUrl: options.giteaBaseUrl,
+    ignoreScripts: options.ignoreScripts === true,
     projects,
     registryUrl: options.registryUrl,
     ...summary,

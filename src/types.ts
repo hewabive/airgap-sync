@@ -454,6 +454,7 @@ export interface VerifyInstallReport {
   failed: number;
   generatedAt: string;
   giteaBaseUrl: string;
+  ignoreScripts: boolean;
   ok: boolean;
   passed: number;
   projects: VerifyInstallProjectResult[];

@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { emitKeypressEvents } from 'node:readline';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 import {
@@ -99,6 +100,7 @@ interface VerifyOptions {
 }
 
 interface VerifyInstallOptions {
+  ignoreScripts?: boolean;
   gitea: string;
   json?: boolean;
   keepTemp?: boolean;
@@ -160,7 +162,11 @@ function compactArgs(args: (string | undefined)[]): string[] {
   return args.filter((arg): arg is string => arg !== undefined && arg.length > 0);
 }
 
-async function runSelfCommand(args: string[], cwd: string): Promise<void> {
+async function runSelfCommand(
+  args: string[],
+  cwd: string,
+  envOverrides: NodeJS.ProcessEnv = {}
+): Promise<void> {
   const cliPath = process.argv[1];
   if (!cliPath) {
     throw new Error('Cannot locate current CLI entrypoint');
@@ -169,7 +175,7 @@ async function runSelfCommand(args: string[], cwd: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
       cwd,
-      env: process.env,
+      env: { ...process.env, ...envOverrides },
       stdio: 'inherit',
     });
 
@@ -387,6 +393,55 @@ async function ask(
   return trimmed.length > 0 ? trimmed : (defaultValue ?? '');
 }
 
+async function askSecret(rl: ReadlineInterface, question: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return ask(rl, question);
+  }
+
+  rl.pause();
+  emitKeypressEvents(process.stdin);
+  const wasRaw = process.stdin.isRaw;
+  process.stdin.setRawMode(true);
+  process.stdout.write(`${question}: `);
+
+  return await new Promise<string>((resolve, reject) => {
+    let value = '';
+
+    const cleanup = () => {
+      process.stdin.off('keypress', onKeypress);
+      process.stdin.setRawMode(wasRaw);
+      rl.resume();
+    };
+
+    const onKeypress = (chunk: string, key: { ctrl?: boolean; name?: string }) => {
+      if (key.ctrl === true && key.name === 'c') {
+        cleanup();
+        process.stdout.write('\n');
+        reject(new Error('Interrupted'));
+        return;
+      }
+
+      if (key.name === 'return' || key.name === 'enter') {
+        cleanup();
+        process.stdout.write('\n');
+        resolve(value.trim());
+        return;
+      }
+
+      if (key.name === 'backspace') {
+        value = value.slice(0, -1);
+        return;
+      }
+
+      if (chunk && chunk >= ' ') {
+        value += chunk;
+      }
+    };
+
+    process.stdin.on('keypress', onKeypress);
+  });
+}
+
 async function askYesNo(
   rl: ReadlineInterface,
   question: string,
@@ -568,7 +623,7 @@ async function runMenuAction(
         'Configure global Git rewrites on this machine?',
         false
       );
-      const token = process.env.GITEA_TOKEN ?? (await ask(rl, 'Gitea token'));
+      const token = process.env.GITEA_TOKEN ?? (await askSecret(rl, 'Gitea token'));
       await runSelfCommand(
         compactArgs([
           'apply',
@@ -577,20 +632,33 @@ async function runMenuAction(
           targetRegistry,
           '--gitea',
           giteaUrl,
-          token ? '--gitea-token' : undefined,
-          token,
           publicRepos ? '--public' : undefined,
           configureGitGlobal ? '--configure-git-global' : undefined,
         ]),
-        workspaceDir
+        workspaceDir,
+        token ? { GITEA_TOKEN: token } : {}
       );
       return true;
     }
     case '9': {
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+      const ignoreScripts = await askYesNo(
+        rl,
+        'Ignore lifecycle scripts during install verification?',
+        true
+      );
       await runSelfCommand(
-        ['verify', 'install', bundle, '--registry', targetRegistry, '--gitea', giteaUrl],
+        compactArgs([
+          'verify',
+          'install',
+          bundle,
+          '--registry',
+          targetRegistry,
+          '--gitea',
+          giteaUrl,
+          ignoreScripts ? '--ignore-scripts' : undefined,
+        ]),
         workspaceDir
       );
       return true;
@@ -1090,6 +1158,7 @@ verifyCommand
   .requiredOption('-r, --registry <url>', 'Target npm registry URL')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
   .option('--timeout-ms <ms>', 'Install timeout per project', parsePositiveInteger, 10 * 60_000)
+  .option('--ignore-scripts', 'Skip npm/pnpm/yarn lifecycle scripts during install verification')
   .option('--keep-temp', 'Keep temporary project copies for debugging')
   .option('--json', 'Print the full JSON verification report')
   .action(async (bundle: string, options: VerifyInstallOptions) => {
@@ -1097,6 +1166,7 @@ verifyCommand
       const report = await verifyInstall({
         bundleDir: bundle,
         giteaBaseUrl: options.gitea,
+        ignoreScripts: options.ignoreScripts === true,
         keepTemp: options.keepTemp === true,
         registryUrl: options.registry,
         timeoutMs: options.timeoutMs,

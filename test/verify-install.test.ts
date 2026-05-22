@@ -134,6 +134,7 @@ describe('verifyInstall', () => {
     expect(report).toMatchObject({
       failed: 0,
       generatedAt: '2026-05-21T00:01:00.000Z',
+      ignoreScripts: false,
       ok: true,
       passed: 1,
       skipped: 0,
@@ -169,6 +170,41 @@ describe('verifyInstall', () => {
     expect(calls[0]).toMatchObject({
       args: ['install', '--frozen-lockfile'],
       command: 'pnpm',
+    });
+  });
+
+  it('can skip package manager lifecycle scripts', async () => {
+    await writeWorkspaceSnapshot();
+    const calls: InstallCommandInvocation[] = [];
+
+    const report = await verifyInstall({
+      bundleDir,
+      giteaBaseUrl: 'http://gitea.local',
+      gitRunner: gitRunnerWithProject({
+        lockfiles: {
+          'package-lock.json': JSON.stringify({
+            lockfileVersion: 3,
+            name: 'app',
+            packages: {},
+          }),
+        },
+      }),
+      ignoreScripts: true,
+      registryUrl: 'http://verdaccio.local:4873',
+      runner(invocation) {
+        calls.push(invocation);
+        return Promise.resolve({ exitCode: 0, stderr: '', stdout: '' });
+      },
+    });
+
+    expect(calls[0]).toMatchObject({
+      args: ['ci', '--ignore-scripts'],
+      command: 'npm',
+    });
+    expect(report.ignoreScripts).toBe(true);
+    expect(report.projects[0]).toMatchObject({
+      command: ['npm', 'ci', '--ignore-scripts'],
+      status: 'passed',
     });
   });
 

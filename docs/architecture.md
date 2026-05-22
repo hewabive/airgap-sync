@@ -69,7 +69,7 @@ closed network
   -> create missing Gitea owners/repositories
   -> push Git mirrors into Gitea
   -> generate install configuration
-  -> verify install without external network access
+  -> verify install against closed-network services
 ```
 
 The Git side should use standard Git primitives where possible:

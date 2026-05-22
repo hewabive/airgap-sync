@@ -10,3 +10,4 @@
   mirror push.
 - Added Verdaccio publish with dist-tag restoration and skip-existing checks.
 - Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.
+- Added `verify install --ignore-scripts` and documented the tool security model.

@@ -197,7 +197,8 @@ Before running project installs, verify the imported bundle:
 airgap-sync verify ./airgap-bundle
 airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local
+  --gitea http://gitea.local \
+  --ignore-scripts
 ```
 
 ## Current Lower-Level Commands
@@ -241,6 +242,7 @@ mirrors, or writing global Git config.
 ## Current Gaps
 
 - `verify install` runs real installs with isolated package-manager caches and Git
-  rewrites, but it does not yet enforce a network-deny sandbox.
+  rewrites, but it does not yet enforce a network-deny sandbox. Use
+  `--ignore-scripts` when lifecycle scripts should not execute during verification.
 - Real-environment testing is still needed for large monorepositories, private source
   registries, private Git hosts, and authentication variants.
