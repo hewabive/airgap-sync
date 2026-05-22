@@ -674,18 +674,18 @@ async function configureCollectDefaults(
   const includeDev = await askPromptBoolean(
     rl,
     'Include devDependencies by default',
-    config.defaults.collect.includeDev
+    config.defaults.download.includeDev
   );
   const includePeer = await askPromptBoolean(
     rl,
     'Traverse peerDependencies by default',
-    config.defaults.collect.includePeer
+    config.defaults.download.includePeer
   );
   const nextConfig: WorkspaceConfig = {
     ...config,
     defaults: {
       ...config.defaults,
-      collect: {
+      download: {
         includeDev,
         includePeer,
       },
@@ -703,18 +703,18 @@ async function configureApplyDefaults(
   const publicRepositories = await askPromptBoolean(
     rl,
     'Create public Gitea repositories by default',
-    config.defaults.apply.publicRepositories
+    config.defaults.publish.publicRepositories
   );
   const configureGitGlobal = await askPromptBoolean(
     rl,
     'Configure global Git rewrites by default',
-    config.defaults.apply.configureGitGlobal
+    config.defaults.publish.configureGitGlobal
   );
   const nextConfig: WorkspaceConfig = {
     ...config,
     defaults: {
       ...config.defaults,
-      apply: {
+      publish: {
         configureGitGlobal,
         publicRepositories,
       },
@@ -1008,13 +1008,13 @@ async function runMenuAction(
       const includeDev = await resolvePromptBoolean(
         rl,
         'Include devDependencies?',
-        config.defaults.collect.includeDev,
+        config.defaults.download.includeDev,
         false
       );
       const includePeer = await resolvePromptBoolean(
         rl,
         'Traverse peerDependencies?',
-        config.defaults.collect.includePeer,
+        config.defaults.download.includePeer,
         false
       );
       await runSelfCommand(
@@ -1034,13 +1034,13 @@ async function runMenuAction(
       const publicRepos = await resolvePromptBoolean(
         rl,
         'Create public Gitea repositories?',
-        config.defaults.apply.publicRepositories,
+        config.defaults.publish.publicRepositories,
         false
       );
       const configureGitGlobal = await resolvePromptBoolean(
         rl,
         'Configure global Git rewrites on this machine?',
-        config.defaults.apply.configureGitGlobal,
+        config.defaults.publish.configureGitGlobal,
         false
       );
       console.error(

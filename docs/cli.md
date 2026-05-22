@@ -52,7 +52,9 @@ specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry`, `giteaUrl`, bundle output, and default answers in `airgap-sync.json`.
-Default answers can be `yes`, `no`, or `ask`; `ask` keeps the prompt for that action.
+Default answers live under `defaults.download`, `defaults.publish`, and
+`defaults.verifyInstall`. They can be `yes`, `no`, or `ask`; `ask` keeps the prompt for
+that action.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## secrets

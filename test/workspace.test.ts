@@ -31,13 +31,13 @@ describe('workspace config', () => {
 
     expect(config).toEqual({
       defaults: {
-        apply: {
-          configureGitGlobal: 'ask',
-          publicRepositories: false,
-        },
-        collect: {
+        download: {
           includeDev: 'ask',
           includePeer: false,
+        },
+        publish: {
+          configureGitGlobal: 'ask',
+          publicRepositories: false,
         },
         verifyInstall: {
           ignoreScripts: true,
@@ -114,13 +114,13 @@ describe('workspace config', () => {
 
     expect(await readWorkspaceConfig(tempDir)).toMatchObject({
       defaults: {
-        apply: {
-          configureGitGlobal: 'ask',
-          publicRepositories: false,
-        },
-        collect: {
+        download: {
           includeDev: 'ask',
           includePeer: false,
+        },
+        publish: {
+          configureGitGlobal: 'ask',
+          publicRepositories: false,
         },
         verifyInstall: {
           ignoreScripts: true,
@@ -137,13 +137,13 @@ describe('workspace config', () => {
       path.join(tempDir, 'airgap-sync.json'),
       {
         defaults: {
-          apply: {
-            configureGitGlobal: true,
-            publicRepositories: 'ask',
-          },
-          collect: {
+          download: {
             includeDev: false,
             includePeer: true,
+          },
+          publish: {
+            configureGitGlobal: true,
+            publicRepositories: 'ask',
           },
           verifyInstall: {
             ignoreScripts: 'ask',
@@ -158,16 +158,54 @@ describe('workspace config', () => {
     );
 
     expect((await readWorkspaceConfig(tempDir)).defaults).toEqual({
-      apply: {
-        configureGitGlobal: true,
-        publicRepositories: 'ask',
-      },
-      collect: {
+      download: {
         includeDev: false,
         includePeer: true,
       },
+      publish: {
+        configureGitGlobal: true,
+        publicRepositories: 'ask',
+      },
       verifyInstall: {
         ignoreScripts: 'ask',
+      },
+    });
+  });
+
+  it('reads legacy collect/apply workspace defaults', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        defaults: {
+          apply: {
+            configureGitGlobal: true,
+            publicRepositories: 'ask',
+          },
+          collect: {
+            includeDev: false,
+            includePeer: true,
+          },
+        },
+        output: './airgap-bundle',
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [],
+      },
+      { spaces: 2 }
+    );
+
+    expect((await readWorkspaceConfig(tempDir)).defaults).toEqual({
+      download: {
+        includeDev: false,
+        includePeer: true,
+      },
+      publish: {
+        configureGitGlobal: true,
+        publicRepositories: 'ask',
+      },
+      verifyInstall: {
+        ignoreScripts: true,
       },
     });
   });

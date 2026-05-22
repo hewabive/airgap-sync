@@ -23,13 +23,13 @@ export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
 
 export interface WorkspaceDefaults {
-  apply: {
-    configureGitGlobal: WorkspacePromptBoolean;
-    publicRepositories: WorkspacePromptBoolean;
-  };
-  collect: {
+  download: {
     includeDev: WorkspacePromptBoolean;
     includePeer: WorkspacePromptBoolean;
+  };
+  publish: {
+    configureGitGlobal: WorkspacePromptBoolean;
+    publicRepositories: WorkspacePromptBoolean;
   };
   verifyInstall: {
     ignoreScripts: WorkspacePromptBoolean;
@@ -91,13 +91,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function createDefaultWorkspaceConfig(): WorkspaceConfig {
   return {
     defaults: {
-      apply: {
-        configureGitGlobal: 'ask',
-        publicRepositories: false,
-      },
-      collect: {
+      download: {
         includeDev: 'ask',
         includePeer: false,
+      },
+      publish: {
+        configureGitGlobal: 'ask',
+        publicRepositories: false,
       },
       verifyInstall: {
         ignoreScripts: true,
@@ -175,24 +175,32 @@ function normalizePromptBoolean(
 function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   const defaults = createDefaultWorkspaceConfig().defaults;
   const input = isRecord(value) ? value : {};
-  const collect = isRecord(input.collect) ? input.collect : {};
-  const apply = isRecord(input.apply) ? input.apply : {};
+  const download = isRecord(input.download)
+    ? input.download
+    : isRecord(input.collect)
+      ? input.collect
+      : {};
+  const publish = isRecord(input.publish)
+    ? input.publish
+    : isRecord(input.apply)
+      ? input.apply
+      : {};
   const verifyInstall = isRecord(input.verifyInstall) ? input.verifyInstall : {};
 
   return {
-    apply: {
+    download: {
+      includeDev: normalizePromptBoolean(download.includeDev, defaults.download.includeDev),
+      includePeer: normalizePromptBoolean(download.includePeer, defaults.download.includePeer),
+    },
+    publish: {
       configureGitGlobal: normalizePromptBoolean(
-        apply.configureGitGlobal,
-        defaults.apply.configureGitGlobal
+        publish.configureGitGlobal,
+        defaults.publish.configureGitGlobal
       ),
       publicRepositories: normalizePromptBoolean(
-        apply.publicRepositories,
-        defaults.apply.publicRepositories
+        publish.publicRepositories,
+        defaults.publish.publicRepositories
       ),
-    },
-    collect: {
-      includeDev: normalizePromptBoolean(collect.includeDev, defaults.collect.includeDev),
-      includePeer: normalizePromptBoolean(collect.includePeer, defaults.collect.includePeer),
     },
     verifyInstall: {
       ignoreScripts: normalizePromptBoolean(
