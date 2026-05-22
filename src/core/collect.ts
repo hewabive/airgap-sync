@@ -8,6 +8,7 @@ import type {
   CollectTimings,
   GitRequirement,
   GitSource,
+  RepositoryUpdateReport,
   RootPackageRequirement,
   UnsupportedRootPackageRequirement,
 } from '../types.js';
@@ -36,13 +37,14 @@ export interface CollectBundleOptions {
   includeDev?: boolean;
   includePeer?: boolean;
   initialGitRequirements?: GitRequirement[];
+  initialGitSources?: GitSource[];
   initialRequirements?: RootPackageRequirement[];
   initialUnsupported?: UnsupportedRootPackageRequirement[];
   maxIterations?: number;
   outputDir: string;
   registry: RegistryClient;
   registryUrl: string;
-  root: string;
+  root?: string;
   runGitCommand?: GitCommandRunner;
   runGitOutputCommand?: GitOutputCommandRunner;
 }
@@ -115,6 +117,25 @@ function sourceIds(sources: GitSource[]): Set<string> {
   return new Set(sources.map((source) => source.id));
 }
 
+function emptyRepositoryUpdateReport(options: {
+  dryRun: boolean;
+  generatedAt: string;
+  root: string;
+}): RepositoryUpdateReport {
+  return {
+    detached: 0,
+    dirty: 0,
+    dryRun: options.dryRun,
+    errors: [],
+    generatedAt: options.generatedAt,
+    planned: 0,
+    repositories: [],
+    root: options.root,
+    totalRepositories: 0,
+    updated: 0,
+  };
+}
+
 async function scanGitSourceManifests(options: {
   bundleDir: string;
   includeDev: boolean;
@@ -182,7 +203,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const totalStart = performance.now();
   const timings = createCollectTimings();
   const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const root = path.resolve(options.root);
+  const root = options.root ? path.resolve(options.root) : undefined;
   const outputDir = path.resolve(options.outputDir);
   const dryRun = options.dryRun === true;
   const includeDev = options.includeDev === true;
@@ -190,21 +211,27 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const maxIterations = options.maxIterations ?? 10;
 
   const repositoryUpdateStart = performance.now();
-  const repositoryUpdate = await updateRepositories({
-    dryRun,
-    generatedAt,
-    root,
-    ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
-  });
+  const repositoryUpdate = root
+    ? await updateRepositories({
+        dryRun,
+        generatedAt,
+        root,
+        ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
+      })
+    : emptyRepositoryUpdateReport({ dryRun, generatedAt, root: outputDir });
   timings.repositoryUpdateMs = elapsedMs(repositoryUpdateStart);
   const manifestScanStart = performance.now();
-  const parsedManifest = await readManifestRequirements(root, {
-    includeDev,
-    includePeer,
-  });
+  const parsedManifest = root
+    ? await readManifestRequirements(root, {
+        includeDev,
+        includePeer,
+      })
+    : { gitRequirements: [], requirements: [], unsupported: [] };
   timings.manifestScanMs = elapsedMs(manifestScanStart);
   const lockfileScanStart = performance.now();
-  const parsedLockfiles = await readLockfileRequirements(root);
+  const parsedLockfiles = root
+    ? await readLockfileRequirements(root)
+    : { gitRequirements: [], requirements: [], unsupported: [] };
   timings.lockfileScanMs = elapsedMs(lockfileScanStart);
   const state: RequirementState = {
     gitRequirements: [],
@@ -257,7 +284,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     skipped: 0,
     unsupported: [],
   });
-  let gitSources = createGitSourcesManifest([], { createdAt: generatedAt });
+  let gitSources = createGitSourcesManifest([], {
+    createdAt: generatedAt,
+    initialSources: options.initialGitSources ?? [],
+  });
   const initialGitFetchStart = performance.now();
   let gitFetch = await fetchGitSources({
     bundleDir: outputDir,
@@ -296,6 +326,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     });
     gitSources = createGitSourcesManifest(resolution.gitRequirements, {
       createdAt: generatedAt,
+      initialSources: options.initialGitSources ?? [],
     });
     const gitFetchStart = performance.now();
     gitFetch = await fetchGitSources({
@@ -405,7 +436,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     outputDir,
     registryUrl: options.registryUrl,
     repositoryUpdate,
-    root,
+    root: root ?? outputDir,
     timings,
     wroteBundle,
   };

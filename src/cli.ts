@@ -14,6 +14,7 @@ import {
   createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
+  createWorkspaceGitSources,
   createWorkspaceSnapshot,
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
@@ -21,7 +22,6 @@ import {
   HttpGiteaClient,
   HttpRegistryClient,
   initWorkspace,
-  materializeWorkspaceGitTargets,
   packageName,
   packageVersion,
   parseRootSpecs,
@@ -821,14 +821,10 @@ program
       if (!root) {
         const workspaceDir = process.cwd();
         const config = await readWorkspaceConfig(workspaceDir);
-        const targetSync = await materializeWorkspaceGitTargets({
-          config,
-          dryRun: options.dryRun === true,
-          workspaceDir,
-        });
         const parsedTargets = parseRootSpecs(
           config.targets.filter((target) => target.type === 'npm').map((target) => target.spec)
         );
+        const gitTargets = createWorkspaceGitSources(config);
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const snapshotOutput = options.output
@@ -841,12 +837,12 @@ program
           includeDev: options.includeDev === true,
           includePeer: options.includePeer === true,
           initialGitRequirements: parsedTargets.gitRequirements,
+          initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
           initialUnsupported: parsedTargets.unsupported,
           outputDir,
           registry,
           registryUrl,
-          root: path.resolve(workspaceDir, config.reposDir),
         });
         const workspaceSnapshot = createWorkspaceSnapshot({
           config: {
@@ -855,8 +851,6 @@ program
             sourceRegistry: registryUrl,
           },
           createdAt: report.generatedAt,
-          targetSync,
-          workspaceDir,
         });
         if (options.dryRun !== true) {
           await writeWorkspaceSnapshot(outputDir, workspaceSnapshot);
@@ -865,7 +859,6 @@ program
         console.log(
           JSON.stringify(
             {
-              targetSync,
               workspaceSnapshot,
               ...report,
             },
@@ -874,7 +867,7 @@ program
           )
         );
 
-        if (targetSync.errors.length > 0 || collectShouldFail(report)) {
+        if (collectShouldFail(report)) {
           process.exitCode = 1;
         }
         return;

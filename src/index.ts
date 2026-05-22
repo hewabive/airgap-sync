@@ -31,6 +31,7 @@ export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
 export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export {
   createGitSourcesManifest,
+  createGitSourceFromUrl,
   readGitSourcesManifest,
   writeGitSourcesManifest,
 } from './core/git-sources.js';
@@ -50,13 +51,11 @@ export { verifyBundle } from './core/verify.js';
 export { runInstallCommand, verifyInstall } from './core/verify-install.js';
 export {
   addWorkspaceTarget,
+  createWorkspaceGitSources,
   createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
-  defaultWorkspaceReposDir,
   defaultWorkspaceSourceRegistry,
-  gitTargetLocalPath,
   initWorkspace,
-  materializeWorkspaceGitTargets,
   readWorkspaceConfig,
   removeWorkspaceTarget,
   workspaceConfigFileName,
@@ -130,12 +129,8 @@ export type {
 } from './core/verify-install.js';
 export type {
   InitWorkspaceOptions,
-  MaterializeWorkspaceGitTargetsOptions,
   WorkspaceConfig,
   WorkspaceGitTarget,
-  WorkspaceGitTargetResult,
-  WorkspaceGitTargetsReport,
-  WorkspaceGitTargetStatus,
   WorkspaceNpmTarget,
   WorkspaceSnapshot,
   WorkspaceTarget,

@@ -1,10 +1,10 @@
 import path from 'node:path';
 import * as fs from './fs.js';
-import { type GitCommandRunner, runGitCommand } from './git-fetch.js';
+import { createGitSourceFromUrl } from './git-sources.js';
+import type { GitSource } from '../types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
-export const defaultWorkspaceReposDir = './repos';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
 
 export interface WorkspaceGitTarget {
@@ -23,39 +23,16 @@ export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget;
 export interface WorkspaceConfig {
   giteaUrl?: string;
   output: string;
-  reposDir: string;
   schemaVersion: 1;
   sourceRegistry: string;
   targetRegistry?: string;
   targets: WorkspaceTarget[];
 }
 
-export type WorkspaceGitTargetStatus = 'planned' | 'cloned' | 'exists' | 'error';
-
-export interface WorkspaceGitTargetResult {
-  branch?: string;
-  error?: string;
-  status: WorkspaceGitTargetStatus;
-  targetPath: string;
-  url: string;
-}
-
-export interface WorkspaceGitTargetsReport {
-  cloned: number;
-  dryRun: boolean;
-  errors: WorkspaceGitTargetResult[];
-  exists: number;
-  planned: number;
-  repositories: WorkspaceGitTargetResult[];
-  reposDir: string;
-  totalRepositories: number;
-}
-
 interface WorkspaceGitTargetSnapshot {
   branch?: string;
-  error?: string;
-  localPath: string;
-  status?: WorkspaceGitTargetStatus;
+  localMirrorPath: string;
+  sourceId: string;
   type: 'git';
   url: string;
 }
@@ -70,7 +47,6 @@ export type WorkspaceTargetSnapshot = WorkspaceGitTargetSnapshot | WorkspaceNpmT
 export interface WorkspaceSnapshot {
   createdAt: string;
   output: string;
-  reposDir: string;
   schemaVersion: 1;
   sourceRegistry: string;
   targets: WorkspaceTargetSnapshot[];
@@ -81,18 +57,9 @@ export interface InitWorkspaceOptions {
   workspaceDir: string;
 }
 
-export interface MaterializeWorkspaceGitTargetsOptions {
-  config: WorkspaceConfig;
-  dryRun?: boolean;
-  runner?: GitCommandRunner;
-  workspaceDir: string;
-}
-
 export interface CreateWorkspaceSnapshotOptions {
   config: WorkspaceConfig;
   createdAt?: string;
-  targetSync?: WorkspaceGitTargetsReport;
-  workspaceDir: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -102,7 +69,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function createDefaultWorkspaceConfig(): WorkspaceConfig {
   return {
     output: defaultWorkspaceOutputDir,
-    reposDir: defaultWorkspaceReposDir,
     schemaVersion: 1,
     sourceRegistry: defaultWorkspaceSourceRegistry,
     targets: [],
@@ -171,10 +137,6 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       typeof value.output === 'string' && value.output.trim().length > 0
         ? value.output.trim()
         : defaultWorkspaceOutputDir,
-    reposDir:
-      typeof value.reposDir === 'string' && value.reposDir.trim().length > 0
-        ? value.reposDir.trim()
-        : defaultWorkspaceReposDir,
     schemaVersion: 1,
     sourceRegistry:
       typeof value.sourceRegistry === 'string' && value.sourceRegistry.trim().length > 0
@@ -194,10 +156,7 @@ export async function initWorkspace(options: InitWorkspaceOptions): Promise<Work
 
   const config = createDefaultWorkspaceConfig();
   await fs.writeJson(configPath, config, { spaces: 2 });
-  await fs.ensureDir(path.resolve(workspaceDir, config.reposDir));
   await fs.ensureDir(path.resolve(workspaceDir, config.output));
-  await fs.ensureDir(path.resolve(workspaceDir, 'cache'));
-  await fs.ensureDir(path.resolve(workspaceDir, 'reports'));
   return config;
 }
 
@@ -250,147 +209,28 @@ export async function removeWorkspaceTarget(
   return { config, removed };
 }
 
-function normalizeGitRepoPathSegment(segment: string): string {
-  return segment.replace(/\.git$/i, '');
-}
-
-export function gitTargetLocalPath(
-  workspaceDir: string,
-  config: WorkspaceConfig,
-  url: string
-): string {
-  const scpLike = /^git@([^:]+):(.+)$/.exec(url);
-  if (scpLike) {
-    const host = scpLike[1] ?? 'unknown-host';
-    const repoPath = (scpLike[2] ?? 'repository').split('/').map(normalizeGitRepoPathSegment);
-    return path.resolve(workspaceDir, config.reposDir, host, ...repoPath);
-  }
-
-  try {
-    const parsed = new URL(url);
-    const repoPath = parsed.pathname
-      .replace(/^\/+/, '')
-      .split('/')
-      .filter(Boolean)
-      .map(normalizeGitRepoPathSegment);
-    return path.resolve(workspaceDir, config.reposDir, parsed.hostname, ...repoPath);
-  } catch {
-    return path.resolve(workspaceDir, config.reposDir, normalizeGitRepoPathSegment(url));
-  }
-}
-
-async function materializeGitTarget(
-  workspaceDir: string,
-  config: WorkspaceConfig,
-  target: WorkspaceGitTarget,
-  dryRun: boolean,
-  runner: GitCommandRunner
-): Promise<WorkspaceGitTargetResult> {
-  const targetPath = gitTargetLocalPath(workspaceDir, config, target.url);
-
-  try {
-    if (await fs.pathExists(targetPath)) {
-      return {
-        ...(target.branch ? { branch: target.branch } : {}),
-        status: 'exists',
-        targetPath,
+export function createWorkspaceGitSources(config: WorkspaceConfig): GitSource[] {
+  return config.targets
+    .filter((target): target is WorkspaceGitTarget => target.type === 'git')
+    .map((target) =>
+      createGitSourceFromUrl({
+        ...(target.branch ? { committish: target.branch } : {}),
+        target: true,
         url: target.url,
-      };
-    }
-
-    if (dryRun) {
-      return {
-        ...(target.branch ? { branch: target.branch } : {}),
-        status: 'planned',
-        targetPath,
-        url: target.url,
-      };
-    }
-
-    await fs.ensureDir(path.dirname(targetPath));
-    await runner({
-      args: [
-        'clone',
-        ...(target.branch ? ['--branch', target.branch] : []),
-        target.url,
-        targetPath,
-      ],
-    });
-
-    return {
-      ...(target.branch ? { branch: target.branch } : {}),
-      status: 'cloned',
-      targetPath,
-      url: target.url,
-    };
-  } catch (error) {
-    return {
-      ...(target.branch ? { branch: target.branch } : {}),
-      error: (error as Error).message,
-      status: 'error',
-      targetPath,
-      url: target.url,
-    };
-  }
-}
-
-export async function materializeWorkspaceGitTargets(
-  options: MaterializeWorkspaceGitTargetsOptions
-): Promise<WorkspaceGitTargetsReport> {
-  const workspaceDir = path.resolve(options.workspaceDir);
-  const reposDir = path.resolve(workspaceDir, options.config.reposDir);
-  const dryRun = options.dryRun === true;
-  const runner = options.runner ?? runGitCommand;
-  const repositories: WorkspaceGitTargetResult[] = [];
-  if (!dryRun) {
-    await fs.ensureDir(reposDir);
-  }
-
-  for (const target of options.config.targets) {
-    if (target.type === 'git') {
-      repositories.push(
-        await materializeGitTarget(workspaceDir, options.config, target, dryRun, runner)
-      );
-    }
-  }
-
-  const errors = repositories.filter((repository) => repository.status === 'error');
-
-  return {
-    cloned: repositories.filter((repository) => repository.status === 'cloned').length,
-    dryRun,
-    errors,
-    exists: repositories.filter((repository) => repository.status === 'exists').length,
-    planned: repositories.filter((repository) => repository.status === 'planned').length,
-    repositories,
-    reposDir,
-    totalRepositories: repositories.length,
-  };
-}
-
-function toPortablePath(filePath: string): string {
-  return filePath.split(path.sep).join(path.posix.sep);
-}
-
-function matchingGitTargetResult(
-  target: WorkspaceGitTarget,
-  report: WorkspaceGitTargetsReport | undefined
-): WorkspaceGitTargetResult | undefined {
-  return report?.repositories.find(
-    (repository) =>
-      repository.url === target.url && (repository.branch ?? '') === (target.branch ?? '')
-  );
+      })
+    );
 }
 
 export function createWorkspaceSnapshot(
   options: CreateWorkspaceSnapshotOptions
 ): WorkspaceSnapshot {
-  const workspaceDir = path.resolve(options.workspaceDir);
+  const gitSourcesByUrl = new Map(
+    createWorkspaceGitSources(options.config).map((source) => [source.sourceUrl, source])
+  );
 
   return {
     createdAt: options.createdAt ?? new Date().toISOString(),
     output: options.config.output,
-    reposDir: options.config.reposDir,
     schemaVersion: 1,
     sourceRegistry: options.config.sourceRegistry,
     targets: options.config.targets.map((target) => {
@@ -401,16 +241,15 @@ export function createWorkspaceSnapshot(
         };
       }
 
-      const result = matchingGitTargetResult(target, options.targetSync);
-      const targetPath =
-        result?.targetPath ?? gitTargetLocalPath(workspaceDir, options.config, target.url);
-      const localPath = toPortablePath(path.relative(workspaceDir, targetPath));
+      const source = gitSourcesByUrl.get(target.url.replace(/^git\+/, ''));
+      if (!source) {
+        throw new Error(`Unable to infer a Git source identity from ${target.url}`);
+      }
 
       return {
         ...(target.branch ? { branch: target.branch } : {}),
-        ...(result?.error ? { error: result.error } : {}),
-        localPath,
-        ...(result?.status ? { status: result.status } : {}),
+        localMirrorPath: source.localMirrorPath,
+        sourceId: source.id,
         type: 'git',
         url: target.url,
       };

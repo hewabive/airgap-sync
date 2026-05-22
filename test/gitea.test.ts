@@ -53,7 +53,7 @@ describe('HttpGiteaClient', () => {
   });
 
   it('surfaces Gitea JSON error messages in provision reports', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 })).mockResolvedValueOnce(
+    fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ message: 'repo lookup failed' }), {
         status: 500,
       })
@@ -298,9 +298,7 @@ describe('provisionGiteaRepositories', () => {
         throw new Error('create repository should not be called');
       },
       organizationExists: () => Promise.resolve(false),
-      repositoryExists: () => {
-        throw new Error('repository exists should not be called');
-      },
+      repositoryExists: () => Promise.resolve(false),
     };
 
     const report = await provisionGiteaRepositories({

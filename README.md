@@ -19,16 +19,16 @@ The broader target is an airgap sync workflow for portable media:
 - refresh one or more Git repositories on an online machine;
 - discover Node dependency graphs across those repositories;
 - collect npm registry packages for Verdaccio;
-- collect Git dependencies as portable source mirrors;
+- collect target repositories and Git dependencies as portable source mirrors;
 - apply both sides in the closed network and verify installs do not reach outside.
 
 ## Status
 
 This repository is an early but usable implementation. The core workflow is in place:
-workspace targets, conservative Git refresh, recursive npm dependency collection,
-lockfile and nested package.json scanning, Git dependency mirroring, Verdaccio publish,
-dist-tag restoration, Gitea repository creation, mirror push, static bundle validation,
-and install verification.
+workspace targets, recursive npm dependency collection, lockfile and nested
+package.json scanning, Git target/dependency mirroring, Verdaccio publish, dist-tag
+restoration, Gitea repository creation, mirror push, static bundle validation, and
+install verification.
 
 It still needs real-environment hardening around large repositories, authentication
 variants, performance tuning, and operator ergonomics.
@@ -97,16 +97,13 @@ The configured workspace lives on removable media:
 
 ```text
 airgap-sync.json          Target list and defaults
-repos/                    Working clones for configured Git targets
 airgap-bundle/            Transfer bundle for Verdaccio and Gitea
+airgap-bundle/git-mirrors/ Git mirrors for target repositories and Git dependencies
 airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
-cache/                    Reserved for local caches
-reports/                  Reserved for operator-facing reports
 ```
 
-`airgap-sync.json` belongs next to `repos/` and `airgap-bundle/` on the removable
-media. It is the workspace configuration for repeated syncs, not part of a single
-transfer bundle.
+`airgap-sync.json` belongs next to `airgap-bundle/` on the removable media. It is the
+workspace configuration for repeated syncs, not part of a single transfer bundle.
 
 The lower-level commands remain available for debugging and one-off use:
 

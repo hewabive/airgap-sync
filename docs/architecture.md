@@ -5,9 +5,8 @@ through normal npm publishing commands.
 
 The product direction is broader: a portable airgap dependency sync tool for projects
 that combine Git repositories, npm registry dependencies, and npm Git dependencies.
-The npm/Verdaccio bundle and lower-level Git mirror commands are implemented first;
-repository refresh, fixed-point collection, and top-level apply orchestration are the
-next architectural layer.
+The npm/Verdaccio bundle, Git mirror transfer, fixed-point collection, and top-level
+apply orchestration are the main architectural layers.
 
 ## Problem
 
@@ -48,12 +47,12 @@ airgap bundle
 
 ```text
 online removable media
-  -> refresh Git repositories
-  -> scan package manifests and lockfiles from project repositories
+  -> fetch configured Git targets as bundle-local mirrors
+  -> scan package manifests and lockfiles from Git mirrors
   -> resolve npm registry package closure
   -> resolve Git dependency closure
   -> download npm tarballs
-  -> mirror Git repositories or create Git bundles
+  -> mirror Git repositories
   -> scan manifests from newly mirrored Git dependencies
   -> repeat npm/Git collection until no new inputs are found
   -> write transfer bundle
@@ -77,13 +76,14 @@ The Git side should use standard Git primitives where possible:
 The npm side should continue to populate Verdaccio through `npm publish` and
 `npm dist-tag`, not by mutating Verdaccio storage.
 
-## Repository Update Policy
+## Repository Input Policy
 
-The transfer workflow starts from one or more project repositories on removable media.
-`airgap-sync` should be able to scan a root directory for nested Git repositories and
-refresh each one before dependency collection.
+The primary transfer workflow starts from Git target URLs in `airgap-sync.json`.
+Configured targets and Git dependencies use the same storage model: local bare mirrors
+under `airgap-bundle/git-mirrors/`, preserving source host and owner/repository paths.
 
-The default update policy should be conservative:
+Lower-level collection from an explicit directory is still available for diagnostics
+and one-off use. Its repository update policy is conservative:
 
 - find repositories by locating `.git` directories or files;
 - skip nested repositories once the nearest parent repository is selected;
@@ -92,8 +92,8 @@ The default update policy should be conservative:
 - record detached HEADs, merge conflicts, authentication failures, and non-fast-forward
   branches in a report instead of trying to repair them.
 
-Repository update is part of collection because package manifests can change whenever a
-project repository is refreshed.
+Workspace-mode collection does not keep separate working clones. The bundle is the
+portable Git store.
 
 ## Resolver Policy
 

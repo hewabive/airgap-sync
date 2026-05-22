@@ -56,6 +56,7 @@ export interface GitSource {
   repo: string;
   requirements: GitRequirement[];
   sourceUrl: string;
+  target?: boolean;
 }
 
 export interface GitSourcesManifest {

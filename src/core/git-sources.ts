@@ -9,6 +9,7 @@ import type {
 
 export interface GitSourcesOptions {
   createdAt?: string;
+  initialSources?: GitSource[];
   mirrorRoot?: string;
 }
 
@@ -65,6 +66,23 @@ function identityFromHosted(requirement: GitRequirement, url: string): SourceIde
 }
 
 function identityFromUrl(url: string): SourceIdentity | undefined {
+  const scpLike = /^git@([^:]+):(.+)$/.exec(url);
+  if (scpLike) {
+    const host = (scpLike[1] ?? '').toLowerCase();
+    const parts = (scpLike[2] ?? '').split('/').filter((part) => part.length > 0);
+    if (host && parts.length >= 2) {
+      const owner = safePathPart(parts.at(-2) ?? '');
+      const repo = safePathPart(trimGitSuffix(parts.at(-1) ?? ''));
+      return {
+        host,
+        id: `${host}/${owner}/${repo}`,
+        owner,
+        repo,
+        sourceUrl: url,
+      };
+    }
+  }
+
   try {
     const parsed = new URL(url);
     const parts = parsed.pathname
@@ -121,6 +139,42 @@ function mergeRequirement(source: GitSource, requirement: GitRequirement): void 
   }
 }
 
+function mergeSource(target: GitSource, source: GitSource): void {
+  for (const requirement of source.requirements) {
+    mergeRequirement(target, requirement);
+  }
+
+  if (source.target === true) {
+    target.target = true;
+  }
+}
+
+export function createGitSourceFromUrl(options: {
+  committish?: string;
+  mirrorRoot?: string;
+  target?: boolean;
+  url: string;
+}): GitSource {
+  const url = options.url.replace(/^git\+/, '');
+  const identity = identityFromUrl(url);
+  if (!identity) {
+    throw new Error(`Unable to infer a Git source identity from ${options.url}`);
+  }
+  const mirrorRoot = options.mirrorRoot ?? 'git-mirrors';
+
+  return {
+    ...(options.committish ? { committish: options.committish } : {}),
+    host: identity.host,
+    id: identity.id,
+    localMirrorPath: toLocalMirrorPath(identity, mirrorRoot),
+    owner: identity.owner,
+    repo: identity.repo,
+    requirements: [],
+    sourceUrl: identity.sourceUrl,
+    ...(options.target === true ? { target: true } : {}),
+  };
+}
+
 export function createGitSourcesManifest(
   requirements: GitRequirement[],
   options: GitSourcesOptions = {}
@@ -128,6 +182,20 @@ export function createGitSourcesManifest(
   const mirrorRoot = options.mirrorRoot ?? 'git-mirrors';
   const sources = new Map<string, GitSource>();
   const skipped: SkippedGitRequirement[] = [];
+
+  for (const source of options.initialSources ?? []) {
+    const existing = sources.get(source.id);
+    if (existing) {
+      mergeSource(existing, source);
+      continue;
+    }
+
+    sources.set(source.id, {
+      ...source,
+      localMirrorPath: source.localMirrorPath || toLocalMirrorPath(source, mirrorRoot),
+      requirements: [...source.requirements],
+    });
+  }
 
   for (const requirement of requirements) {
     const identity = sourceIdentity(requirement);

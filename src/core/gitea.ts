@@ -279,6 +279,20 @@ function repositoryBlockedByOrganizationError(
   };
 }
 
+function existingRepositoryAction(
+  source: GitSource,
+  options: ProvisionGiteaRepositoriesOptions,
+  isPrivate: boolean
+): GiteaRepositoryActionResult {
+  return {
+    owner: source.owner,
+    private: isPrivate,
+    repository: source.repo,
+    status: 'exists',
+    targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
+  };
+}
+
 export async function provisionGiteaRepositories(
   options: ProvisionGiteaRepositoriesOptions
 ): Promise<GiteaRepositoryProvisionReport> {
@@ -308,13 +322,47 @@ export async function provisionGiteaRepositories(
       });
     }
   } else {
-    for (const owner of owners) {
+    const missingSources: GitSource[] = [];
+
+    for (const source of options.manifest.sources) {
+      try {
+        const exists = await options.client.repositoryExists(source.owner, source.repo);
+        if (exists) {
+          actions.push(existingRepositoryAction(source, options, isPrivate));
+          if (!organizationActionsByOwner.has(source.owner)) {
+            const action: GiteaOrganizationActionResult = {
+              owner: source.owner,
+              status: 'exists',
+            };
+            organizationActions.push(action);
+            organizationActionsByOwner.set(source.owner, action);
+          }
+          continue;
+        }
+
+        missingSources.push(source);
+      } catch (error) {
+        actions.push({
+          error: errorMessage(error),
+          owner: source.owner,
+          private: isPrivate,
+          repository: source.repo,
+          status: 'error',
+          targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
+        });
+      }
+    }
+
+    for (const owner of uniqueOwners({ ...options.manifest, sources: missingSources })) {
+      if (organizationActionsByOwner.has(owner)) {
+        continue;
+      }
       const action = await provisionOrganization(owner, options, isPrivate);
       organizationActions.push(action);
       organizationActionsByOwner.set(owner, action);
     }
 
-    for (const source of options.manifest.sources) {
+    for (const source of missingSources) {
       const organization = organizationActionsByOwner.get(source.owner);
       if (organization?.status === 'error') {
         actions.push(

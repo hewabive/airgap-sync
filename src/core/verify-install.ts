@@ -5,6 +5,7 @@ import * as fs from './fs.js';
 import { writeVerifyInstallReport } from './bundle.js';
 import { createGitConfigRewriteRules } from './git-apply.js';
 import { normalizeBaseUrl } from './git-targets.js';
+import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
 import type {
   GitSourcesManifest,
   VerifyInstallPackageManager,
@@ -35,6 +36,7 @@ export interface VerifyInstallOptions {
   bundleDir: string;
   generatedAt?: string;
   giteaBaseUrl: string;
+  gitRunner?: GitCommandRunner;
   keepTemp?: boolean;
   registryUrl: string;
   runner?: InstallCommandRunner;
@@ -95,17 +97,6 @@ export async function runInstallCommand(
   });
 }
 
-function workspaceRootFromBundle(bundleDir: string, snapshot: WorkspaceSnapshot): string {
-  if (path.isAbsolute(snapshot.output)) {
-    return path.dirname(path.resolve(snapshot.output));
-  }
-
-  const depth = snapshot.output
-    .split(/[\\/]/u)
-    .filter((segment) => segment.length > 0 && segment !== '.').length;
-  return path.resolve(bundleDir, ...Array.from({ length: depth }, () => '..'));
-}
-
 function gitTargets(snapshot: WorkspaceSnapshot): (WorkspaceTargetSnapshot & { type: 'git' })[] {
   return snapshot.targets.filter(
     (target): target is WorkspaceTargetSnapshot & { type: 'git' } => target.type === 'git'
@@ -151,16 +142,6 @@ async function detectInstallCommand(projectPath: string): Promise<InstallCommand
   }
 
   return undefined;
-}
-
-async function copyProject(sourcePath: string, targetPath: string): Promise<void> {
-  await fs.cp(sourcePath, targetPath, {
-    filter(source) {
-      const relative = path.relative(sourcePath, source);
-      return !relative.split(path.sep).includes('node_modules');
-    },
-    recursive: true,
-  });
 }
 
 function gitConfigContent(
@@ -220,38 +201,36 @@ function summarize(
 }
 
 async function verifyProjectInstall(options: {
+  checkoutPath: string;
   env: NodeJS.ProcessEnv;
-  projectPath: string;
   runner: InstallCommandRunner;
+  sourceId: string;
   targetUrl: string;
-  tempRoot: string;
   timeoutMs: number;
 }): Promise<VerifyInstallProjectResult> {
-  if (!(await fs.pathExists(options.projectPath))) {
+  if (!(await fs.pathExists(options.checkoutPath))) {
     return {
-      projectPath: options.projectPath,
+      projectPath: options.sourceId,
       reason: 'Project path does not exist',
       status: 'skipped',
       targetUrl: options.targetUrl,
     };
   }
 
-  const command = await detectInstallCommand(options.projectPath);
+  const command = await detectInstallCommand(options.checkoutPath);
   if (!command) {
     return {
-      projectPath: options.projectPath,
+      projectPath: options.sourceId,
       reason: 'No supported lockfile found',
       status: 'skipped',
       targetUrl: options.targetUrl,
     };
   }
 
-  const tempPath = path.join(options.tempRoot, path.basename(options.projectPath));
-  await copyProject(options.projectPath, tempPath);
   const result = await options.runner({
     args: command.args,
     command: command.command,
-    cwd: tempPath,
+    cwd: options.checkoutPath,
     env: options.env,
     timeoutMs: options.timeoutMs,
   });
@@ -260,13 +239,47 @@ async function verifyProjectInstall(options: {
     command: [command.command, ...command.args],
     exitCode: result.exitCode,
     packageManager: command.packageManager,
-    projectPath: options.projectPath,
+    projectPath: options.sourceId,
     status: result.exitCode === 0 ? 'passed' : 'failed',
     stderr: truncateOutput(result.stderr),
     stdout: truncateOutput(result.stdout),
     targetUrl: options.targetUrl,
-    tempPath,
+    tempPath: options.checkoutPath,
   };
+}
+
+async function checkoutTarget(options: {
+  bundleDir: string;
+  gitRunner: GitCommandRunner;
+  target: WorkspaceTargetSnapshot & { type: 'git' };
+  tempRoot: string;
+}): Promise<{ checkoutPath: string; mirrorPath: string; skippedReason?: string }> {
+  const mirrorPath = path.resolve(options.bundleDir, options.target.localMirrorPath);
+  const checkoutPath = path.join(
+    options.tempRoot,
+    'projects',
+    ...options.target.sourceId.split('/')
+  );
+
+  if (!(await fs.pathExists(mirrorPath))) {
+    return {
+      checkoutPath,
+      mirrorPath,
+      skippedReason: 'Local Git mirror does not exist',
+    };
+  }
+
+  await fs.ensureDir(path.dirname(checkoutPath));
+  await options.gitRunner({
+    args: [
+      'clone',
+      ...(options.target.branch ? ['--branch', options.target.branch] : []),
+      mirrorPath,
+      checkoutPath,
+    ],
+  });
+
+  return { checkoutPath, mirrorPath };
 }
 
 export async function verifyInstall(options: VerifyInstallOptions): Promise<VerifyInstallReport> {
@@ -275,7 +288,6 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
   const timeoutMs = options.timeoutMs ?? defaultInstallTimeoutMs;
   const snapshot = await readWorkspaceSnapshot(bundleDir);
   const gitSources = await readOptionalGitSources(bundleDir);
-  const workspaceRoot = workspaceRootFromBundle(bundleDir, snapshot);
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-install-'));
   const gitConfigPath = path.join(tempRoot, 'gitconfig');
   await fs.writeFile(gitConfigPath, gitConfigContent(gitSources, options.giteaBaseUrl));
@@ -286,18 +298,35 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
     registryUrl: options.registryUrl,
   });
   const runner = options.runner ?? runInstallCommand;
+  const gitRunner = options.gitRunner ?? runGitCommand;
 
   let projects: VerifyInstallProjectResult[];
   try {
     projects = [];
     for (const target of gitTargets(snapshot)) {
+      const checkout = await checkoutTarget({
+        bundleDir,
+        gitRunner,
+        target,
+        tempRoot,
+      });
+      if (checkout.skippedReason) {
+        projects.push({
+          projectPath: target.sourceId,
+          reason: checkout.skippedReason,
+          status: 'skipped',
+          targetUrl: target.url,
+        });
+        continue;
+      }
+
       projects.push(
         await verifyProjectInstall({
+          checkoutPath: checkout.checkoutPath,
           env,
-          projectPath: path.resolve(workspaceRoot, target.localPath),
           runner,
+          sourceId: target.sourceId,
           targetUrl: target.url,
-          tempRoot,
           timeoutMs,
         })
       );

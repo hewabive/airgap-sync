@@ -16,13 +16,10 @@ airgap-sync init /media/USB/airgap-sync
 Creates `airgap-sync.json` plus the default workspace directories:
 
 ```text
-repos/
 airgap-bundle/
-cache/
-reports/
 ```
 
-The default config uses `https://registry.npmjs.org`, `./repos`, and `./airgap-bundle`.
+The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 
 ## target
 
@@ -33,9 +30,9 @@ airgap-sync target list
 airgap-sync target remove 1
 ```
 
-Targets are stored in `airgap-sync.json`. Git targets are cloned into `repos/` using
-preserved source paths such as `repos/github.com/acme/app`. npm targets are treated as
-explicit root package specs during `collect`.
+Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirrors into
+`airgap-bundle/git-mirrors/` during `collect`. npm targets are treated as explicit root
+package specs.
 
 ## menu
 
@@ -80,13 +77,13 @@ airgap-sync collect ./repos \
   --output ./airgap-bundle
 ```
 
-Without a root argument, reads `airgap-sync.json` from the current directory, clones
-missing configured Git targets into `repos/`, scans those repositories, includes
-configured npm targets as root package specs, resolves npm registry packages, writes
-portable Git source metadata, clones or updates Git dependency mirrors, scans package
-manifests from those mirrors, and repeats until no new npm or Git inputs are found.
-It also writes `workspace-snapshot.json` with the configured targets and portable
-relative repository paths for later verification.
+Without a root argument, reads `airgap-sync.json` from the current directory, fetches
+configured Git targets as bare mirrors, scans package manifests from those mirrors,
+includes configured npm targets as root package specs, resolves npm registry packages,
+writes portable Git source metadata, clones or updates Git dependency mirrors, scans
+package manifests from those mirrors, and repeats until no new npm or Git inputs are
+found. It also writes `workspace-snapshot.json` with the configured targets and their
+bundle-local mirror paths for later verification.
 
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
@@ -186,10 +183,10 @@ Errors produce a non-zero exit code. Warnings, such as a missing `apply-report.j
 before the offline import has run, are reported but do not fail the command.
 
 `verify install` runs real package-manager installs for Git targets recorded in
-`workspace-snapshot.json`. It copies each project to a temporary directory, detects the
-package manager from the lockfile, sets the npm registry, and uses a temporary Git
-config with source-host rewrites to the provided Gitea URL. It writes
-`verify-install-report.json`.
+`workspace-snapshot.json`. It checks out each target project from the bundle-local Git
+mirror into a temporary directory, detects the package manager from the lockfile, sets
+the npm registry, and uses a temporary Git config with source-host rewrites to the
+provided Gitea URL. It writes `verify-install-report.json`.
 
 Supported install detection:
 

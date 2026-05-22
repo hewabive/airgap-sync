@@ -18,7 +18,6 @@ for debugging individual phases.
 Example names used below:
 
 ```text
-./repos                         Working clones for configured Git targets
 ./airgap-bundle                 Transfer bundle directory
 https://registry.npmjs.org      Source npm registry
 http://verdaccio.local:4873     Closed-network npm registry
@@ -51,9 +50,8 @@ apply, verification, and bundle info.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
-Keep this file in the workspace root on removable media, next to `repos/` and
-`airgap-bundle/`; it is long-lived workspace state rather than a file inside one
-generated bundle.
+Keep this file in the workspace root on removable media, next to `airgap-bundle/`; it
+is long-lived workspace state rather than a file inside one generated bundle.
 
 ## Online Phase
 
@@ -63,9 +61,10 @@ Refresh configured targets and collect npm/Git dependency closure:
 airgap-sync collect
 ```
 
-The collect step clones missing configured Git targets under `repos/`, refreshes clean
-repositories with conservative `git pull --ff-only`, includes configured npm targets as
-root package specs, and writes the transfer bundle under `airgap-bundle/` by default.
+The collect step fetches configured Git targets as bare mirrors under
+`airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
+configured npm targets as root package specs, and writes the transfer bundle under
+`airgap-bundle/` by default.
 
 Lower-level collection from an explicit repository directory is still available:
 
@@ -79,8 +78,8 @@ airgap-sync collect ./repos \
 The collect step runs to a fixed point:
 
 ```text
-scan package.json files from project repositories
-  -> refresh clean Git repositories
+fetch configured Git targets into bundle-local mirrors
+  -> scan package.json files from Git mirrors
   -> resolve and download npm registry package closure
   -> discover Git dependencies from package manifests
   -> clone/update missing Git dependency mirrors

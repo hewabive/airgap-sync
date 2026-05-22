@@ -369,6 +369,114 @@ describe('collectBundle', () => {
     ]);
   });
 
+  it('runs workspace-style collection from initial Git sources without a repository root', async () => {
+    const gitOutputCalls: GitOutputCommandInvocation[] = [];
+    const gitCalls: GitCommandInvocation[] = [];
+
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      initialGitSources: [
+        {
+          committish: 'main',
+          host: 'github.com',
+          id: 'github.com/acme/app',
+          localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+          owner: 'acme',
+          repo: 'app',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/app.git',
+          target: true,
+        },
+      ],
+      maxIterations: 5,
+      outputDir: path.join(tempDir, 'airgap-bundle'),
+      registry: {
+        getPackageMetadata(name) {
+          expect(name).toBe('demo');
+          return Promise.resolve(metadata);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      async runGitCommand(invocation): Promise<void> {
+        gitCalls.push(invocation);
+        if (invocation.args[0] === 'clone') {
+          await fs.ensureDir(invocation.args.at(-1) ?? '');
+          return;
+        }
+        return;
+      },
+      runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
+        gitOutputCalls.push(invocation);
+
+        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+          return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
+        }
+        if (invocation.args.join(' ') === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              dependencies: {
+                demo: 'latest',
+              },
+              name: 'app',
+              version: '1.0.0',
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(report.repositoryUpdate).toMatchObject({
+      totalRepositories: 0,
+    });
+    expect(report).toMatchObject({
+      fixedPoint: true,
+      fetch: {
+        errors: [],
+        resolved: 1,
+      },
+      iterations: [
+        {
+          addedRequirements: 1,
+          gitSources: 1,
+          iteration: 1,
+          resolved: 0,
+          scannedGitSources: 1,
+        },
+        {
+          addedRequirements: 0,
+          gitSources: 1,
+          iteration: 2,
+          resolved: 1,
+          scannedGitSources: 0,
+        },
+      ],
+      wroteBundle: true,
+    });
+    expect(gitCalls[0]).toEqual({
+      args: [
+        'clone',
+        '--mirror',
+        'https://github.com/acme/app.git',
+        path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/acme/app.git'),
+      ],
+    });
+    expect(report.gitSources.sources[0]).toMatchObject({
+      id: 'github.com/acme/app',
+      target: true,
+    });
+    expect(gitOutputCalls.map((call) => call.args.join(' '))).toEqual([
+      'rev-parse --verify main^{tree}',
+      'ls-tree -r --name-only main',
+      'show main:package.json',
+    ]);
+  });
+
   it.each([
     {
       fileName: 'package-lock.json',

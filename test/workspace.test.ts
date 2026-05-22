@@ -4,14 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from '../src/core/fs.js';
 import {
   addWorkspaceTarget,
+  createWorkspaceGitSources,
   createWorkspaceSnapshot,
-  gitTargetLocalPath,
   initWorkspace,
-  materializeWorkspaceGitTargets,
   readWorkspaceConfig,
   removeWorkspaceTarget,
 } from '../src/core/workspace.js';
-import type { GitCommandInvocation } from '../src/core/git-fetch.js';
 
 let tempDir: string;
 
@@ -29,13 +27,11 @@ describe('workspace config', () => {
 
     expect(config).toEqual({
       output: './airgap-bundle',
-      reposDir: './repos',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
       targets: [],
     });
     expect(await fs.pathExists(path.join(tempDir, 'airgap-sync.json'))).toBe(true);
-    expect(await fs.pathExists(path.join(tempDir, 'repos'))).toBe(true);
     expect(await fs.pathExists(path.join(tempDir, 'airgap-bundle'))).toBe(true);
   });
 
@@ -91,7 +87,6 @@ describe('workspace config', () => {
       {
         giteaUrl: ' http://gitea.local ',
         output: './airgap-bundle',
-        reposDir: './repos',
         schemaVersion: 1,
         sourceRegistry: 'https://registry.npmjs.org',
         targetRegistry: ' http://verdaccio.local:4873 ',
@@ -106,7 +101,7 @@ describe('workspace config', () => {
     });
   });
 
-  it('materializes missing Git targets under preserved source paths', async () => {
+  it('creates Git sources for configured Git targets', async () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     config.targets.push({
       branch: 'main',
@@ -114,35 +109,19 @@ describe('workspace config', () => {
       url: 'https://github.com/acme/app.git',
     });
 
-    const calls: GitCommandInvocation[] = [];
-    const report = await materializeWorkspaceGitTargets({
-      config,
-      workspaceDir: tempDir,
-      async runner(invocation) {
-        calls.push(invocation);
-        await fs.ensureDir(invocation.args.at(-1) ?? '');
-      },
-    });
-
-    expect(gitTargetLocalPath(tempDir, config, 'https://github.com/acme/app.git')).toBe(
-      path.join(tempDir, 'repos/github.com/acme/app')
-    );
-    expect(calls).toEqual([
+    expect(createWorkspaceGitSources(config)).toEqual([
       {
-        args: [
-          'clone',
-          '--branch',
-          'main',
-          'https://github.com/acme/app.git',
-          path.join(tempDir, 'repos/github.com/acme/app'),
-        ],
+        committish: 'main',
+        host: 'github.com',
+        id: 'github.com/acme/app',
+        localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+        owner: 'acme',
+        repo: 'app',
+        requirements: [],
+        sourceUrl: 'https://github.com/acme/app.git',
+        target: true,
       },
     ]);
-    expect(report).toMatchObject({
-      cloned: 1,
-      errors: [],
-      totalRepositories: 1,
-    });
   });
 
   it('creates a portable workspace snapshot for later verification', async () => {
@@ -158,30 +137,21 @@ describe('workspace config', () => {
         type: 'npm',
       }
     );
-    const targetSync = await materializeWorkspaceGitTargets({
-      config,
-      dryRun: true,
-      workspaceDir: tempDir,
-    });
-
     expect(
       createWorkspaceSnapshot({
         config,
         createdAt: '2026-05-21T00:00:00.000Z',
-        targetSync,
-        workspaceDir: tempDir,
       })
     ).toEqual({
       createdAt: '2026-05-21T00:00:00.000Z',
       output: './airgap-bundle',
-      reposDir: './repos',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
       targets: [
         {
           branch: 'main',
-          localPath: 'repos/github.com/acme/app',
-          status: 'planned',
+          localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+          sourceId: 'github.com/acme/app',
           type: 'git',
           url: 'https://github.com/acme/app.git',
         },

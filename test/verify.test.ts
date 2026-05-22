@@ -76,7 +76,6 @@ const fetchReport: FetchReport = {
 const workspaceSnapshot: WorkspaceSnapshot = {
   createdAt: '2026-05-21T00:01:00.000Z',
   output: './bundle',
-  reposDir: './repos',
   schemaVersion: 1,
   sourceRegistry: 'https://registry.example',
   targets: [

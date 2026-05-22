@@ -51,11 +51,10 @@ verification.
 
 ## Milestone 6: Git Repository Orchestration
 
-- Done: Scan configured repository directories.
-- Done: Refresh repositories on the online side using safe fetch/pull policies.
-- Done: Run repository refresh before dependency collection.
-- Done: Add `collect` orchestration for repository refresh, npm bundle fetch, Git source
-  metadata, and Git mirror fetch.
+- Done: Fetch configured Git targets as bundle-local mirrors.
+- Done: Scan manifests from target and dependency Git mirrors.
+- Done: Add `collect` orchestration for npm bundle fetch, Git source metadata, and Git
+  mirror fetch.
 - Done: Mirror repositories for transfer into a closed network.
 - Done: Push mirrors into Gitea.
 - Done: Generate `insteadOf` rules for closed-network installs.
