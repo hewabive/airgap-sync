@@ -73,7 +73,7 @@ async function applyRepository(
 
   try {
     await runner({
-      args: ['-C', mirrorPath, 'push', '--mirror', targetUrl],
+      args: ['-c', `safe.directory=${mirrorPath}`, '-C', mirrorPath, 'push', '--mirror', targetUrl],
     });
     return {
       repository: source.id,

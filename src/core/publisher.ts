@@ -19,6 +19,7 @@ const defaultDistTagConcurrency = 4;
 const defaultPublishConcurrency = 4;
 const tempPublishTag = 'airgap-sync-temp';
 const registryLookupConcurrency = 8;
+const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 export interface PublishBundleOptions {
   bundleDir: string;
@@ -172,7 +173,7 @@ function packageNamesMissingLatestTags(
 
 async function npmPublish(tarballPath: string, registryUrl: string): Promise<void> {
   await execFileAsync(
-    'npm',
+    npmExecutable,
     [
       'publish',
       tarballPath,
@@ -192,7 +193,7 @@ async function npmPublish(tarballPath: string, registryUrl: string): Promise<voi
 
 async function npmDistTagAdd(requirement: TagRequirement, registryUrl: string): Promise<void> {
   await execFileAsync(
-    'npm',
+    npmExecutable,
     [
       'dist-tag',
       'add',
@@ -213,10 +214,14 @@ async function npmDistTagRemove(
   tag: string,
   registryUrl: string
 ): Promise<void> {
-  await execFileAsync('npm', ['dist-tag', 'rm', packageName, tag, '--registry', registryUrl], {
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: 60_000,
-  });
+  await execFileAsync(
+    npmExecutable,
+    ['dist-tag', 'rm', packageName, tag, '--registry', registryUrl],
+    {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 60_000,
+    }
+  );
 }
 
 async function mapWithConcurrency<T, R>(
@@ -313,7 +318,7 @@ async function npmPackageSnapshotFromCli(
 ): Promise<PackageRegistrySnapshot> {
   try {
     const { stdout } = await execFileAsync(
-      'npm',
+      npmExecutable,
       ['view', packageName, 'versions', 'dist-tags', '--json', '--registry', registryUrl],
       {
         maxBuffer: 10 * 1024 * 1024,

@@ -127,7 +127,15 @@ describe('applyGitSources', () => {
 
     expect(calls).toEqual([
       {
-        args: ['-C', sourcePath, 'push', '--mirror', 'http://gitea.local/owner/repo.git'],
+        args: [
+          '-c',
+          `safe.directory=${sourcePath}`,
+          '-C',
+          sourcePath,
+          'push',
+          '--mirror',
+          'http://gitea.local/owner/repo.git',
+        ],
       },
     ]);
     expect(report).toMatchObject({
