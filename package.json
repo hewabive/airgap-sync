@@ -26,6 +26,7 @@
   "scripts": {
     "build": "tsc --noEmit && tsup",
     "check": "npm run lint && npm run typecheck && npm run test:run && npm run knip",
+    "cli": "node ./dist/cli.cjs",
     "dev": "tsup --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

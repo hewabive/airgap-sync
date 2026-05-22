@@ -7,6 +7,8 @@ documented before it becomes code.
 
 ```bash
 npm ci
+npm run build
+npm run cli
 npm run check
 ```
 

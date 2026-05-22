@@ -4,7 +4,13 @@
 
 ```bash
 npm ci
+npm run build
+npm run cli
 ```
+
+`npm run cli` runs `dist/cli.cjs` from the source checkout. The `airgap-sync`
+binary name is available automatically only after the package is installed as a
+dependency or installed globally.
 
 ## Checks
 

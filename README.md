@@ -152,6 +152,8 @@ Setup:
 
 ```bash
 npm ci
+npm run build
+npm run cli
 npm run check
 ```
 
@@ -159,6 +161,7 @@ Useful commands:
 
 ```bash
 npm run build       # Type-check and build dist/
+npm run cli         # Run the built CLI from this source checkout
 npm test            # Run tests
 npm run lint        # Run ESLint
 npm run format      # Format source and docs
