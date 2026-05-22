@@ -36,6 +36,10 @@ interface FetchEntry {
   targetPath: string;
 }
 
+function redactGitArg(arg: string): string {
+  return arg.startsWith('http.extraHeader=') ? 'http.extraHeader=<redacted>' : arg;
+}
+
 export async function runGitCommand(invocation: GitCommandInvocation): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn('git', invocation.args, {
@@ -56,7 +60,10 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<v
 
       const message = Buffer.concat(stderr).toString('utf8').trim();
       reject(
-        new Error(message || `git ${invocation.args.join(' ')} exited with code ${String(code)}`)
+        new Error(
+          message ||
+            `git ${invocation.args.map(redactGitArg).join(' ')} exited with code ${String(code)}`
+        )
       );
     });
   });

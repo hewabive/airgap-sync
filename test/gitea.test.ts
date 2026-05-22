@@ -52,6 +52,30 @@ describe('HttpGiteaClient', () => {
     expect(firstCall?.[1]?.signal).toBeDefined();
   });
 
+  it('reads the authenticated user login', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ login: 'maxim' }), {
+        status: 200,
+      })
+    );
+    const client = new HttpGiteaClient('http://gitea.local/', {
+      authToken: 'secret',
+    });
+
+    await expect(client.currentUserLogin()).resolves.toBe('maxim');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall?.[0]).toBe('http://gitea.local/api/v1/user');
+    expect(firstCall?.[1]).toMatchObject({
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'token secret',
+      },
+      method: 'GET',
+    });
+  });
+
   it('surfaces Gitea JSON error messages in provision reports', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ message: 'repo lookup failed' }), {

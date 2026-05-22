@@ -240,6 +240,7 @@ to a later offline apply command.
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --dry-run
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --mirrors-dir ./git-mirrors
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
 ```
 
 Reads `git-sources.json` and pushes local bare mirrors to Gitea with
@@ -247,6 +248,9 @@ Reads `git-sources.json` and pushes local bare mirrors to Gitea with
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`.
 The target repositories must already exist unless the Gitea instance is configured to
 create repositories on push.
+
+When `--token` or `GITEA_TOKEN` is set, the command uses that token for Git HTTP
+push authentication instead of relying on an interactive credential helper.
 
 The command writes `git-apply-report.json`, including generated `git config --global
 url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
@@ -308,6 +312,9 @@ Supported options:
 
 Prefer the `GITEA_TOKEN` environment variable over `--gitea-token` so the token
 does not appear in shell history or process listings.
+
+The Gitea token is used for both API repository provisioning and Git HTTP mirror
+push authentication.
 
 Git target paths preserve source owner/repository names by default. For example,
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`, so

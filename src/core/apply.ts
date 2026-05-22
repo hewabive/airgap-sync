@@ -9,7 +9,7 @@ import {
   writeGiteaRepositoryProvisionReport,
   writePublishReport,
 } from './bundle.js';
-import { applyGitSources } from './git-apply.js';
+import { applyGitSources, type GitHttpAuth } from './git-apply.js';
 import { configureGitRewrites } from './git-config.js';
 import { type GitCommandRunner } from './git-fetch.js';
 import { provisionGiteaRepositories, type GiteaClient } from './gitea.js';
@@ -29,6 +29,7 @@ export interface ApplyBundleOptions {
   distTagConcurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
+  gitAuth?: GitHttpAuth;
   giteaBaseUrl: string;
   giteaClient: GiteaClient;
   mirrorsDir?: string;
@@ -116,6 +117,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     client: options.giteaClient,
     dryRun,
     generatedAt,
+    ...(options.gitAuth ? { gitAuth: options.gitAuth } : {}),
     giteaBaseUrl: options.giteaBaseUrl,
     manifest: gitSources,
     private: options.private ?? true,

@@ -23,6 +23,11 @@ export interface GiteaClient {
   repositoryExists(owner: string, name: string): Promise<boolean>;
 }
 
+interface GiteaCurrentUser {
+  login?: unknown;
+  username?: unknown;
+}
+
 export interface HttpGiteaClientOptions {
   authToken: string;
   timeoutMs?: number;
@@ -182,6 +187,21 @@ export class HttpGiteaClient implements GiteaClient {
       method: 'POST',
       validStatuses: new Set([201]),
     });
+  }
+
+  async currentUserLogin(): Promise<string> {
+    const response = await this.#request('/user', {
+      method: 'GET',
+      validStatuses: new Set([200]),
+    });
+    const data = (await responseData(response)) as GiteaCurrentUser;
+    const login = data.login ?? data.username;
+
+    if (typeof login !== 'string' || login.length === 0) {
+      throw new Error('Gitea API did not return the current user login');
+    }
+
+    return login;
   }
 }
 

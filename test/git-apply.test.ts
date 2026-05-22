@@ -147,6 +147,49 @@ describe('applyGitSources', () => {
     });
   });
 
+  it('passes Gitea token auth to Git push without changing report URLs', async () => {
+    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(sourcePath);
+    const calls: GitCommandInvocation[] = [];
+    const authHeader = `Authorization: Basic ${Buffer.from('maxim:secret').toString('base64')}`;
+
+    const report = await applyGitSources({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      gitAuth: {
+        password: 'secret',
+        username: 'maxim',
+      },
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
+      runner: (invocation) => {
+        calls.push(invocation);
+        return Promise.resolve();
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        args: [
+          '-c',
+          `safe.directory=${sourcePath}`,
+          '-c',
+          `http.extraHeader=${authHeader}`,
+          '-C',
+          sourcePath,
+          'push',
+          '--mirror',
+          'http://gitea.local/owner/repo.git',
+        ],
+      },
+    ]);
+    expect(report).toMatchObject({
+      errors: [],
+      pushed: 1,
+    });
+    expect(report.errors).toEqual([]);
+  });
+
   it('records push failures', async () => {
     const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
     await fs.ensureDir(sourcePath);

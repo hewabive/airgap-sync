@@ -159,7 +159,7 @@ The offline apply step should:
 - map source Git repositories to the closed-network Gitea instance;
 - preserve upstream owner/repository paths when possible;
 - create missing Gitea owners or repositories;
-- push local bare mirrors into Gitea;
+- push local bare mirrors into Gitea using the provided Gitea token;
 - generate install configuration for consumer machines.
 
 By default `apply` reports the Git rewrite rules without changing global Git config.
@@ -220,7 +220,7 @@ airgap-sync git fetch ./airgap-bundle
 # Offline
 airgap-sync publish ./airgap-bundle --registry http://verdaccio.local:4873
 airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
-airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
 airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global
 ```
 

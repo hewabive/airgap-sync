@@ -236,6 +236,7 @@ interface GitFetchOptions {
 interface GitApplyOptions {
   dryRun?: boolean;
   gitea: string;
+  token?: string;
   mirrorsDir?: string;
 }
 
@@ -1323,14 +1324,24 @@ gitCommand
   .description('Push local bare mirrors into Gitea and report Git rewrite rules')
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .option('--token <token>', 'Gitea API token for Git push auth, defaults to GITEA_TOKEN')
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
     try {
       const manifest = await readGitSourcesManifest(bundle);
+      const token = options.token ?? process.env.GITEA_TOKEN;
+      const httpClient =
+        options.dryRun === true || !token
+          ? undefined
+          : new HttpGiteaClient(options.gitea, { authToken: token });
+      const gitAuth = httpClient
+        ? { password: token ?? '', username: await httpClient.currentUserLogin() }
+        : undefined;
       const report = await applyGitSources({
         bundleDir: bundle,
         dryRun: options.dryRun === true,
+        ...(gitAuth ? { gitAuth } : {}),
         giteaBaseUrl: options.gitea,
         manifest,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
@@ -1440,15 +1451,20 @@ addNpmPublishOptions(
         return;
       }
 
-      const client =
+      const httpClient =
         options.dryRun === true
-          ? noopGiteaClient
+          ? undefined
           : new HttpGiteaClient(options.gitea, { authToken: token ?? '' });
+      const client = httpClient ?? noopGiteaClient;
+      const gitAuth = httpClient
+        ? { password: token ?? '', username: await httpClient.currentUserLogin() }
+        : undefined;
       const report = await applyBundle({
         bundleDir: bundle,
         configureGitGlobal: options.configureGitGlobal === true,
         distTagConcurrency: options.distTagConcurrency,
         dryRun: options.dryRun === true,
+        ...(gitAuth ? { gitAuth } : {}),
         giteaBaseUrl: options.gitea,
         giteaClient: client,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),

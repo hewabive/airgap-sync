@@ -35,8 +35,9 @@ variants, performance tuning, and operator ergonomics.
 
 Current limitations:
 
-- Source registry and Git host authentication is still explicit; there is no automatic
-  credential discovery yet.
+- Source registry and upstream Git host authentication is still explicit; there is no
+  automatic credential discovery yet. Closed-network Gitea authentication uses the
+  provided token for both repository creation and mirror push.
 - Verification proves package-manager installs for configured Git targets, but it does
   not yet enforce a network-deny sandbox around the process. Use
   `verify install --ignore-scripts` when install scripts should not execute during

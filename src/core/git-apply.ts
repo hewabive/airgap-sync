@@ -15,9 +15,15 @@ export interface ApplyGitSourcesOptions {
   dryRun?: boolean;
   giteaBaseUrl: string;
   generatedAt?: string;
+  gitAuth?: GitHttpAuth;
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
   runner?: GitCommandRunner;
+}
+
+export interface GitHttpAuth {
+  password: string;
+  username: string;
 }
 
 function quoteGitConfigPart(value: string): string {
@@ -54,6 +60,25 @@ function sourcePath(source: GitSource, options: ApplyGitSourcesOptions): string 
   });
 }
 
+function gitHttpAuthHeader(auth: GitHttpAuth): string {
+  return `Authorization: Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString(
+    'base64'
+  )}`;
+}
+
+function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): string[] {
+  return [
+    '-c',
+    `safe.directory=${mirrorPath}`,
+    ...(auth ? ['-c', `http.extraHeader=${gitHttpAuthHeader(auth)}`] : []),
+    '-C',
+    mirrorPath,
+    'push',
+    '--mirror',
+    targetUrl,
+  ];
+}
+
 async function applyRepository(
   source: GitSource,
   options: ApplyGitSourcesOptions,
@@ -73,7 +98,7 @@ async function applyRepository(
 
   try {
     await runner({
-      args: ['-c', `safe.directory=${mirrorPath}`, '-C', mirrorPath, 'push', '--mirror', targetUrl],
+      args: pushArgs(mirrorPath, targetUrl, options.gitAuth),
     });
     return {
       repository: source.id,
