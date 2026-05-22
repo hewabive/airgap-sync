@@ -175,16 +175,8 @@ function normalizePromptBoolean(
 function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   const defaults = createDefaultWorkspaceConfig().defaults;
   const input = isRecord(value) ? value : {};
-  const download = isRecord(input.download)
-    ? input.download
-    : isRecord(input.collect)
-      ? input.collect
-      : {};
-  const publish = isRecord(input.publish)
-    ? input.publish
-    : isRecord(input.apply)
-      ? input.apply
-      : {};
+  const download = isRecord(input.download) ? input.download : {};
+  const publish = isRecord(input.publish) ? input.publish : {};
   const verifyInstall = isRecord(input.verifyInstall) ? input.verifyInstall : {};
 
   return {
