@@ -642,144 +642,138 @@ export async function publishBundle(
   });
   timings.publishMs = elapsedMs(publishStart);
 
-  if (errors.length === 0) {
-    const distTagsStart = performance.now();
-    const distTagConcurrency = normalizeConcurrency(
-      options.distTagConcurrency,
-      defaultDistTagConcurrency
-    );
-    let tagProgress = 0;
-    options.onProgress?.({
-      current: tagProgress,
-      phase: 'dist-tags',
-      status: 'start',
-      total: distTags.requirements.length,
-    });
+  const distTagsStart = performance.now();
+  const distTagConcurrency = normalizeConcurrency(
+    options.distTagConcurrency,
+    defaultDistTagConcurrency
+  );
+  let tagProgress = 0;
+  options.onProgress?.({
+    current: tagProgress,
+    phase: 'dist-tags',
+    status: 'start',
+    total: distTags.requirements.length,
+  });
 
-    async function restoreDistTag(requirement: TagRequirement): Promise<DistTagResult> {
-      if (currentDistTags.get(requirement.name)?.[requirement.tag] === requirement.version) {
-        tagProgress++;
-        options.onProgress?.({
-          current: tagProgress,
-          package: packageId(requirement),
-          phase: 'dist-tags',
-          status: 'skipped',
-          tag: requirement.tag,
-          total: distTags.requirements.length,
-        });
-        return {
-          package: packageId(requirement),
-          status: 'skipped',
-          tag: requirement.tag,
-        };
-      }
-
-      try {
-        await npmDistTagAdd(requirement, options.registryUrl);
-        const packageTags = currentDistTags.get(requirement.name) ?? {};
-        packageTags[requirement.tag] = requirement.version;
-        currentDistTags.set(requirement.name, packageTags);
-        tagProgress++;
-        options.onProgress?.({
-          current: tagProgress,
-          package: packageId(requirement),
-          phase: 'dist-tags',
-          status: 'tagged',
-          tag: requirement.tag,
-          total: distTags.requirements.length,
-        });
-        return {
-          package: packageId(requirement),
-          status: 'tagged',
-          tag: requirement.tag,
-        };
-      } catch (error) {
-        tagProgress++;
-        options.onProgress?.({
-          current: tagProgress,
-          package: packageId(requirement),
-          phase: 'dist-tags',
-          status: 'error',
-          tag: requirement.tag,
-          total: distTags.requirements.length,
-        });
-        return {
-          error: errorSummary(error),
-          package: packageId(requirement),
-          status: 'error',
-          tag: requirement.tag,
-        };
-      }
+  async function restoreDistTag(requirement: TagRequirement): Promise<DistTagResult> {
+    if (currentDistTags.get(requirement.name)?.[requirement.tag] === requirement.version) {
+      tagProgress++;
+      options.onProgress?.({
+        current: tagProgress,
+        package: packageId(requirement),
+        phase: 'dist-tags',
+        status: 'skipped',
+        tag: requirement.tag,
+        total: distTags.requirements.length,
+      });
+      return {
+        package: packageId(requirement),
+        status: 'skipped',
+        tag: requirement.tag,
+      };
     }
 
-    const distTagResultGroups = await mapWithConcurrency(
-      groupByPackageName(distTags.requirements),
-      distTagConcurrency,
-      async (group) => {
-        const results: DistTagResult[] = [];
-        for (const requirement of group) {
-          results.push(await restoreDistTag(requirement));
-        }
-        return results;
-      }
-    );
-    for (const result of distTagResultGroups.flat()) {
-      if (result.status === 'tagged' || result.status === 'skipped') {
-        restoredTags++;
-      } else {
-        errors.push({
-          action: 'dist-tag',
-          package: result.package,
-          status: 'error',
-          tag: result.tag,
-          error: result.error ?? 'Unknown error',
-        });
-      }
+    try {
+      await npmDistTagAdd(requirement, options.registryUrl);
+      const packageTags = currentDistTags.get(requirement.name) ?? {};
+      packageTags[requirement.tag] = requirement.version;
+      currentDistTags.set(requirement.name, packageTags);
+      tagProgress++;
+      options.onProgress?.({
+        current: tagProgress,
+        package: packageId(requirement),
+        phase: 'dist-tags',
+        status: 'tagged',
+        tag: requirement.tag,
+        total: distTags.requirements.length,
+      });
+      return {
+        package: packageId(requirement),
+        status: 'tagged',
+        tag: requirement.tag,
+      };
+    } catch (error) {
+      tagProgress++;
+      options.onProgress?.({
+        current: tagProgress,
+        package: packageId(requirement),
+        phase: 'dist-tags',
+        status: 'error',
+        tag: requirement.tag,
+        total: distTags.requirements.length,
+      });
+      return {
+        error: errorSummary(error),
+        package: packageId(requirement),
+        status: 'error',
+        tag: requirement.tag,
+      };
     }
-    options.onProgress?.({
-      current: tagProgress,
-      phase: 'dist-tags',
-      status: 'done',
-      total: distTags.requirements.length,
-    });
-    timings.distTagsMs = elapsedMs(distTagsStart);
-
-    const cleanupStart = performance.now();
-    let cleanupProgress = 0;
-    const cleanupTotal = publishedPackageNames.size;
-    options.onProgress?.({
-      current: cleanupProgress,
-      phase: 'cleanup',
-      status: 'start',
-      total: cleanupTotal,
-    });
-    await mapWithConcurrency(
-      [...publishedPackageNames],
-      distTagConcurrency,
-      async (packageName) => {
-        try {
-          await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
-        } catch {
-          // The temp tag may already be absent if the package existed before this run.
-        }
-        cleanupProgress++;
-        options.onProgress?.({
-          current: cleanupProgress,
-          package: packageName,
-          phase: 'cleanup',
-          status: 'progress',
-          total: cleanupTotal,
-        });
-      }
-    );
-    options.onProgress?.({
-      current: cleanupProgress,
-      phase: 'cleanup',
-      status: 'done',
-      total: cleanupTotal,
-    });
-    timings.cleanupMs = elapsedMs(cleanupStart);
   }
+
+  const distTagResultGroups = await mapWithConcurrency(
+    groupByPackageName(distTags.requirements),
+    distTagConcurrency,
+    async (group) => {
+      const results: DistTagResult[] = [];
+      for (const requirement of group) {
+        results.push(await restoreDistTag(requirement));
+      }
+      return results;
+    }
+  );
+  for (const result of distTagResultGroups.flat()) {
+    if (result.status === 'tagged' || result.status === 'skipped') {
+      restoredTags++;
+    } else {
+      errors.push({
+        action: 'dist-tag',
+        package: result.package,
+        status: 'error',
+        tag: result.tag,
+        error: result.error ?? 'Unknown error',
+      });
+    }
+  }
+  options.onProgress?.({
+    current: tagProgress,
+    phase: 'dist-tags',
+    status: 'done',
+    total: distTags.requirements.length,
+  });
+  timings.distTagsMs = elapsedMs(distTagsStart);
+
+  const cleanupStart = performance.now();
+  let cleanupProgress = 0;
+  const cleanupTotal = publishedPackageNames.size;
+  options.onProgress?.({
+    current: cleanupProgress,
+    phase: 'cleanup',
+    status: 'start',
+    total: cleanupTotal,
+  });
+  await mapWithConcurrency([...publishedPackageNames], distTagConcurrency, async (packageName) => {
+    try {
+      await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
+    } catch {
+      // The temp tag may already be absent if the package existed before this run.
+    }
+    cleanupProgress++;
+    options.onProgress?.({
+      current: cleanupProgress,
+      package: packageName,
+      phase: 'cleanup',
+      status: 'progress',
+      total: cleanupTotal,
+    });
+  });
+  options.onProgress?.({
+    current: cleanupProgress,
+    phase: 'cleanup',
+    status: 'done',
+    total: cleanupTotal,
+  });
+  timings.cleanupMs = elapsedMs(cleanupStart);
 
   timings.totalMs = elapsedMs(totalStart);
   return {

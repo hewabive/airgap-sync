@@ -115,6 +115,14 @@ describe('parseDependencySpec', () => {
       specifier: 'latest',
       type: 'tag',
     });
+
+    expect(parseDependencySpec('node-fetch', 'cjs', 'verdaccio-audit@13.0.1')).toEqual({
+      name: 'node-fetch',
+      raw: 'node-fetch@cjs',
+      requiredBy: 'verdaccio-audit@13.0.1',
+      specifier: 'cjs',
+      type: 'tag',
+    });
   });
 
   it('normalizes npm exact version specs with a leading equals sign', () => {

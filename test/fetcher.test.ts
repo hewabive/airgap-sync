@@ -212,6 +212,95 @@ describe('fetchSeedBundle', () => {
     expect(tarballMocks.readPackageManifest).not.toHaveBeenCalled();
   });
 
+  it('records non-latest dependency tag requirements', async () => {
+    const registryWithTaggedDependency: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            'dist-tags': {
+              latest: '1.0.0',
+            },
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+                dependencies: {
+                  'node-fetch': 'cjs',
+                },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('node-fetch');
+        return Promise.resolve({
+          name: 'node-fetch',
+          'dist-tags': {
+            cjs: '2.6.7',
+            latest: '3.3.2',
+          },
+          versions: {
+            '2.6.7': {
+              name: 'node-fetch',
+              version: '2.6.7',
+              dist: {
+                tarball: 'https://registry.example/node-fetch/-/node-fetch-2.6.7.tgz',
+              },
+            },
+            '3.3.2': {
+              name: 'node-fetch',
+              version: '3.3.2',
+              dist: {
+                tarball: 'https://registry.example/node-fetch/-/node-fetch-3.3.2.tgz',
+              },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithTaggedDependency,
+      requirements: [
+        requirement({
+          raw: 'demo@latest',
+          specifier: 'latest',
+          type: 'tag',
+        }),
+      ],
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'node-fetch@2.6.7',
+      'node-fetch@3.3.2',
+    ]);
+    expect(result.tagRequirements).toEqual([
+      {
+        name: 'demo',
+        requiredBy: 'root',
+        tag: 'latest',
+        version: '1.0.0',
+      },
+      {
+        name: 'node-fetch',
+        requiredBy: 'demo@1.0.0',
+        tag: 'cjs',
+        version: '2.6.7',
+      },
+      {
+        name: 'node-fetch',
+        requiredBy: 'airgap-sync:publish-latest',
+        tag: 'latest',
+        version: '3.3.2',
+      },
+    ]);
+  });
+
   it('resolves independent root requirements concurrently', async () => {
     let inFlight = 0;
     let maxInFlight = 0;
