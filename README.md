@@ -145,7 +145,7 @@ airgap-sync apply ./airgap-bundle \
 Requirements:
 
 - Node.js 22 or newer
-- pnpm 10 or newer
+- pnpm 11 or newer
 
 Setup:
 

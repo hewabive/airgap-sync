@@ -11,3 +11,4 @@
 - Added Verdaccio publish with dist-tag restoration and skip-existing checks.
 - Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.
 - Added `verify install --ignore-scripts` and documented the tool security model.
+- Moved pnpm build approval settings to `pnpm-workspace.yaml` for pnpm 11.
