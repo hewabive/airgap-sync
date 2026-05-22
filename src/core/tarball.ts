@@ -5,6 +5,7 @@ import * as fs from './fs.js';
 import * as tar from 'tar';
 import type { PackageManifest, ResolvedRootPackage } from '../types.js';
 import { packageFileName } from './files.js';
+import { HttpStatusError, isRetryableFetchError, retry } from './retry.js';
 
 export interface DownloadedTarball {
   file: string;
@@ -34,19 +35,32 @@ export async function downloadResolvedPackage(
 
   await fs.ensureDir(packageDir);
 
-  const response = await fetch(pkg.dist.tarball, {
-    signal: AbortSignal.timeout(60_000),
-  });
+  await retry(
+    async () => {
+      const tarballResponse = await fetch(pkg.dist.tarball, {
+        signal: AbortSignal.timeout(60_000),
+      });
 
-  if (response.status !== 200) {
-    throw new Error(`Tarball download failed with status ${String(response.status)}`);
-  }
+      if (tarballResponse.status !== 200) {
+        throw new HttpStatusError(
+          `Tarball download failed with status ${String(tarballResponse.status)}`,
+          tarballResponse.status
+        );
+      }
 
-  if (!response.body) {
-    throw new Error(`Tarball download returned an empty response body: ${pkg.dist.tarball}`);
-  }
+      if (!tarballResponse.body) {
+        throw new Error(`Tarball download returned an empty response body: ${pkg.dist.tarball}`);
+      }
 
-  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(outputPath));
+      try {
+        await pipeline(Readable.fromWeb(tarballResponse.body), fs.createWriteStream(outputPath));
+      } catch (error) {
+        await fs.remove(outputPath);
+        throw error;
+      }
+    },
+    { isRetryable: isRetryableFetchError }
+  );
 
   return {
     file: path.posix.join('packages', file),

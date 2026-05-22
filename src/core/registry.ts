@@ -1,4 +1,5 @@
 import type { PackageMetadata } from '../types.js';
+import { HttpStatusError, isRetryableFetchError, retry } from './retry.js';
 
 const blockedRegistries = new Set([
   'registry.npmjs.org',
@@ -72,14 +73,24 @@ export class HttpRegistryClient implements RegistryClient {
       headers.Authorization = `Bearer ${this.#authToken}`;
     }
 
-    const response = await fetch(`${this.#registryUrl}/${encodePackageName(name)}`, {
-      headers,
-      signal: AbortSignal.timeout(this.#timeoutMs),
-    });
+    const response = await retry(
+      async () => {
+        const metadataResponse = await fetch(`${this.#registryUrl}/${encodePackageName(name)}`, {
+          headers,
+          signal: AbortSignal.timeout(this.#timeoutMs),
+        });
 
-    if (response.status !== 200) {
-      throw new Error(`Registry metadata request failed with status ${String(response.status)}`);
-    }
+        if (metadataResponse.status !== 200) {
+          throw new HttpStatusError(
+            `Registry metadata request failed with status ${String(metadataResponse.status)}`,
+            metadataResponse.status
+          );
+        }
+
+        return metadataResponse;
+      },
+      { isRetryable: isRetryableFetchError }
+    );
 
     return (await response.json()) as PackageMetadata;
   }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { CachedRegistryClient } from '../src/core/registry.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CachedRegistryClient, HttpRegistryClient } from '../src/core/registry.js';
 import type { PackageMetadata } from '../src/types.js';
 import type { RegistryClient } from '../src/core/registry.js';
 
@@ -71,5 +71,38 @@ describe('CachedRegistryClient', () => {
     await expect(registry.getPackageMetadata('demo')).rejects.toThrow('temporary failure');
     await expect(registry.getPackageMetadata('demo')).resolves.toBe(metadata);
     expect(calls).toBe(2);
+  });
+});
+
+describe('HttpRegistryClient', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  it('retries transient metadata fetch failures', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock
+      .mockResolvedValueOnce(new Response('temporary failure', { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(metadata), { status: 200 }));
+
+    const registry = new HttpRegistryClient('https://registry.example');
+
+    await expect(registry.getPackageMetadata('demo')).resolves.toEqual(metadata);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry missing package metadata', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValue(new Response('missing', { status: 404 }));
+
+    const registry = new HttpRegistryClient('https://registry.example');
+
+    await expect(registry.getPackageMetadata('demo')).rejects.toThrow(
+      'Registry metadata request failed with status 404'
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
