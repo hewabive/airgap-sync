@@ -174,6 +174,8 @@ describe('applyGitSources', () => {
           '-c',
           `safe.directory=${sourcePath}`,
           '-c',
+          'credential.helper=',
+          '-c',
           `http.extraHeader=${authHeader}`,
           '-C',
           sourcePath,
@@ -181,6 +183,10 @@ describe('applyGitSources', () => {
           '--mirror',
           'http://gitea.local/owner/repo.git',
         ],
+        env: {
+          GCM_INTERACTIVE: 'never',
+          GIT_TERMINAL_PROMPT: '0',
+        },
       },
     ]);
     expect(report).toMatchObject({

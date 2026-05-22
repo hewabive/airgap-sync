@@ -7,6 +7,7 @@ import { gitSourceMirrorPath } from './git-targets.js';
 export interface GitCommandInvocation {
   args: string[];
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export type GitCommandRunner = (invocation: GitCommandInvocation) => Promise<void>;
@@ -44,6 +45,7 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<v
   await new Promise<void>((resolve, reject) => {
     const child = spawn('git', invocation.args, {
       cwd: invocation.cwd,
+      env: { ...process.env, ...invocation.env },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     const stderr: Buffer[] = [];

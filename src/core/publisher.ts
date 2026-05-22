@@ -148,17 +148,27 @@ function isAlreadyExistsError(error: unknown): boolean {
 function errorSummary(error: unknown): string {
   const stderr =
     error && typeof error === 'object' && 'stderr' in error ? String(error.stderr).trim() : '';
-  const message = stderr || (error instanceof Error ? error.message : String(error));
-  const lines = message
+  const stdout =
+    error && typeof error === 'object' && 'stdout' in error ? String(error.stdout).trim() : '';
+  const message = error instanceof Error ? error.message : String(error);
+  const lines = [stderr, stdout, message]
+    .filter((part) => part.length > 0)
+    .join('\n')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  return (
+
+  const summary =
     lines.find((line) => /^npm (?:error|ERR!)/u.test(line)) ??
     lines.find((line) => !line.startsWith('npm notice')) ??
     lines.at(-1) ??
-    'Unknown error'
-  );
+    'Unknown error';
+
+  if (summary.includes('E413') || /payload too large/iu.test(summary)) {
+    return `${summary} (target registry rejected the upload as too large; raise Verdaccio max_body_size and any reverse-proxy upload limit)`;
+  }
+
+  return summary;
 }
 
 function currentNpmCliPath(): string | undefined {

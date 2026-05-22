@@ -12,6 +12,9 @@ for debugging individual phases.
 - The transfer bundle directory is on removable media or can be copied to it.
 - The closed network has Verdaccio and Gitea running.
 - Verdaccio is populated only through `npm publish` and `npm dist-tag`.
+- Verdaccio, and any reverse proxy in front of it, allows large package uploads. Large
+  native packages can fail with HTTP `E413` unless Verdaccio `max_body_size` and proxy
+  upload limits are raised.
 - Gitea target repositories either can be created through the Gitea API or already
   exist.
 

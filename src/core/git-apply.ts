@@ -70,13 +70,22 @@ function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): st
   return [
     '-c',
     `safe.directory=${mirrorPath}`,
-    ...(auth ? ['-c', `http.extraHeader=${gitHttpAuthHeader(auth)}`] : []),
+    ...(auth
+      ? ['-c', 'credential.helper=', '-c', `http.extraHeader=${gitHttpAuthHeader(auth)}`]
+      : []),
     '-C',
     mirrorPath,
     'push',
     '--mirror',
     targetUrl,
   ];
+}
+
+function pushEnv(): NodeJS.ProcessEnv {
+  return {
+    GCM_INTERACTIVE: 'never',
+    GIT_TERMINAL_PROMPT: '0',
+  };
 }
 
 async function applyRepository(
@@ -99,6 +108,7 @@ async function applyRepository(
   try {
     await runner({
       args: pushArgs(mirrorPath, targetUrl, options.gitAuth),
+      ...(options.gitAuth ? { env: pushEnv() } : {}),
     });
     return {
       repository: source.id,
