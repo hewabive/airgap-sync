@@ -43,7 +43,7 @@ airgap-sync target list
 Operators who prefer prompts can run:
 
 ```bash
-airgap-sync menu
+airgap-sync
 ```
 
 The menu covers target management, endpoint configuration, online collection, offline
@@ -51,6 +51,9 @@ apply, verification, and bundle info.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
+Keep this file in the workspace root on removable media, next to `repos/` and
+`airgap-bundle/`; it is long-lived workspace state rather than a file inside one
+generated bundle.
 
 ## Online Phase
 

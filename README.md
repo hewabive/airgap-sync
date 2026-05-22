@@ -47,10 +47,11 @@ pnpm exec airgap-sync init
 After a global install or `pnpm dlx airgap-sync`, the same commands can be run as
 `airgap-sync ...`.
 
-For guided operation, start the interactive menu:
+For guided operation, start the interactive menu. With no command, `airgap-sync`
+opens the menu by default; `airgap-sync -h` still prints the command reference.
 
 ```bash
-pnpm exec airgap-sync menu
+pnpm exec airgap-sync
 ```
 
 ```bash
@@ -102,6 +103,10 @@ airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 cache/                    Reserved for local caches
 reports/                  Reserved for operator-facing reports
 ```
+
+`airgap-sync.json` belongs next to `repos/` and `airgap-bundle/` on the removable
+media. It is the workspace configuration for repeated syncs, not part of a single
+transfer bundle.
 
 The lower-level commands remain available for debugging and one-off use:
 

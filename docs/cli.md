@@ -40,6 +40,7 @@ explicit root package specs during `collect`.
 ## menu
 
 ```bash
+airgap-sync
 airgap-sync menu
 airgap-sync menu /media/USB/airgap-sync
 ```
@@ -47,6 +48,9 @@ airgap-sync menu /media/USB/airgap-sync
 Opens an interactive prompt menu for common workspace actions: list/add/remove targets,
 configure source and closed-network endpoints, collect updates, verify a bundle, apply
 the bundle, run install verification, and show bundle information.
+
+Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
+specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry` and `giteaUrl` in `airgap-sync.json` when the operator enters them, but
