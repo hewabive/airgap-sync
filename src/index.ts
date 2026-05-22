@@ -77,8 +77,19 @@ export {
 
 export type { BundleDocuments, BundleDocumentsOptions, FetchReportOptions } from './core/bundle.js';
 export type { ApplyBundleOptions } from './core/apply.js';
-export type { CollectBundleOptions } from './core/collect.js';
-export type { FetchSeedBundleOptions, FetchSeedBundleResult } from './core/fetcher.js';
+export type {
+  CollectBundleOptions,
+  CollectProgressEvent,
+  CollectProgressPhase,
+  CollectProgressStatus,
+} from './core/collect.js';
+export type {
+  FetchProgressEvent,
+  FetchProgressPhase,
+  FetchProgressStatus,
+  FetchSeedBundleOptions,
+  FetchSeedBundleResult,
+} from './core/fetcher.js';
 export type { ApplyGitSourcesOptions } from './core/git-apply.js';
 export type { ConfigureGitRewritesOptions } from './core/git-config.js';
 export type {
@@ -88,6 +99,8 @@ export type {
 } from './core/gitea.js';
 export type {
   FetchGitSourcesOptions,
+  GitFetchProgressEvent,
+  GitFetchProgressStatus,
   GitCommandInvocation,
   GitCommandRunner,
 } from './core/git-fetch.js';
@@ -113,6 +126,8 @@ export type {
   GitOutputCommandInvocation,
   GitOutputCommandResult,
   GitOutputCommandRunner,
+  RepositoryUpdateProgressEvent,
+  RepositoryUpdateProgressStatus,
   UpdateRepositoriesOptions,
 } from './core/repos.js';
 export type {

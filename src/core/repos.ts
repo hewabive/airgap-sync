@@ -33,8 +33,18 @@ export type GitOutputCommandRunner = (
 export interface UpdateRepositoriesOptions {
   dryRun?: boolean;
   generatedAt?: string;
+  onProgress?: (event: RepositoryUpdateProgressEvent) => void;
   root: string;
   runner?: GitOutputCommandRunner;
+}
+
+export type RepositoryUpdateProgressStatus = 'start' | 'progress' | 'done';
+
+export interface RepositoryUpdateProgressEvent {
+  current: number;
+  repository?: string;
+  status: RepositoryUpdateProgressStatus;
+  total: number;
 }
 
 export async function runGitOutputCommand(
@@ -170,10 +180,26 @@ export async function updateRepositories(
   const runner = options.runner ?? runGitOutputCommand;
   const repositories = await findGitRepositories(root);
   const results: RepositoryUpdateResult[] = [];
+  options.onProgress?.({
+    current: 0,
+    status: 'start',
+    total: repositories.length,
+  });
 
-  for (const repository of repositories) {
+  for (const [index, repository] of repositories.entries()) {
     results.push(await updateRepository(repository, options.dryRun === true, runner));
+    options.onProgress?.({
+      current: index + 1,
+      repository,
+      status: 'progress',
+      total: repositories.length,
+    });
   }
+  options.onProgress?.({
+    current: results.length,
+    status: 'done',
+    total: repositories.length,
+  });
 
   const errors = results.filter(
     (result) =>

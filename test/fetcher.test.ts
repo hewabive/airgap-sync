@@ -89,12 +89,20 @@ describe('fetchSeedBundle', () => {
   });
 
   it('adds the upstream latest target for packages resolved by exact version', async () => {
+    const progress: string[] = [];
     const result = await fetchSeedBundle({
+      onProgress(event) {
+        progress.push(`${event.phase}:${event.status}`);
+      },
       outputDir: '/virtual/seed',
       registry,
       requirements: [requirement({})],
     });
 
+    expect(progress).toContain('resolve:start');
+    expect(progress).toContain('resolve:progress');
+    expect(progress).toContain('download:progress');
+    expect(progress.at(-1)).toBe('resolve:done');
     expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
       'demo@1.0.0',
       'demo@2.0.0',

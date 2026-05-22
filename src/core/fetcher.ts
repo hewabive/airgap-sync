@@ -21,11 +21,23 @@ export interface FetchSeedBundleOptions {
   concurrency?: number;
   download?: boolean;
   includePeer?: boolean;
+  onProgress?: (event: FetchProgressEvent) => void;
   outputDir: string;
   registry: RegistryClient;
   gitRequirements?: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported?: UnsupportedRootPackageRequirement[];
+}
+
+export type FetchProgressPhase = 'resolve' | 'download' | 'scan';
+export type FetchProgressStatus = 'start' | 'progress' | 'done' | 'error';
+
+export interface FetchProgressEvent {
+  current?: number;
+  package?: string;
+  phase: FetchProgressPhase;
+  queue?: number;
+  status: FetchProgressStatus;
 }
 
 export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
@@ -169,6 +181,13 @@ export async function fetchSeedBundle(
   let drainResolved = false;
   let resolveDrain: (() => void) | undefined;
 
+  options.onProgress?.({
+    current: 0,
+    phase: 'resolve',
+    queue: queue.length,
+    status: 'start',
+  });
+
   function maybeResolveDrain(): void {
     if (!drainResolved && activeWorkers === 0 && queue.length === 0) {
       drainResolved = true;
@@ -235,6 +254,13 @@ export async function fetchSeedBundle(
 
     resolvedById.set(id, resolved);
     result.resolved.push(resolved);
+    options.onProgress?.({
+      current: result.resolved.length,
+      package: id,
+      phase: 'resolve',
+      queue: queue.length,
+      status: 'progress',
+    });
 
     let manifest: PackageManifest;
 
@@ -247,6 +273,13 @@ export async function fetchSeedBundle(
       } else {
         result.downloaded++;
       }
+      options.onProgress?.({
+        current: result.downloaded + result.skipped,
+        package: id,
+        phase: 'download',
+        queue: queue.length,
+        status: 'progress',
+      });
       const manifestStart = performance.now();
       manifest = await readPackageManifest(downloaded.path);
       timings.manifestReadMs += elapsedMs(manifestStart);
@@ -274,6 +307,13 @@ export async function fetchSeedBundle(
         const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
         if (gitRequirement) {
           result.gitRequirements.push(gitRequirement);
+          options.onProgress?.({
+            current: result.gitRequirements.length,
+            package: requiredBy,
+            phase: 'scan',
+            queue: queue.length,
+            status: 'progress',
+          });
           continue;
         }
         result.unsupported.push(parsed);
@@ -289,6 +329,14 @@ export async function fetchSeedBundle(
     const resolution = await resolveRootRequirements([requirement], options.registry);
     timings.resolveMs += elapsedMs(resolveStart);
     result.errors.push(...resolution.errors);
+    if (resolution.errors.length > 0) {
+      options.onProgress?.({
+        package: requirement.raw,
+        phase: 'resolve',
+        queue: queue.length,
+        status: 'error',
+      });
+    }
 
     for (const tagRequirement of resolution.tagRequirements) {
       const id = tagRequirementId(tagRequirement);
@@ -312,5 +360,11 @@ export async function fetchSeedBundle(
   result.unsupported.sort(compareUnsupportedRequirement);
 
   timings.totalMs = elapsedMs(totalStart);
+  options.onProgress?.({
+    current: result.resolved.length,
+    phase: 'resolve',
+    queue: 0,
+    status: 'done',
+  });
   return result;
 }

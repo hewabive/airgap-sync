@@ -143,9 +143,13 @@ describe('collectBundle', () => {
 
   it('updates repositories, resolves packages, creates git sources, and plans git fetches', async () => {
     const gitCalls: GitOutputCommandInvocation[] = [];
+    const progress: string[] = [];
     const report = await collectBundle({
       dryRun: true,
       generatedAt: '2026-05-21T00:00:00.000Z',
+      onProgress(event) {
+        progress.push(`${event.phase}:${event.status}`);
+      },
       outputDir: path.join(tempDir, 'airgap-bundle'),
       registry: {
         getPackageMetadata(name) {
@@ -167,6 +171,11 @@ describe('collectBundle', () => {
       },
     });
 
+    expect(progress).toContain('repository-update:start');
+    expect(progress).toContain('repository-update:done');
+    expect(progress).toContain('manifest-scan:done');
+    expect(progress).toContain('npm-fetch:start');
+    expect(progress).toContain('npm-fetch:done');
     expect(gitCalls).toEqual([
       {
         args: ['status', '--porcelain'],

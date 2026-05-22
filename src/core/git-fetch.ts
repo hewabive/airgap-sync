@@ -17,7 +17,17 @@ export interface FetchGitSourcesOptions {
   generatedAt?: string;
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
+  onProgress?: (event: GitFetchProgressEvent) => void;
   runner?: GitCommandRunner;
+}
+
+export type GitFetchProgressStatus = 'start' | 'progress' | 'done';
+
+export interface GitFetchProgressEvent {
+  current: number;
+  repository?: string;
+  status: GitFetchProgressStatus;
+  total: number;
 }
 
 interface FetchEntry {
@@ -98,9 +108,15 @@ async function fetchEntries(options: {
   entries: FetchEntry[];
   generatedAt?: string;
   mirrorsDir: string;
+  onProgress?: (event: GitFetchProgressEvent) => void;
   runner?: GitCommandRunner;
 }): Promise<GitFetchReport> {
   const actions: GitFetchActionResult[] = [];
+  options.onProgress?.({
+    current: 0,
+    status: 'start',
+    total: options.entries.length,
+  });
 
   if (options.dryRun) {
     for (const entry of options.entries) {
@@ -113,10 +129,21 @@ async function fetchEntries(options: {
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    for (const entry of options.entries) {
+    for (const [index, entry] of options.entries.entries()) {
       actions.push(await fetchEntry(entry, runner));
+      options.onProgress?.({
+        current: index + 1,
+        repository: entry.id,
+        status: 'progress',
+        total: options.entries.length,
+      });
     }
   }
+  options.onProgress?.({
+    current: actions.length,
+    status: 'done',
+    total: options.entries.length,
+  });
 
   const errors = actions.filter((action) => action.status === 'error');
 
@@ -151,6 +178,7 @@ export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<
     entries,
     mirrorsDir,
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
+    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     ...(options.runner ? { runner: options.runner } : {}),
   });
 }

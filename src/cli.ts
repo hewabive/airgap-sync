@@ -53,6 +53,7 @@ import {
 } from './index.js';
 import type { GiteaClient } from './index.js';
 import type {
+  CollectProgressEvent,
   FetchSeedBundleResult,
   PublishProgressEvent,
   PublishProgressPhase,
@@ -249,6 +250,73 @@ const publishPhaseLabels: Record<PublishProgressPhase, string> = {
   publish: 'publish packages',
   validate: 'validate bundle',
 };
+
+const collectPhaseLabels: Record<CollectProgressEvent['phase'], string> = {
+  'bundle-write': 'write bundle',
+  'git-fetch': 'fetch git mirrors',
+  'git-manifest-scan': 'scan git manifests',
+  'lockfile-scan': 'scan lockfiles',
+  'manifest-scan': 'scan package manifests',
+  'npm-fetch': 'resolve/download npm',
+  'repository-update': 'update repositories',
+};
+
+function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
+  const lastLogged = new Map<string, number>();
+
+  return (event) => {
+    const label = collectPhaseLabels[event.phase];
+    const prefix =
+      event.iteration === undefined ? '[collect]' : `[collect:${String(event.iteration)}]`;
+    const key = `${String(event.iteration ?? 0)}:${event.phase}`;
+
+    if (event.status === 'start') {
+      const detail = event.detail ? ` ${event.detail}` : '';
+      const total = event.total === undefined ? '' : ` (${String(event.total)})`;
+      console.error(`${prefix} ${label}: started${total}${detail}`);
+      return;
+    }
+
+    if (event.status === 'done') {
+      const count =
+        event.current === undefined
+          ? ''
+          : event.total === undefined
+            ? ` (${String(event.current)})`
+            : ` (${String(event.current)}/${String(event.total)})`;
+      console.error(`${prefix} ${label}: done${count}`);
+      return;
+    }
+
+    if (event.status === 'error') {
+      const detail = event.detail ? ` ${event.detail}` : '';
+      console.error(`${prefix} ${label}: error${detail}`);
+      return;
+    }
+
+    if (event.current === undefined) {
+      return;
+    }
+
+    const last = lastLogged.get(key) ?? 0;
+    const threshold =
+      event.total && event.total > 0 ? Math.max(1, Math.ceil(event.total / 20)) : 25;
+    const shouldLog =
+      event.current === 1 ||
+      event.current - last >= threshold ||
+      (event.total !== undefined && event.current === event.total);
+
+    if (!shouldLog) {
+      return;
+    }
+
+    lastLogged.set(key, event.current);
+    const total = event.total === undefined ? '' : `/${String(event.total)}`;
+    const queue = event.queue === undefined ? '' : ` queue=${String(event.queue)}`;
+    const detail = event.detail ? ` ${event.detail}` : '';
+    console.error(`${prefix} ${label}: ${String(event.current)}${total}${queue}${detail}`);
+  };
+}
 
 function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
   const lastLogged = new Map<PublishProgressPhase, number>();
@@ -908,6 +976,7 @@ program
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
           initialUnsupported: parsedTargets.unsupported,
+          onProgress: createCollectProgressLogger(),
           outputDir,
           registry,
           registryUrl,
@@ -949,6 +1018,7 @@ program
         concurrency: options.concurrency,
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
+        onProgress: createCollectProgressLogger(),
         outputDir,
         registry,
         registryUrl,

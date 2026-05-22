@@ -21,7 +21,9 @@ import {
   writeGitFetchReport,
 } from './bundle.js';
 import { fetchSeedBundle, type FetchSeedBundleResult } from './fetcher.js';
+import type { FetchProgressEvent } from './fetcher.js';
 import { fetchGitSources, type GitCommandRunner } from './git-fetch.js';
+import type { GitFetchProgressEvent } from './git-fetch.js';
 import { readGitSourceManifestRequirements } from './git-manifests.js';
 import { createGitSourcesManifest, writeGitSourcesManifest } from './git-sources.js';
 import { gitSourceMirrorPath } from './git-targets.js';
@@ -29,6 +31,7 @@ import { readLockfileRequirements } from './lockfiles.js';
 import { readManifestRequirements } from './manifests.js';
 import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
+import type { RepositoryUpdateProgressEvent } from './repos.js';
 
 export interface CollectBundleOptions {
   concurrency?: number;
@@ -41,12 +44,34 @@ export interface CollectBundleOptions {
   initialRequirements?: RootPackageRequirement[];
   initialUnsupported?: UnsupportedRootPackageRequirement[];
   maxIterations?: number;
+  onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
   registry: RegistryClient;
   registryUrl: string;
   root?: string;
   runGitCommand?: GitCommandRunner;
   runGitOutputCommand?: GitOutputCommandRunner;
+}
+
+export type CollectProgressPhase =
+  | 'repository-update'
+  | 'manifest-scan'
+  | 'lockfile-scan'
+  | 'npm-fetch'
+  | 'git-fetch'
+  | 'git-manifest-scan'
+  | 'bundle-write';
+
+export type CollectProgressStatus = 'start' | 'progress' | 'done' | 'error';
+
+export interface CollectProgressEvent {
+  current?: number;
+  detail?: string;
+  iteration?: number;
+  phase: CollectProgressPhase;
+  queue?: number;
+  status: CollectProgressStatus;
+  total?: number;
 }
 
 interface RequirementState {
@@ -211,27 +236,66 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const maxIterations = options.maxIterations ?? 10;
 
   const repositoryUpdateStart = performance.now();
+  options.onProgress?.({
+    phase: 'repository-update',
+    status: 'start',
+  });
   const repositoryUpdate = root
     ? await updateRepositories({
         dryRun,
         generatedAt,
+        onProgress: (event: RepositoryUpdateProgressEvent) => {
+          options.onProgress?.({
+            current: event.current,
+            ...(event.repository ? { detail: event.repository } : {}),
+            phase: 'repository-update',
+            status: event.status,
+            total: event.total,
+          });
+        },
         root,
         ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
       })
     : emptyRepositoryUpdateReport({ dryRun, generatedAt, root: outputDir });
+  if (!root) {
+    options.onProgress?.({
+      current: 0,
+      phase: 'repository-update',
+      status: 'done',
+      total: 0,
+    });
+  }
   timings.repositoryUpdateMs = elapsedMs(repositoryUpdateStart);
   const manifestScanStart = performance.now();
+  options.onProgress?.({
+    phase: 'manifest-scan',
+    status: 'start',
+  });
   const parsedManifest = root
     ? await readManifestRequirements(root, {
         includeDev,
         includePeer,
       })
     : { gitRequirements: [], requirements: [], unsupported: [] };
+  options.onProgress?.({
+    current: parsedManifest.requirements.length + parsedManifest.gitRequirements.length,
+    phase: 'manifest-scan',
+    status: 'done',
+  });
   timings.manifestScanMs = elapsedMs(manifestScanStart);
   const lockfileScanStart = performance.now();
+  options.onProgress?.({
+    phase: 'lockfile-scan',
+    status: 'start',
+  });
   const parsedLockfiles = root
     ? await readLockfileRequirements(root)
     : { gitRequirements: [], requirements: [], unsupported: [] };
+  options.onProgress?.({
+    current: parsedLockfiles.requirements.length + parsedLockfiles.gitRequirements.length,
+    phase: 'lockfile-scan',
+    status: 'done',
+  });
   timings.lockfileScanMs = elapsedMs(lockfileScanStart);
   const state: RequirementState = {
     gitRequirements: [],
@@ -294,6 +358,16 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     dryRun: true,
     generatedAt,
     manifest: gitSources,
+    onProgress: (event: GitFetchProgressEvent) => {
+      options.onProgress?.({
+        current: event.current,
+        ...(event.repository ? { detail: event.repository } : {}),
+        iteration: 0,
+        phase: 'git-fetch',
+        status: event.status,
+        total: event.total,
+      });
+    },
     ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
   });
   timings.gitFetchMs += elapsedMs(initialGitFetchStart);
@@ -302,10 +376,26 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const iterationStart = performance.now();
     const fetchIterationStart = performance.now();
+    options.onProgress?.({
+      detail: `${String(state.requirements.length)} npm requirements`,
+      iteration,
+      phase: 'npm-fetch',
+      status: 'start',
+    });
     resolution = await fetchSeedBundle({
       download: !dryRun,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
+      onProgress: (event: FetchProgressEvent) => {
+        options.onProgress?.({
+          ...(event.current === undefined ? {} : { current: event.current }),
+          ...(event.package ? { detail: event.package } : {}),
+          iteration,
+          phase: 'npm-fetch',
+          ...(event.queue === undefined ? {} : { queue: event.queue }),
+          status: event.status,
+        });
+      },
       outputDir,
       registry: options.registry,
       gitRequirements: state.gitRequirements,
@@ -334,6 +424,16 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       dryRun,
       generatedAt,
       manifest: gitSources,
+      onProgress: (event: GitFetchProgressEvent) => {
+        options.onProgress?.({
+          current: event.current,
+          ...(event.repository ? { detail: event.repository } : {}),
+          iteration,
+          phase: 'git-fetch',
+          status: event.status,
+          total: event.total,
+        });
+      },
       ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
     });
     const gitFetchMs = elapsedMs(gitFetchStart);
@@ -354,6 +454,13 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
 
     if (!dryRun && resolution.errors.length === 0 && gitFetch.errors.length === 0) {
       const gitManifestScanStart = performance.now();
+      options.onProgress?.({
+        current: 0,
+        iteration,
+        phase: 'git-manifest-scan',
+        status: 'start',
+        total: gitSources.sources.length,
+      });
       const scan = await scanGitSourceManifests({
         bundleDir: outputDir,
         includeDev,
@@ -376,6 +483,13 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       addUnique(state.unsupported, seenUnsupported, scan.state.unsupported, unsupportedKey);
       gitManifestScanMs = elapsedMs(gitManifestScanStart);
       timings.gitManifestScanMs += gitManifestScanMs;
+      options.onProgress?.({
+        current: scannedGitSources,
+        iteration,
+        phase: 'git-manifest-scan',
+        status: scan.errors.length > 0 ? 'error' : 'done',
+        total: gitSources.sources.length,
+      });
     }
 
     const addedRequirements = state.requirements.length - beforeRequirementCount;
@@ -444,6 +558,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   if (!dryRun) {
     if (wroteBundle && resolution) {
       const bundleDocumentsStart = performance.now();
+      options.onProgress?.({
+        phase: 'bundle-write',
+        status: 'start',
+      });
       const documents = createBundleDocuments({
         outputDir,
         resolved: resolution.resolved,
@@ -452,6 +570,11 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       });
       await writeBundleDocuments(outputDir, documents);
       timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
+      options.onProgress?.({
+        current: documents.manifest.packages.length,
+        phase: 'bundle-write',
+        status: 'done',
+      });
     }
 
     const reportWriteStart = performance.now();
