@@ -129,6 +129,14 @@ function elapsedMs(start: number): number {
   return Math.round(performance.now() - start);
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.name && error.name !== 'Error' ? `${error.name}: ${error.message}` : error.message;
+  }
+
+  return String(error);
+}
+
 async function manifestFromRegistry(
   pkg: ResolvedRootPackage,
   registry: RegistryClient
@@ -264,72 +272,116 @@ export async function fetchSeedBundle(
 
     let manifest: PackageManifest;
 
-    if (shouldDownload) {
-      const downloadStart = performance.now();
-      const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
-      timings.downloadMs += elapsedMs(downloadStart);
-      if (downloaded.skipped) {
-        result.skipped++;
+    try {
+      if (shouldDownload) {
+        const downloadStart = performance.now();
+        const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
+        timings.downloadMs += elapsedMs(downloadStart);
+        if (downloaded.skipped) {
+          result.skipped++;
+        } else {
+          result.downloaded++;
+        }
+        options.onProgress?.({
+          current: result.downloaded + result.skipped,
+          package: id,
+          phase: 'download',
+          queue: queue.length,
+          status: 'progress',
+        });
+        const manifestStart = performance.now();
+        manifest = await readPackageManifest(downloaded.path);
+        timings.manifestReadMs += elapsedMs(manifestStart);
       } else {
-        result.downloaded++;
+        result.wouldDownload++;
+        const manifestStart = performance.now();
+        manifest = await manifestFromRegistry(resolved, options.registry);
+        timings.manifestReadMs += elapsedMs(manifestStart);
       }
+
+      if (scannedPackages.has(id)) {
+        return;
+      }
+      scannedPackages.add(id);
+
+      const requiredBy = packageId(manifest);
+      const dependencyScanStart = performance.now();
+      const dependencies = dependencySpecsFromManifest(manifest, {
+        includePeer: options.includePeer === true,
+      });
+
+      for (const [name, specifier] of Object.entries(dependencies)) {
+        const parsed = parseDependencySpec(name, specifier, requiredBy);
+        if ('reason' in parsed) {
+          const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
+          if (gitRequirement) {
+            result.gitRequirements.push(gitRequirement);
+            options.onProgress?.({
+              current: result.gitRequirements.length,
+              package: requiredBy,
+              phase: 'scan',
+              queue: queue.length,
+              status: 'progress',
+            });
+            continue;
+          }
+          result.unsupported.push(parsed);
+        } else {
+          enqueueRequirement(parsed);
+        }
+      }
+      timings.dependencyScanMs += elapsedMs(dependencyScanStart);
+    } catch (error) {
+      result.errors.push({
+        name: resolved.name,
+        raw: resolved.raw,
+        reason: errorMessage(error),
+        specifier: resolved.specifier,
+        type: resolved.type,
+      });
       options.onProgress?.({
         current: result.downloaded + result.skipped,
         package: id,
-        phase: 'download',
+        phase: shouldDownload ? 'download' : 'scan',
         queue: queue.length,
-        status: 'progress',
+        status: 'error',
       });
-      const manifestStart = performance.now();
-      manifest = await readPackageManifest(downloaded.path);
-      timings.manifestReadMs += elapsedMs(manifestStart);
-    } else {
-      result.wouldDownload++;
-      const manifestStart = performance.now();
-      manifest = await manifestFromRegistry(resolved, options.registry);
-      timings.manifestReadMs += elapsedMs(manifestStart);
-    }
-
-    if (scannedPackages.has(id)) {
       return;
     }
-    scannedPackages.add(id);
-
-    const requiredBy = packageId(manifest);
-    const dependencyScanStart = performance.now();
-    const dependencies = dependencySpecsFromManifest(manifest, {
-      includePeer: options.includePeer === true,
-    });
-
-    for (const [name, specifier] of Object.entries(dependencies)) {
-      const parsed = parseDependencySpec(name, specifier, requiredBy);
-      if ('reason' in parsed) {
-        const gitRequirement = parseGitDependencySpec(name, specifier, requiredBy);
-        if (gitRequirement) {
-          result.gitRequirements.push(gitRequirement);
-          options.onProgress?.({
-            current: result.gitRequirements.length,
-            package: requiredBy,
-            phase: 'scan',
-            queue: queue.length,
-            status: 'progress',
-          });
-          continue;
-        }
-        result.unsupported.push(parsed);
-      } else {
-        enqueueRequirement(parsed);
-      }
-    }
-    timings.dependencyScanMs += elapsedMs(dependencyScanStart);
   }
 
   async function processRequirement(requirement: RootPackageRequirement): Promise<void> {
-    const resolveStart = performance.now();
-    const resolution = await resolveRootRequirements([requirement], options.registry);
-    timings.resolveMs += elapsedMs(resolveStart);
-    result.errors.push(...resolution.errors);
-    if (resolution.errors.length > 0) {
+    try {
+      const resolveStart = performance.now();
+      const resolution = await resolveRootRequirements([requirement], options.registry);
+      timings.resolveMs += elapsedMs(resolveStart);
+      result.errors.push(...resolution.errors);
+      if (resolution.errors.length > 0) {
+        options.onProgress?.({
+          package: requirement.raw,
+          phase: 'resolve',
+          queue: queue.length,
+          status: 'error',
+        });
+      }
+
+      for (const tagRequirement of resolution.tagRequirements) {
+        const id = tagRequirementId(tagRequirement);
+        if (!tagRequirements.has(id)) {
+          tagRequirements.add(id);
+          result.tagRequirements.push(tagRequirement);
+        }
+      }
+
+      await Promise.all(resolution.resolved.map((resolved) => processResolvedPackage(resolved)));
+    } catch (error) {
+      result.errors.push({
+        name: requirement.name,
+        raw: requirement.raw,
+        reason: errorMessage(error),
+        specifier: requirement.specifier,
+        type: requirement.type,
+      });
       options.onProgress?.({
         package: requirement.raw,
         phase: 'resolve',
@@ -337,16 +389,6 @@ export async function fetchSeedBundle(
         status: 'error',
       });
     }
-
-    for (const tagRequirement of resolution.tagRequirements) {
-      const id = tagRequirementId(tagRequirement);
-      if (!tagRequirements.has(id)) {
-        tagRequirements.add(id);
-        result.tagRequirements.push(tagRequirement);
-      }
-    }
-
-    await Promise.all(resolution.resolved.map((resolved) => processResolvedPackage(resolved)));
   }
 
   await new Promise<void>((resolve) => {

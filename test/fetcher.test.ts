@@ -135,6 +135,42 @@ describe('fetchSeedBundle', () => {
     expect(tarballMocks.downloadResolvedPackage).toHaveBeenCalledOnce();
   });
 
+  it('records tarball download failures without rejecting the whole fetch', async () => {
+    const progress: string[] = [];
+    tarballMocks.downloadResolvedPackage.mockRejectedValueOnce(
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    );
+
+    const result = await fetchSeedBundle({
+      onProgress(event) {
+        progress.push(`${event.phase}:${event.status}:${event.package ?? ''}`);
+      },
+      outputDir: '/virtual/seed',
+      registry,
+      requirements: [
+        requirement({
+          raw: 'demo@latest',
+          specifier: 'latest',
+          type: 'tag',
+        }),
+      ],
+    });
+
+    expect(progress).toContain('download:error:demo@2.0.0');
+    expect(progress.at(-1)).toBe('resolve:done:');
+    expect(result.downloaded).toBe(0);
+    expect(result.errors).toEqual([
+      {
+        name: 'demo',
+        raw: 'demo@latest',
+        reason: 'TimeoutError: The operation was aborted due to timeout',
+        specifier: 'latest',
+        type: 'tag',
+      },
+    ]);
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@2.0.0']);
+  });
+
   it('can traverse dependencies without downloading tarballs', async () => {
     const registryWithDependencies: RegistryClient = {
       getPackageMetadata(name) {
