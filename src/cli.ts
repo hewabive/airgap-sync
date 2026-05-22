@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
@@ -17,6 +18,7 @@ import {
   createFetchReport,
   createWorkspaceGitSources,
   createWorkspaceSnapshot,
+  defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
   fetchSeedBundle,
@@ -65,6 +67,8 @@ import type {
   ResolveRootRequirementsResult,
   VerifyReport,
   VerifyInstallReport,
+  WorkspaceConfig,
+  WorkspacePromptBoolean,
 } from './index.js';
 
 const defaultDistTagConcurrency = 4;
@@ -508,6 +512,54 @@ async function askYesNo(
   return normalized === 'y' || normalized === 'yes';
 }
 
+function promptBooleanToString(value: WorkspacePromptBoolean): string {
+  return typeof value === 'boolean' ? (value ? 'yes' : 'no') : value;
+}
+
+function parsePromptBoolean(
+  value: string,
+  fallback: WorkspacePromptBoolean
+): WorkspacePromptBoolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (normalized === 'ask' || normalized === 'a') {
+    return 'ask';
+  }
+
+  if (normalized === 'yes' || normalized === 'y' || normalized === 'true') {
+    return true;
+  }
+
+  if (normalized === 'no' || normalized === 'n' || normalized === 'false') {
+    return false;
+  }
+
+  throw new Error(`Expected yes, no, or ask; got: ${value}`);
+}
+
+async function askPromptBoolean(
+  rl: ReadlineInterface,
+  question: string,
+  current: WorkspacePromptBoolean
+): Promise<WorkspacePromptBoolean> {
+  return parsePromptBoolean(
+    await ask(rl, `${question} (yes/no/ask)`, promptBooleanToString(current)),
+    current
+  );
+}
+
+async function resolvePromptBoolean(
+  rl: ReadlineInterface,
+  question: string,
+  value: WorkspacePromptBoolean,
+  promptDefault: boolean
+): Promise<boolean> {
+  return value === 'ask' ? await askYesNo(rl, question, promptDefault) : value;
+}
+
 async function readSavedGiteaToken(workspaceDir: string): Promise<string | undefined> {
   return (await readWorkspaceSecrets(workspaceDir)).giteaToken;
 }
@@ -565,6 +617,142 @@ async function checkGiteaToken(giteaUrl: string, token: string): Promise<string>
   return await new HttpGiteaClient(giteaUrl, { authToken: token }).currentUserLogin();
 }
 
+async function saveWorkspaceConfig(workspaceDir: string, config: WorkspaceConfig): Promise<void> {
+  await writeWorkspaceConfig(workspaceDir, config);
+  await mkdir(path.resolve(workspaceDir, config.output), { recursive: true });
+}
+
+async function configureConnectionSettings(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const sourceRegistry = await ask(rl, 'Source npm registry', config.sourceRegistry);
+  const targetRegistry = await ask(
+    rl,
+    'Closed-network npm registry',
+    config.targetRegistry ?? 'http://verdaccio.local:4873'
+  );
+  const giteaUrl = await ask(
+    rl,
+    'Closed-network Gitea URL',
+    config.giteaUrl ?? 'http://gitea.local:3000'
+  );
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    sourceRegistry,
+    ...(targetRegistry ? { targetRegistry } : {}),
+    ...(giteaUrl ? { giteaUrl } : {}),
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureBundleDirectory(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const output = await ask(rl, 'Bundle directory', config.output || defaultWorkspaceOutputDir);
+  const nextConfig = {
+    ...config,
+    output: output || defaultWorkspaceOutputDir,
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureCollectDefaults(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const includeDev = await askPromptBoolean(
+    rl,
+    'Include devDependencies by default',
+    config.defaults.collect.includeDev
+  );
+  const includePeer = await askPromptBoolean(
+    rl,
+    'Traverse peerDependencies by default',
+    config.defaults.collect.includePeer
+  );
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    defaults: {
+      ...config.defaults,
+      collect: {
+        includeDev,
+        includePeer,
+      },
+    },
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureApplyDefaults(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const publicRepositories = await askPromptBoolean(
+    rl,
+    'Create public Gitea repositories by default',
+    config.defaults.apply.publicRepositories
+  );
+  const configureGitGlobal = await askPromptBoolean(
+    rl,
+    'Configure global Git rewrites by default',
+    config.defaults.apply.configureGitGlobal
+  );
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    defaults: {
+      ...config.defaults,
+      apply: {
+        configureGitGlobal,
+        publicRepositories,
+      },
+    },
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureVerifyInstallDefaults(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const ignoreScripts = await askPromptBoolean(
+    rl,
+    'Ignore lifecycle scripts during install verification by default',
+    config.defaults.verifyInstall.ignoreScripts
+  );
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    defaults: {
+      ...config.defaults,
+      verifyInstall: {
+        ignoreScripts,
+      },
+    },
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureInitialWorkspace(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  console.log('Configure workspace defaults.');
+  const withBundle = await configureBundleDirectory(workspaceDir, rl, config);
+  return await configureConnectionSettings(workspaceDir, rl, withBundle);
+}
+
 async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
   try {
     return await readWorkspaceConfig(workspaceDir);
@@ -574,7 +762,7 @@ async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
     ) {
       throw error;
     }
-    return initWorkspace({ workspaceDir });
+    return await configureInitialWorkspace(workspaceDir, rl, await initWorkspace({ workspaceDir }));
   }
 }
 
@@ -584,7 +772,7 @@ function printMenu(): void {
   console.log('2. Add Git target');
   console.log('3. Add npm target');
   console.log('4. Remove target');
-  console.log('5. Configure registries and Gitea');
+  console.log('5. Settings');
   console.log('6. Collect updates');
   console.log('7. Verify bundle');
   console.log('8. Apply bundle');
@@ -596,24 +784,41 @@ function printMenu(): void {
 
 async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
   const config = await readMenuWorkspace(workspaceDir, rl);
-  const sourceRegistry = await ask(rl, 'Source npm registry', config.sourceRegistry);
-  const targetRegistry = await ask(
-    rl,
-    'Closed-network npm registry',
-    config.targetRegistry ?? 'http://verdaccio.local:4873'
-  );
-  const giteaUrl = await ask(
-    rl,
-    'Closed-network Gitea URL',
-    config.giteaUrl ?? 'http://gitea.local'
-  );
+  console.log('\nSettings');
+  console.log('1. Registries and Gitea');
+  console.log('2. Bundle directory');
+  console.log('3. Collect defaults');
+  console.log('4. Apply defaults');
+  console.log('5. Verify install defaults');
+  console.log('6. Show current config');
+  console.log('0. Back');
 
-  await writeWorkspaceConfig(workspaceDir, {
-    ...config,
-    sourceRegistry,
-    ...(targetRegistry ? { targetRegistry } : {}),
-    ...(giteaUrl ? { giteaUrl } : {}),
-  });
+  const choice = await ask(rl, 'Choose an action', '0');
+  switch (choice) {
+    case '0':
+      return;
+    case '1':
+      await configureConnectionSettings(workspaceDir, rl, config);
+      break;
+    case '2':
+      await configureBundleDirectory(workspaceDir, rl, config);
+      break;
+    case '3':
+      await configureCollectDefaults(workspaceDir, rl, config);
+      break;
+    case '4':
+      await configureApplyDefaults(workspaceDir, rl, config);
+      break;
+    case '5':
+      await configureVerifyInstallDefaults(workspaceDir, rl, config);
+      break;
+    case '6':
+      console.log(JSON.stringify(config, null, 2));
+      return;
+    default:
+      console.log('Unknown menu item.');
+      return;
+  }
   console.log('Saved workspace configuration.');
 }
 
@@ -622,33 +827,33 @@ async function targetRegistryFromMenu(
   rl: ReadlineInterface
 ): Promise<string> {
   const config = await readMenuWorkspace(workspaceDir, rl);
+  if (config.targetRegistry) {
+    return config.targetRegistry;
+  }
+
   const targetRegistry = await ask(
     rl,
     'Closed-network npm registry',
-    config.targetRegistry ?? 'http://verdaccio.local:4873'
+    'http://verdaccio.local:4873'
   );
   if (!targetRegistry) {
     throw new Error('Closed-network npm registry is required');
   }
-  if (targetRegistry !== config.targetRegistry) {
-    await writeWorkspaceConfig(workspaceDir, { ...config, targetRegistry });
-  }
+  await saveWorkspaceConfig(workspaceDir, { ...config, targetRegistry });
   return targetRegistry;
 }
 
 async function giteaUrlFromMenu(workspaceDir: string, rl: ReadlineInterface): Promise<string> {
   const config = await readMenuWorkspace(workspaceDir, rl);
-  const giteaUrl = await ask(
-    rl,
-    'Closed-network Gitea URL',
-    config.giteaUrl ?? 'http://gitea.local'
-  );
+  if (config.giteaUrl) {
+    return config.giteaUrl;
+  }
+
+  const giteaUrl = await ask(rl, 'Closed-network Gitea URL', 'http://gitea.local:3000');
   if (!giteaUrl) {
     throw new Error('Closed-network Gitea URL is required');
   }
-  if (giteaUrl !== config.giteaUrl) {
-    await writeWorkspaceConfig(workspaceDir, { ...config, giteaUrl });
-  }
+  await saveWorkspaceConfig(workspaceDir, { ...config, giteaUrl });
   return giteaUrl;
 }
 
@@ -748,8 +953,18 @@ async function runMenuAction(
       await configureWorkspaceMenu(workspaceDir, rl);
       return true;
     case '6': {
-      const includeDev = await askYesNo(rl, 'Include devDependencies?', false);
-      const includePeer = await askYesNo(rl, 'Traverse peerDependencies?', false);
+      const includeDev = await resolvePromptBoolean(
+        rl,
+        'Include devDependencies?',
+        config.defaults.collect.includeDev,
+        false
+      );
+      const includePeer = await resolvePromptBoolean(
+        rl,
+        'Traverse peerDependencies?',
+        config.defaults.collect.includePeer,
+        false
+      );
       await runSelfCommand(
         compactArgs([
           'collect',
@@ -767,10 +982,16 @@ async function runMenuAction(
       console.error(`[menu] apply: bundle ${bundle}`);
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
-      const publicRepos = await askYesNo(rl, 'Create public Gitea repositories?', false);
-      const configureGitGlobal = await askYesNo(
+      const publicRepos = await resolvePromptBoolean(
+        rl,
+        'Create public Gitea repositories?',
+        config.defaults.apply.publicRepositories,
+        false
+      );
+      const configureGitGlobal = await resolvePromptBoolean(
         rl,
         'Configure global Git rewrites on this machine?',
+        config.defaults.apply.configureGitGlobal,
         false
       );
       console.error(
@@ -799,9 +1020,10 @@ async function runMenuAction(
     case '9': {
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
-      const ignoreScripts = await askYesNo(
+      const ignoreScripts = await resolvePromptBoolean(
         rl,
         'Ignore lifecycle scripts during install verification?',
+        config.defaults.verifyInstall.ignoreScripts,
         true
       );
       await runSelfCommand(

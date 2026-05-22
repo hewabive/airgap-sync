@@ -60,7 +60,9 @@ apply, verification, and bundle info.
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
 Keep this file in the workspace root on removable media, next to `airgap-bundle/`; it
-is long-lived workspace state rather than a file inside one generated bundle.
+is long-lived workspace state rather than a file inside one generated bundle. The same
+file stores endpoint URLs, bundle output, and menu defaults; boolean defaults can be
+set to `true`, `false`, or `ask`.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.

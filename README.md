@@ -118,7 +118,9 @@ airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 ```
 
 `airgap-sync.json` belongs next to `airgap-bundle/` on the removable media. It is the
-workspace configuration for repeated syncs, not part of a single transfer bundle.
+workspace configuration for repeated syncs, not part of a single transfer bundle. It
+stores endpoints, target lists, bundle output, and menu defaults such as whether to
+include dev dependencies or ask each time.
 If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.
 
 The lower-level commands remain available for debugging and one-off use:

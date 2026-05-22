@@ -30,6 +30,19 @@ describe('workspace config', () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
 
     expect(config).toEqual({
+      defaults: {
+        apply: {
+          configureGitGlobal: 'ask',
+          publicRepositories: false,
+        },
+        collect: {
+          includeDev: 'ask',
+          includePeer: false,
+        },
+        verifyInstall: {
+          ignoreScripts: true,
+        },
+      },
       output: './airgap-bundle',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
@@ -100,8 +113,62 @@ describe('workspace config', () => {
     );
 
     expect(await readWorkspaceConfig(tempDir)).toMatchObject({
+      defaults: {
+        apply: {
+          configureGitGlobal: 'ask',
+          publicRepositories: false,
+        },
+        collect: {
+          includeDev: 'ask',
+          includePeer: false,
+        },
+        verifyInstall: {
+          ignoreScripts: true,
+        },
+      },
       giteaUrl: 'http://gitea.local',
       targetRegistry: 'http://verdaccio.local:4873',
+    });
+  });
+
+  it('normalizes workspace menu defaults', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        defaults: {
+          apply: {
+            configureGitGlobal: true,
+            publicRepositories: 'ask',
+          },
+          collect: {
+            includeDev: false,
+            includePeer: true,
+          },
+          verifyInstall: {
+            ignoreScripts: 'ask',
+          },
+        },
+        output: './airgap-bundle',
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [],
+      },
+      { spaces: 2 }
+    );
+
+    expect((await readWorkspaceConfig(tempDir)).defaults).toEqual({
+      apply: {
+        configureGitGlobal: true,
+        publicRepositories: 'ask',
+      },
+      collect: {
+        includeDev: false,
+        includePeer: true,
+      },
+      verifyInstall: {
+        ignoreScripts: 'ask',
+      },
     });
   });
 

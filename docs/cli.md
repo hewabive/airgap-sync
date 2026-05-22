@@ -43,15 +43,17 @@ airgap-sync menu /media/USB/airgap-sync
 ```
 
 Opens an interactive prompt menu for common workspace actions: list/add/remove targets,
-configure source and closed-network endpoints, collect updates, verify a bundle, apply
-the bundle, run install verification, and show bundle information.
+configure source and closed-network endpoints, tune run defaults, collect updates,
+verify a bundle, apply the bundle, run install verification, and show bundle
+information.
 
 Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
 specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
-`targetRegistry` and `giteaUrl` in `airgap-sync.json` when the operator enters them, but
-it stores Gitea tokens only when explicitly requested, in `airgap-sync.secrets.json`.
+`targetRegistry`, `giteaUrl`, bundle output, and default answers in `airgap-sync.json`.
+Default answers can be `yes`, `no`, or `ask`; `ask` keeps the prompt for that action.
+Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## secrets
 

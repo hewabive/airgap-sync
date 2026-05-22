@@ -156,8 +156,10 @@ export type {
 export type {
   InitWorkspaceOptions,
   WorkspaceConfig,
+  WorkspaceDefaults,
   WorkspaceGitTarget,
   WorkspaceNpmTarget,
+  WorkspacePromptBoolean,
   WorkspaceSecrets,
   WorkspaceSnapshot,
   WorkspaceTarget,

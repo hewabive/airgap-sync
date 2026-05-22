@@ -20,8 +20,24 @@ export interface WorkspaceNpmTarget {
 }
 
 export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget;
+export type WorkspacePromptBoolean = boolean | 'ask';
+
+export interface WorkspaceDefaults {
+  apply: {
+    configureGitGlobal: WorkspacePromptBoolean;
+    publicRepositories: WorkspacePromptBoolean;
+  };
+  collect: {
+    includeDev: WorkspacePromptBoolean;
+    includePeer: WorkspacePromptBoolean;
+  };
+  verifyInstall: {
+    ignoreScripts: WorkspacePromptBoolean;
+  };
+}
 
 export interface WorkspaceConfig {
+  defaults: WorkspaceDefaults;
   giteaUrl?: string;
   output: string;
   schemaVersion: 1;
@@ -74,6 +90,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function createDefaultWorkspaceConfig(): WorkspaceConfig {
   return {
+    defaults: {
+      apply: {
+        configureGitGlobal: 'ask',
+        publicRepositories: false,
+      },
+      collect: {
+        includeDev: 'ask',
+        includePeer: false,
+      },
+      verifyInstall: {
+        ignoreScripts: true,
+      },
+    },
     output: defaultWorkspaceOutputDir,
     schemaVersion: 1,
     sourceRegistry: defaultWorkspaceSourceRegistry,
@@ -132,6 +161,48 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function normalizePromptBoolean(
+  value: unknown,
+  fallback: WorkspacePromptBoolean
+): WorkspacePromptBoolean {
+  if (value === true || value === false || value === 'ask') {
+    return value;
+  }
+
+  return fallback;
+}
+
+function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
+  const defaults = createDefaultWorkspaceConfig().defaults;
+  const input = isRecord(value) ? value : {};
+  const collect = isRecord(input.collect) ? input.collect : {};
+  const apply = isRecord(input.apply) ? input.apply : {};
+  const verifyInstall = isRecord(input.verifyInstall) ? input.verifyInstall : {};
+
+  return {
+    apply: {
+      configureGitGlobal: normalizePromptBoolean(
+        apply.configureGitGlobal,
+        defaults.apply.configureGitGlobal
+      ),
+      publicRepositories: normalizePromptBoolean(
+        apply.publicRepositories,
+        defaults.apply.publicRepositories
+      ),
+    },
+    collect: {
+      includeDev: normalizePromptBoolean(collect.includeDev, defaults.collect.includeDev),
+      includePeer: normalizePromptBoolean(collect.includePeer, defaults.collect.includePeer),
+    },
+    verifyInstall: {
+      ignoreScripts: normalizePromptBoolean(
+        verifyInstall.ignoreScripts,
+        defaults.verifyInstall.ignoreScripts
+      ),
+    },
+  };
+}
+
 function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   if (!isRecord(value)) {
     throw new Error(`${workspaceConfigFileName} must contain a JSON object`);
@@ -148,6 +219,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   const targetRegistry = optionalString(value.targetRegistry);
 
   return {
+    defaults: normalizeWorkspaceDefaults(value.defaults),
     ...(giteaUrl ? { giteaUrl } : {}),
     output:
       typeof value.output === 'string' && value.output.trim().length > 0
