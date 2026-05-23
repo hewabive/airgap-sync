@@ -137,6 +137,10 @@ interface TargetGitOptions {
   branch?: string;
 }
 
+interface TargetListOptions {
+  json?: boolean;
+}
+
 interface GitSourcesOptions {
   write?: boolean;
 }
@@ -293,6 +297,24 @@ function targetToDisplay(target: { branch?: string; spec?: string; type: string;
         spec: target.spec,
         type: target.type,
       };
+}
+
+function formatTargetList(targets: WorkspaceConfig['targets']): string {
+  if (targets.length === 0) {
+    return 'No targets configured.';
+  }
+
+  return targets
+    .map((target, index) => {
+      const prefix = `${String(index + 1)}.`;
+      if (target.type === 'npm') {
+        return `${prefix} npm ${target.spec}`;
+      }
+
+      const branch = target.branch ? ` (${target.branch})` : '';
+      return `${prefix} git ${target.url}${branch}`;
+    })
+    .join('\n');
 }
 
 interface GitFetchOptions {
@@ -1304,22 +1326,28 @@ targetCommand
   .command('list')
   .description('List targets from airgap-sync.json')
   .argument('[workspace]', 'Workspace directory', '.')
-  .action(async (workspace: string) => {
+  .option('--json', 'Print targets as JSON')
+  .action(async (workspace: string, options: TargetListOptions) => {
     try {
       const config = await readWorkspaceConfig(workspace);
-      console.log(
-        JSON.stringify(
-          {
-            targets: config.targets.map((target, index) => ({
-              index: index + 1,
-              ...targetToDisplay(target),
-            })),
-            workspace: path.resolve(workspace),
-          },
-          null,
-          2
-        )
-      );
+      if (options.json === true) {
+        console.log(
+          JSON.stringify(
+            {
+              targets: config.targets.map((target, index) => ({
+                index: index + 1,
+                ...targetToDisplay(target),
+              })),
+              workspace: path.resolve(workspace),
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      console.log(formatTargetList(config.targets));
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
