@@ -60,6 +60,7 @@ import type { GiteaClient } from './index.js';
 import type {
   ApplyProgressEvent,
   ApplyProgressPhase,
+  BundleInfo,
   CollectReport,
   CollectProgressEvent,
   FetchSeedBundleResult,
@@ -135,10 +136,6 @@ interface InitOptions {
 
 interface TargetGitOptions {
   branch?: string;
-}
-
-interface TargetListOptions {
-  json?: boolean;
 }
 
 interface GitSourcesOptions {
@@ -286,19 +283,6 @@ function formatDownloadSummary(report: CollectReport): string {
   return lines.join('\n');
 }
 
-function targetToDisplay(target: { branch?: string; spec?: string; type: string; url?: string }) {
-  return target.type === 'git'
-    ? {
-        branch: target.branch,
-        type: target.type,
-        url: target.url,
-      }
-    : {
-        spec: target.spec,
-        type: target.type,
-      };
-}
-
 function formatTargetList(targets: WorkspaceConfig['targets']): string {
   if (targets.length === 0) {
     return 'No targets configured.';
@@ -315,6 +299,29 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
       return `${prefix} git ${target.url}${branch}`;
     })
     .join('\n');
+}
+
+function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
+  return target.type === 'npm'
+    ? `npm ${target.spec}`
+    : `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`;
+}
+
+function formatWorkspaceConfig(config: WorkspaceConfig): string {
+  return [
+    `Bundle directory: ${config.output}`,
+    `Source registry: ${config.sourceRegistry}`,
+    `Target registry: ${config.targetRegistry ?? '(not set)'}`,
+    `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
+    `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
+    `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
+    `Publish public repositories: ${promptBooleanToString(config.defaults.publish.publicRepositories)}`,
+    `Configure global Git rewrites: ${promptBooleanToString(config.defaults.publish.configureGitGlobal)}`,
+    `Verify install ignore scripts: ${promptBooleanToString(config.defaults.verifyInstall.ignoreScripts)}`,
+    '',
+    'Targets:',
+    formatTargetList(config.targets),
+  ].join('\n');
 }
 
 interface GitFetchOptions {
@@ -606,6 +613,39 @@ function formatVerifyInstallReport(report: VerifyInstallReport): string {
   lines.push(
     `SUMMARY ${String(report.passed)} passed, ${String(report.skipped)} skipped, ${String(report.failed)} failed`
   );
+  return lines.join('\n');
+}
+
+function formatReportStatus(name: string, report: BundleInfo['fetchReport']): string {
+  if (!report.exists) {
+    return `${name}: missing`;
+  }
+
+  const status = report.errors === 0 ? 'ok' : `${String(report.errors)} errors`;
+  return `${name}: ${status}${report.generatedAt ? ` (${report.generatedAt})` : ''}`;
+}
+
+function formatBundleInfo(info: BundleInfo): string {
+  const lines = [
+    `Bundle: ${info.bundle}`,
+    `Created: ${info.createdAt}`,
+    `Source registry: ${info.sourceRegistry}`,
+    `Packages: ${String(info.packageCount)} versions, ${String(info.packageNameCount)} names`,
+    `Dist-tags: ${String(info.tagCount)}`,
+    `Missing tarballs: ${String(info.missingTarballs.length)}`,
+    `Validation: ${info.valid ? 'ok' : `${String(info.validationIssues.length)} issues`}`,
+    formatReportStatus('Fetch report', info.fetchReport),
+    formatReportStatus('Publish report', info.publishReport),
+  ];
+
+  if (info.missingTarballs.length > 0) {
+    lines.push('', 'Missing tarballs:');
+    lines.push(...info.missingTarballs.slice(0, 20).map((file) => `- ${file}`));
+    if (info.missingTarballs.length > 20) {
+      lines.push(`... ${String(info.missingTarballs.length - 20)} more`);
+    }
+  }
+
   return lines.join('\n');
 }
 
@@ -1010,7 +1050,7 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
       await configureCredentialsMenu(workspaceDir, rl);
       return;
     case '7':
-      console.log(JSON.stringify(config, null, 2));
+      console.log(formatWorkspaceConfig(config));
       return;
     default:
       console.log('Unknown menu item.');
@@ -1326,27 +1366,9 @@ targetCommand
   .command('list')
   .description('List targets from airgap-sync.json')
   .argument('[workspace]', 'Workspace directory', '.')
-  .option('--json', 'Print targets as JSON')
-  .action(async (workspace: string, options: TargetListOptions) => {
+  .action(async (workspace: string) => {
     try {
       const config = await readWorkspaceConfig(workspace);
-      if (options.json === true) {
-        console.log(
-          JSON.stringify(
-            {
-              targets: config.targets.map((target, index) => ({
-                index: index + 1,
-                ...targetToDisplay(target),
-              })),
-              workspace: path.resolve(workspace),
-            },
-            null,
-            2
-          )
-        );
-        return;
-      }
-
       console.log(formatTargetList(config.targets));
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -1370,20 +1392,11 @@ targetAddCommand
         url,
       });
       console.log(
-        JSON.stringify(
-          {
-            added: result.added,
-            target: targetToDisplay({
-              ...(options.branch ? { branch: options.branch } : {}),
-              type: 'git',
-              url,
-            }),
-            totalTargets: result.config.targets.length,
-            workspace: path.resolve(workspace),
-          },
-          null,
-          2
-        )
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue({
+          ...(options.branch ? { branch: options.branch } : {}),
+          type: 'git',
+          url,
+        })}\nTotal targets: ${String(result.config.targets.length)}`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -1403,16 +1416,10 @@ targetAddCommand
         type: 'npm',
       });
       console.log(
-        JSON.stringify(
-          {
-            added: result.added,
-            target: targetToDisplay({ spec, type: 'npm' }),
-            totalTargets: result.config.targets.length,
-            workspace: path.resolve(workspace),
-          },
-          null,
-          2
-        )
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue({
+          spec,
+          type: 'npm',
+        })}\nTotal targets: ${String(result.config.targets.length)}`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -1532,15 +1539,9 @@ targetCommand
     try {
       const result = await removeWorkspaceTarget(workspace, parsePositiveInteger(index));
       console.log(
-        JSON.stringify(
-          {
-            removed: targetToDisplay(result.removed),
-            totalTargets: result.config.targets.length,
-            workspace: path.resolve(workspace),
-          },
-          null,
-          2
-        )
+        `Removed target: ${formatTargetValue(result.removed)}\nTotal targets: ${String(
+          result.config.targets.length
+        )}`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -1817,7 +1818,7 @@ program
   .action(async (bundle: string) => {
     try {
       const info = await readBundleInfo(bundle);
-      console.log(JSON.stringify(info, null, 2));
+      console.log(formatBundleInfo(info));
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
