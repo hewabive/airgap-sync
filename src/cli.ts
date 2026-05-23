@@ -962,132 +962,142 @@ function printMenu(): void {
 }
 
 async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
-  console.log('\nTargets');
-  console.log('1. Show targets');
-  console.log('2. Add Git target');
-  console.log('3. Add npm target');
-  console.log('4. Remove target');
-  console.log('0. Back');
+  for (;;) {
+    console.log('\nTargets');
+    console.log('1. Show targets');
+    console.log('2. Add Git target');
+    console.log('3. Add npm target');
+    console.log('4. Remove target');
+    console.log('0. Back');
 
-  const choice = await ask(rl, 'Choose an action', '0');
-  switch (choice) {
-    case '0':
-      return;
-    case '1':
-      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
-      return;
-    case '2': {
-      const url = await ask(rl, 'Git repository URL');
-      const branch = await ask(rl, 'Branch (optional)');
-      if (url) {
-        await runSelfCommand(
-          compactArgs([
-            'target',
-            'add',
-            'git',
-            url,
-            workspaceDir,
-            branch ? '--branch' : undefined,
-            branch,
-          ]),
-          workspaceDir
-        );
+    const choice = await ask(rl, 'Choose an action', '0');
+    switch (choice) {
+      case '0':
+        return;
+      case '1':
+        await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+        break;
+      case '2': {
+        const url = await ask(rl, 'Git repository URL');
+        const branch = await ask(rl, 'Branch (optional)');
+        if (url) {
+          await runSelfCommand(
+            compactArgs([
+              'target',
+              'add',
+              'git',
+              url,
+              workspaceDir,
+              branch ? '--branch' : undefined,
+              branch,
+            ]),
+            workspaceDir
+          );
+        }
+        break;
       }
-      return;
-    }
-    case '3': {
-      const spec = await ask(rl, 'npm package spec');
-      if (spec) {
-        await runSelfCommand(['target', 'add', 'npm', spec, workspaceDir], workspaceDir);
+      case '3': {
+        const spec = await ask(rl, 'npm package spec');
+        if (spec) {
+          await runSelfCommand(['target', 'add', 'npm', spec, workspaceDir], workspaceDir);
+        }
+        break;
       }
-      return;
-    }
-    case '4': {
-      await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
-      const index = await ask(rl, 'Target index to remove');
-      if (index) {
-        await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
+      case '4': {
+        await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+        const index = await ask(rl, 'Target index to remove');
+        if (index) {
+          await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
+        }
+        break;
       }
-      return;
+      default:
+        console.log('Unknown menu item.');
     }
-    default:
-      console.log('Unknown menu item.');
   }
 }
 
 async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
-  const config = await readMenuWorkspace(workspaceDir, rl);
-  console.log('\nSettings');
-  console.log('1. Registries and Gitea');
-  console.log('2. Bundle directory');
-  console.log('3. Download defaults');
-  console.log('4. Publish defaults');
-  console.log('5. Verify install defaults');
-  console.log('6. Saved credentials');
-  console.log('7. Show current config');
-  console.log('0. Back');
+  for (;;) {
+    const config = await readMenuWorkspace(workspaceDir, rl);
+    console.log('\nSettings');
+    console.log('1. Registries and Gitea');
+    console.log('2. Bundle directory');
+    console.log('3. Download defaults');
+    console.log('4. Publish defaults');
+    console.log('5. Verify install defaults');
+    console.log('6. Saved credentials');
+    console.log('7. Show current config');
+    console.log('0. Back');
 
-  const choice = await ask(rl, 'Choose an action', '0');
-  switch (choice) {
-    case '0':
-      return;
-    case '1':
-      await configureConnectionSettings(workspaceDir, rl, config);
-      break;
-    case '2':
-      await configureBundleDirectory(workspaceDir, rl, config);
-      break;
-    case '3':
-      await configureDownloadDefaults(workspaceDir, rl, config);
-      break;
-    case '4':
-      await configurePublishDefaults(workspaceDir, rl, config);
-      break;
-    case '5':
-      await configureVerifyInstallDefaults(workspaceDir, rl, config);
-      break;
-    case '6':
-      await configureCredentialsMenu(workspaceDir, rl);
-      return;
-    case '7':
-      console.log(formatWorkspaceConfig(config));
-      return;
-    default:
-      console.log('Unknown menu item.');
-      return;
+    const choice = await ask(rl, 'Choose an action', '0');
+    switch (choice) {
+      case '0':
+        return;
+      case '1':
+        await configureConnectionSettings(workspaceDir, rl, config);
+        console.log('Saved workspace configuration.');
+        break;
+      case '2':
+        await configureBundleDirectory(workspaceDir, rl, config);
+        console.log('Saved workspace configuration.');
+        break;
+      case '3':
+        await configureDownloadDefaults(workspaceDir, rl, config);
+        console.log('Saved workspace configuration.');
+        break;
+      case '4':
+        await configurePublishDefaults(workspaceDir, rl, config);
+        console.log('Saved workspace configuration.');
+        break;
+      case '5':
+        await configureVerifyInstallDefaults(workspaceDir, rl, config);
+        console.log('Saved workspace configuration.');
+        break;
+      case '6':
+        await configureCredentialsMenu(workspaceDir, rl);
+        break;
+      case '7':
+        console.log(formatWorkspaceConfig(config));
+        break;
+      default:
+        console.log('Unknown menu item.');
+        break;
+    }
   }
-  console.log('Saved workspace configuration.');
 }
 
 async function diagnosticsMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
-  const config = await readMenuWorkspace(workspaceDir, rl);
-  const bundle = config.output;
+  for (;;) {
+    const config = await readMenuWorkspace(workspaceDir, rl);
+    const bundle = config.output;
 
-  console.log('\nDiagnostics');
-  console.log('1. Verify bundle');
-  console.log('2. Show bundle info');
-  console.log('3. Check Gitea token');
-  console.log('0. Back');
+    console.log('\nDiagnostics');
+    console.log('1. Verify bundle');
+    console.log('2. Show bundle info');
+    console.log('3. Check Gitea token');
+    console.log('0. Back');
 
-  const choice = await ask(rl, 'Choose an action', '0');
-  switch (choice) {
-    case '0':
-      return;
-    case '1':
-      await runSelfCommand(['verify', bundle], workspaceDir);
-      return;
-    case '2':
-      await runSelfCommand(['info', bundle], workspaceDir);
-      return;
-    case '3': {
-      const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
-      const token = await giteaTokenFromMenu(workspaceDir, rl);
-      const login = await checkGiteaToken(giteaUrl, token);
-      console.log(`Gitea token is valid for user: ${login}`);
-      return;
+    const choice = await ask(rl, 'Choose an action', '0');
+    switch (choice) {
+      case '0':
+        return;
+      case '1':
+        await runSelfCommand(['verify', bundle], workspaceDir);
+        break;
+      case '2':
+        await runSelfCommand(['info', bundle], workspaceDir);
+        break;
+      case '3': {
+        const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+        const token = await giteaTokenFromMenu(workspaceDir, rl);
+        const login = await checkGiteaToken(giteaUrl, token);
+        console.log(`Gitea token is valid for user: ${login}`);
+        break;
+      }
+      default:
+        console.log('Unknown menu item.');
     }
-    default:
-      console.log('Unknown menu item.');
   }
 }
 
@@ -1130,43 +1140,45 @@ async function configureCredentialsMenu(
   workspaceDir: string,
   rl: ReadlineInterface
 ): Promise<void> {
-  console.log('\nSaved credentials');
-  console.log('1. Save Gitea token');
-  console.log('2. Clear Gitea token');
-  console.log('3. Check Gitea token');
-  console.log('0. Back');
+  for (;;) {
+    console.log('\nSaved credentials');
+    console.log('1. Save Gitea token');
+    console.log('2. Clear Gitea token');
+    console.log('3. Check Gitea token');
+    console.log('0. Back');
 
-  const choice = await ask(rl, 'Choose an action', '0');
-  switch (choice) {
-    case '0':
-      return;
-    case '1': {
-      const token = await ask(rl, 'Gitea token (visible input)');
-      if (!token) {
-        throw new Error('Gitea token is required');
+    const choice = await ask(rl, 'Choose an action', '0');
+    switch (choice) {
+      case '0':
+        return;
+      case '1': {
+        const token = await ask(rl, 'Gitea token (visible input)');
+        if (!token) {
+          throw new Error('Gitea token is required');
+        }
+        await saveWorkspaceGiteaToken(workspaceDir, token);
+        console.log(`Saved Gitea token in ${workspaceSecretsFileName}.`);
+        break;
       }
-      await saveWorkspaceGiteaToken(workspaceDir, token);
-      console.log(`Saved Gitea token in ${workspaceSecretsFileName}.`);
-      return;
+      case '2':
+        await clearWorkspaceGiteaToken(workspaceDir);
+        console.log(`Cleared Gitea token from ${workspaceSecretsFileName}.`);
+        break;
+      case '3': {
+        const config = await readMenuWorkspace(workspaceDir, rl);
+        const giteaUrl = await ask(
+          rl,
+          'Closed-network Gitea URL',
+          config.giteaUrl ?? 'http://gitea.local'
+        );
+        const token = await giteaTokenFromMenu(workspaceDir, rl);
+        const login = await checkGiteaToken(giteaUrl, token);
+        console.log(`Gitea token is valid for user: ${login}`);
+        break;
+      }
+      default:
+        console.log('Unknown menu item.');
     }
-    case '2':
-      await clearWorkspaceGiteaToken(workspaceDir);
-      console.log(`Cleared Gitea token from ${workspaceSecretsFileName}.`);
-      return;
-    case '3': {
-      const config = await readMenuWorkspace(workspaceDir, rl);
-      const giteaUrl = await ask(
-        rl,
-        'Closed-network Gitea URL',
-        config.giteaUrl ?? 'http://gitea.local'
-      );
-      const token = await giteaTokenFromMenu(workspaceDir, rl);
-      const login = await checkGiteaToken(giteaUrl, token);
-      console.log(`Gitea token is valid for user: ${login}`);
-      return;
-    }
-    default:
-      console.log('Unknown menu item.');
   }
 }
 
