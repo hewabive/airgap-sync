@@ -500,6 +500,8 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       addedGitRequirements,
       addedRequirements,
       addedUnsupported,
+      downloaded: resolution.downloaded,
+      errors: resolution.errors.length,
       fetchMs,
       gitFetchMs,
       gitManifestScanMs,
@@ -507,6 +509,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       iteration,
       resolved: resolution.resolved.length,
       scannedGitSources,
+      skipped: resolution.skipped,
       totalMs: elapsedMs(iterationStart),
     });
 

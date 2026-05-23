@@ -76,6 +76,8 @@ export interface CollectIterationReport {
   addedGitRequirements: number;
   addedRequirements: number;
   addedUnsupported: number;
+  downloaded: number;
+  errors: number;
   fetchMs: number;
   gitFetchMs: number;
   gitManifestScanMs: number;
@@ -83,6 +85,7 @@ export interface CollectIterationReport {
   iteration: number;
   resolved: number;
   scannedGitSources: number;
+  skipped: number;
   totalMs: number;
 }
 

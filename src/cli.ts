@@ -258,9 +258,17 @@ function formatDownloadSummary(report: CollectReport): string {
     : green('OK Download completed: all resolved npm packages and Git mirrors are available.');
   const gitDone = report.gitFetch.cloned + report.gitFetch.updated;
   const mode = report.dryRun ? 'dry run, ' : '';
+  const downloadedThisRun = report.iterations.reduce(
+    (total, iteration) => total + iteration.downloaded,
+    0
+  );
+  const alreadyOnDisk = Math.max(0, report.fetch.resolved - downloadedThisRun);
+  const npmLine = report.dryRun
+    ? `NPM packages: ${String(report.fetch.resolved)} resolved, dry run only, ${String(npmErrors)} errors.`
+    : `NPM packages: ${String(report.fetch.resolved)} resolved, ${String(downloadedThisRun)} downloaded, ${String(alreadyOnDisk)} already on disk, ${String(npmErrors)} errors.`;
   const lines = [
     status,
-    `NPM packages: ${String(report.fetch.resolved)} resolved, ${String(report.fetch.downloaded)} downloaded, ${String(report.fetch.skipped)} already on disk, ${String(npmErrors)} errors.`,
+    npmLine,
     `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(gitDone)} cloned/updated, ${String(report.gitFetch.errors.length)} errors.`,
     `Bundle: ${report.outputDir} (${mode}reports written: ${report.wroteBundle ? 'yes' : 'no'}).`,
   ];
