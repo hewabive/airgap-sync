@@ -1,6 +1,7 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import { readBundleManifest, readDistTagsManifest, writeVerifyReport } from './bundle.js';
+import { readPackageManifest } from './tarball.js';
 import { validateBundle } from './validation.js';
 import type {
   ApplyBundleReport,
@@ -130,6 +131,60 @@ async function verifyGitMirrors(
   );
 }
 
+async function verifyTarballIntegrity(
+  bundleDir: string,
+  manifest: BundleManifest
+): Promise<VerifyCheck> {
+  const corrupt: { error: string; file: string }[] = [];
+  const mismatched: {
+    actualName: string;
+    actualVersion: string;
+    expectedName: string;
+    expectedVersion: string;
+    file: string;
+  }[] = [];
+
+  for (const pkg of manifest.packages) {
+    const tarballPath = path.join(bundleDir, pkg.file);
+    if (!(await fs.pathExists(tarballPath))) {
+      continue;
+    }
+
+    try {
+      const packageManifest = await readPackageManifest(tarballPath);
+      if (packageManifest.name !== pkg.name || packageManifest.version !== pkg.version) {
+        mismatched.push({
+          actualName: packageManifest.name,
+          actualVersion: packageManifest.version,
+          expectedName: pkg.name,
+          expectedVersion: pkg.version,
+          file: pkg.file,
+        });
+      }
+    } catch (error) {
+      corrupt.push({
+        error: (error as Error).message,
+        file: pkg.file,
+      });
+    }
+  }
+
+  if (corrupt.length > 0 || mismatched.length > 0) {
+    return check(
+      'tarball-integrity',
+      'error',
+      `${String(corrupt.length)} unreadable tarballs, ${String(mismatched.length)} metadata mismatches`,
+      { corrupt, mismatched }
+    );
+  }
+
+  return check(
+    'tarball-integrity',
+    'ok',
+    `${String(manifest.packages.length)}/${String(manifest.packages.length)} tarballs are readable`
+  );
+}
+
 export async function verifyBundle(options: VerifyBundleOptions): Promise<VerifyReport> {
   const bundleDir = path.resolve(options.bundleDir);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
@@ -165,6 +220,8 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
             { issues: missing }
           )
     );
+
+    checks.push(await verifyTarballIntegrity(bundleDir, manifest));
   }
 
   const fetchReport = await readOptionalJson<FetchReport>(

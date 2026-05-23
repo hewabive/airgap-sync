@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as tar from 'tar';
 import * as fs from '../src/core/fs.js';
 import { verifyBundle } from '../src/core/verify.js';
 import type {
@@ -195,9 +196,31 @@ const applyReport: ApplyBundleReport = {
   succeeded: true,
 };
 
+async function writeTarball(
+  filePath: string,
+  packageJson: { name: string; version: string }
+): Promise<void> {
+  const rootDir = path.join(bundleDir, 'tarball-root');
+  const packageDir = path.join(rootDir, 'package');
+  await fs.ensureDir(packageDir);
+  await fs.writeJson(path.join(packageDir, 'package.json'), packageJson, { spaces: 2 });
+  await tar.c(
+    {
+      cwd: rootDir,
+      file: filePath,
+      gzip: true,
+    },
+    ['package']
+  );
+  await fs.remove(rootDir);
+}
+
 async function writeValidBundle(): Promise<void> {
   await fs.ensureDir(path.join(bundleDir, 'packages'));
-  await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+  await writeTarball(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), {
+    name: 'demo',
+    version: '1.0.0',
+  });
   await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), manifest, { spaces: 2 });
   await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), distTags, { spaces: 2 });
   await fs.writeJson(path.join(bundleDir, 'fetch-report.json'), fetchReport, { spaces: 2 });
@@ -295,6 +318,20 @@ describe('verifyBundle', () => {
         expect.objectContaining({ name: 'tarballs', status: 'error' }),
         expect.objectContaining({ name: 'fetch-report', status: 'error' }),
         expect.objectContaining({ name: 'workspace-snapshot', status: 'warning' }),
+      ])
+    );
+  });
+
+  it('fails unreadable tarballs', async () => {
+    await writeValidBundle();
+    await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), 'not a tarball');
+
+    const report = await verifyBundle({ bundleDir });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'tarball-integrity', status: 'error' }),
       ])
     );
   });
