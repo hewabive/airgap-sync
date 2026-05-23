@@ -286,6 +286,8 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
   report: 'write publish report',
 };
 
+const COLLECT_PROGRESS_HEARTBEAT_MS = 10_000;
+
 function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
   return (event) => {
     const label = applyPhaseLabels[event.phase];
@@ -295,21 +297,67 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
 
 function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
   const lastLogged = new Map<string, number>();
+  const lastOutputAt = new Map<string, number>();
+  const lastEvents = new Map<string, CollectProgressEvent>();
+  const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+  function formatProgressState(event: CollectProgressEvent): string {
+    const total = event.total === undefined ? '' : `/${String(event.total)}`;
+    const queue = event.queue === undefined ? '' : ` queue=${String(event.queue)}`;
+    const detail = event.detail ? ` ${event.detail}` : '';
+    const current = event.current === undefined ? '...' : String(event.current);
+    return `${current}${total}${queue}${detail}`;
+  }
+
+  function formatProgressLine(event: CollectProgressEvent, label: string, prefix: string): string {
+    return `${prefix} ${label}: ${formatProgressState(event)}`;
+  }
+
+  function recordOutput(key: string): void {
+    lastOutputAt.set(key, Date.now());
+  }
+
+  function stopHeartbeat(key: string): void {
+    const timer = heartbeatTimers.get(key);
+    if (timer) {
+      clearInterval(timer);
+      heartbeatTimers.delete(key);
+    }
+  }
 
   return (event) => {
     const label = collectPhaseLabels[event.phase];
     const prefix =
       event.iteration === undefined ? '[download]' : `[download:${String(event.iteration)}]`;
     const key = `${String(event.iteration ?? 0)}:${event.phase}`;
+    lastEvents.set(key, event);
 
     if (event.status === 'start') {
       const detail = event.detail ? ` ${event.detail}` : '';
       const total = event.total === undefined ? '' : ` (${String(event.total)})`;
       console.error(`${prefix} ${label}: started${total}${detail}`);
+      recordOutput(key);
+
+      stopHeartbeat(key);
+      const timer = setInterval(() => {
+        const latest = lastEvents.get(key);
+        if (!latest) {
+          return;
+        }
+        const previousOutputAt = lastOutputAt.get(key) ?? 0;
+        if (Date.now() - previousOutputAt < COLLECT_PROGRESS_HEARTBEAT_MS) {
+          return;
+        }
+        console.error(`${prefix} ${label}: still running ${formatProgressState(latest)}`);
+        recordOutput(key);
+      }, COLLECT_PROGRESS_HEARTBEAT_MS);
+      timer.unref();
+      heartbeatTimers.set(key, timer);
       return;
     }
 
     if (event.status === 'done') {
+      stopHeartbeat(key);
       const count =
         event.current === undefined
           ? ''
@@ -317,12 +365,15 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
             ? ` (${String(event.current)})`
             : ` (${String(event.current)}/${String(event.total)})`;
       console.error(`${prefix} ${label}: done${count}`);
+      recordOutput(key);
       return;
     }
 
     if (event.status === 'error') {
+      stopHeartbeat(key);
       const detail = event.detail ? ` ${event.detail}` : '';
       console.error(`${prefix} ${label}: error${detail}`);
+      recordOutput(key);
       return;
     }
 
@@ -343,10 +394,8 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
     }
 
     lastLogged.set(key, event.current);
-    const total = event.total === undefined ? '' : `/${String(event.total)}`;
-    const queue = event.queue === undefined ? '' : ` queue=${String(event.queue)}`;
-    const detail = event.detail ? ` ${event.detail}` : '';
-    console.error(`${prefix} ${label}: ${String(event.current)}${total}${queue}${detail}`);
+    console.error(formatProgressLine(event, label, prefix));
+    recordOutput(key);
   };
 }
 

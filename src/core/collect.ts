@@ -387,9 +387,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
       onProgress: (event: FetchProgressEvent) => {
+        const detail = [event.phase, event.package].filter(Boolean).join(' ');
         options.onProgress?.({
           ...(event.current === undefined ? {} : { current: event.current }),
-          ...(event.package ? { detail: event.package } : {}),
+          ...(detail ? { detail } : {}),
           iteration,
           phase: 'npm-fetch',
           ...(event.queue === undefined ? {} : { queue: event.queue }),
