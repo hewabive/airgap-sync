@@ -60,6 +60,7 @@ import type { GiteaClient } from './index.js';
 import type {
   ApplyProgressEvent,
   ApplyProgressPhase,
+  CollectReport,
   CollectProgressEvent,
   FetchSeedBundleResult,
   PublishProgressEvent,
@@ -123,6 +124,7 @@ interface CollectOptions {
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
+  json?: boolean;
   output?: string;
   registry?: string;
 }
@@ -221,6 +223,55 @@ function collectShouldFail(report: {
     report.gitManifestScanErrors.length > 0 ||
     report.maxIterationsReached
   );
+}
+
+function useColor(): boolean {
+  return process.stdout.isTTY && !process.env.NO_COLOR;
+}
+
+function color(text: string, code: number): string {
+  return useColor() ? `\u001B[${String(code)}m${text}\u001B[0m` : text;
+}
+
+function green(text: string): string {
+  return color(text, 32);
+}
+
+function red(text: string): string {
+  return color(text, 31);
+}
+
+function formatDownloadSummary(report: CollectReport): string {
+  const failed = collectShouldFail(report);
+  const gitSkipped = report.gitSources.skipped.length;
+  const unsupported = report.fetch.unsupported.length;
+  const npmErrors = report.fetch.errors.length;
+  const gitErrors =
+    report.repositoryUpdate.errors.length +
+    report.gitFetch.errors.length +
+    report.gitManifestScanErrors.length;
+  const totalErrors = npmErrors + gitErrors;
+  const status = failed
+    ? red(
+        `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
+      )
+    : green('OK Download completed: all resolved npm packages and Git mirrors are available.');
+  const gitDone = report.gitFetch.cloned + report.gitFetch.updated;
+  const mode = report.dryRun ? 'dry run, ' : '';
+  const lines = [
+    status,
+    `NPM packages: ${String(report.fetch.resolved)} resolved, ${String(report.fetch.downloaded)} downloaded, ${String(report.fetch.skipped)} already on disk, ${String(npmErrors)} errors.`,
+    `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(gitDone)} cloned/updated, ${String(report.gitFetch.errors.length)} errors.`,
+    `Bundle: ${report.outputDir} (${mode}reports written: ${report.wroteBundle ? 'yes' : 'no'}).`,
+  ];
+
+  if (unsupported > 0 || gitSkipped > 0 || report.maxIterationsReached) {
+    lines.push(
+      `Attention: ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs, max iterations reached: ${String(report.maxIterationsReached)}.`
+    );
+  }
+
+  return lines.join('\n');
 }
 
 function targetToDisplay(target: { branch?: string; spec?: string; type: string; url?: string }) {
@@ -1476,6 +1527,7 @@ program
     16
   )
   .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
+  .option('--json', 'Print the full JSON report instead of the concise summary')
   .action(async (root: string | undefined, options: CollectOptions) => {
     try {
       if (!root) {
@@ -1521,16 +1573,20 @@ program
           await writeWorkspaceSnapshot(outputDir, workspaceSnapshot);
         }
 
-        console.log(
-          JSON.stringify(
-            {
-              workspaceSnapshot,
-              ...report,
-            },
-            null,
-            2
-          )
-        );
+        if (options.json === true) {
+          console.log(
+            JSON.stringify(
+              {
+                workspaceSnapshot,
+                ...report,
+              },
+              null,
+              2
+            )
+          );
+        } else {
+          console.log(formatDownloadSummary(report));
+        }
 
         if (collectShouldFail(report)) {
           process.exitCode = 1;
@@ -1553,7 +1609,9 @@ program
         root,
       });
 
-      console.log(JSON.stringify(report, null, 2));
+      console.log(
+        options.json === true ? JSON.stringify(report, null, 2) : formatDownloadSummary(report)
+      );
 
       if (collectShouldFail(report)) {
         process.exitCode = 1;
