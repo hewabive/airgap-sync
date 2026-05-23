@@ -83,7 +83,17 @@ export function resolveRootRequirementFromMetadata(
   const resolved: ResolvedRootPackage = {
     name: requirement.name,
     version: selected.version,
+    ...(versionMetadata.dependencies ? { dependencies: versionMetadata.dependencies } : {}),
     dist: versionMetadata.dist,
+    ...(versionMetadata.optionalDependencies
+      ? { optionalDependencies: versionMetadata.optionalDependencies }
+      : {}),
+    ...(versionMetadata.peerDependencies
+      ? { peerDependencies: versionMetadata.peerDependencies }
+      : {}),
+    ...(versionMetadata.peerDependenciesMeta
+      ? { peerDependenciesMeta: versionMetadata.peerDependenciesMeta }
+      : {}),
     raw: requirement.raw,
     requiredBy: requirement.requiredBy,
     resolvedVia: selected.resolvedVia,

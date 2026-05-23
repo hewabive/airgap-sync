@@ -285,7 +285,11 @@ export interface PackageMetadata {
 
 export interface ResolvedRootPackage extends PackageIdentity {
   alias?: string;
+  dependencies?: Record<string, string>;
   dist: PackageVersionMetadata['dist'];
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   raw: string;
   requiredBy: string;
   resolvedVia: Exclude<SupportedSpecType, 'alias'>;

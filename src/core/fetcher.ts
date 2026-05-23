@@ -10,14 +10,12 @@ import type {
 } from '../types.js';
 import type { RegistryClient } from './registry.js';
 import { resolveRootRequirements } from './resolver.js';
-import * as fs from './fs.js';
 import { isRetryableFetchError, retry } from './retry.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import {
   type DownloadedTarball,
   dependencySpecsFromManifest,
   downloadResolvedPackage,
-  readPackageManifest,
 } from './tarball.js';
 
 export interface FetchSeedBundleOptions {
@@ -140,47 +138,14 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function isRetryableTarballReadError(error: unknown): boolean {
-  if (isRetryableFetchError(error)) {
-    return true;
-  }
-
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return (
-    error.name === 'ZlibError' ||
-    ['TAR_BAD_ARCHIVE', 'TAR_ABORT', 'unexpected end of file', 'zlib:'].some((message) =>
-      error.message.includes(message)
-    )
-  );
-}
-
-async function manifestFromRegistry(
-  pkg: ResolvedRootPackage,
-  registry: RegistryClient
-): Promise<PackageManifest> {
-  const metadata = await registry.getPackageMetadata(pkg.name);
-  const versionMetadata = metadata.versions[pkg.version];
-
-  if (!versionMetadata) {
-    throw new Error(`${packageId(pkg)} is missing from registry metadata`);
-  }
-
+function manifestFromResolvedPackage(pkg: ResolvedRootPackage): PackageManifest {
   return {
-    name: versionMetadata.name,
-    version: versionMetadata.version,
-    ...(versionMetadata.dependencies ? { dependencies: versionMetadata.dependencies } : {}),
-    ...(versionMetadata.optionalDependencies
-      ? { optionalDependencies: versionMetadata.optionalDependencies }
-      : {}),
-    ...(versionMetadata.peerDependencies
-      ? { peerDependencies: versionMetadata.peerDependencies }
-      : {}),
-    ...(versionMetadata.peerDependenciesMeta
-      ? { peerDependenciesMeta: versionMetadata.peerDependenciesMeta }
-      : {}),
+    name: pkg.name,
+    version: pkg.version,
+    ...(pkg.dependencies ? { dependencies: pkg.dependencies } : {}),
+    ...(pkg.optionalDependencies ? { optionalDependencies: pkg.optionalDependencies } : {}),
+    ...(pkg.peerDependencies ? { peerDependencies: pkg.peerDependencies } : {}),
+    ...(pkg.peerDependenciesMeta ? { peerDependenciesMeta: pkg.peerDependenciesMeta } : {}),
   };
 }
 
@@ -296,28 +261,20 @@ export async function fetchSeedBundle(
     let manifest: PackageManifest;
 
     try {
+      manifest = manifestFromResolvedPackage(resolved);
+
       if (shouldDownload) {
         const fetched = await retry(
-          async (): Promise<{ downloaded: DownloadedTarball; manifest: PackageManifest }> => {
+          async (): Promise<DownloadedTarball> => {
             const downloadStart = performance.now();
             const downloadedTarball = await downloadResolvedPackage(resolved, options.outputDir);
             timings.downloadMs += elapsedMs(downloadStart);
-
-            try {
-              const manifestStart = performance.now();
-              const tarballManifest = await readPackageManifest(downloadedTarball.path);
-              timings.manifestReadMs += elapsedMs(manifestStart);
-              return { downloaded: downloadedTarball, manifest: tarballManifest };
-            } catch (error) {
-              await fs.remove(downloadedTarball.path);
-              throw error;
-            }
+            return downloadedTarball;
           },
-          { isRetryable: isRetryableTarballReadError }
+          { isRetryable: isRetryableFetchError }
         );
 
-        manifest = fetched.manifest;
-        if (fetched.downloaded.skipped) {
+        if (fetched.skipped) {
           result.skipped++;
         } else {
           result.downloaded++;
@@ -331,9 +288,6 @@ export async function fetchSeedBundle(
         });
       } else {
         result.wouldDownload++;
-        const manifestStart = performance.now();
-        manifest = await manifestFromRegistry(resolved, options.registry);
-        timings.manifestReadMs += elapsedMs(manifestStart);
       }
 
       if (scannedPackages.has(id)) {
