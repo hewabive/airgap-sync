@@ -94,6 +94,18 @@ describe('HttpRegistryClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries fetch failed metadata requests', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(new Response(JSON.stringify(metadata), { status: 200 }));
+
+    const registry = new HttpRegistryClient('https://registry.example');
+
+    await expect(registry.getPackageMetadata('demo')).resolves.toEqual(metadata);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry missing package metadata', async () => {
     vi.stubGlobal('fetch', fetchMock);
     fetchMock.mockResolvedValue(new Response('missing', { status: 404 }));

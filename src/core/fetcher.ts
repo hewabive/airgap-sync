@@ -10,8 +10,11 @@ import type {
 } from '../types.js';
 import type { RegistryClient } from './registry.js';
 import { resolveRootRequirements } from './resolver.js';
+import * as fs from './fs.js';
+import { isRetryableFetchError, retry } from './retry.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import {
+  type DownloadedTarball,
   dependencySpecsFromManifest,
   downloadResolvedPackage,
   readPackageManifest,
@@ -135,6 +138,23 @@ function errorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function isRetryableTarballReadError(error: unknown): boolean {
+  if (isRetryableFetchError(error)) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === 'ZlibError' ||
+    ['TAR_BAD_ARCHIVE', 'TAR_ABORT', 'unexpected end of file', 'zlib:'].some((message) =>
+      error.message.includes(message)
+    )
+  );
 }
 
 async function manifestFromRegistry(
@@ -274,10 +294,27 @@ export async function fetchSeedBundle(
 
     try {
       if (shouldDownload) {
-        const downloadStart = performance.now();
-        const downloaded = await downloadResolvedPackage(resolved, options.outputDir);
-        timings.downloadMs += elapsedMs(downloadStart);
-        if (downloaded.skipped) {
+        const fetched = await retry(
+          async (): Promise<{ downloaded: DownloadedTarball; manifest: PackageManifest }> => {
+            const downloadStart = performance.now();
+            const downloadedTarball = await downloadResolvedPackage(resolved, options.outputDir);
+            timings.downloadMs += elapsedMs(downloadStart);
+
+            try {
+              const manifestStart = performance.now();
+              const tarballManifest = await readPackageManifest(downloadedTarball.path);
+              timings.manifestReadMs += elapsedMs(manifestStart);
+              return { downloaded: downloadedTarball, manifest: tarballManifest };
+            } catch (error) {
+              await fs.remove(downloadedTarball.path);
+              throw error;
+            }
+          },
+          { isRetryable: isRetryableTarballReadError }
+        );
+
+        manifest = fetched.manifest;
+        if (fetched.downloaded.skipped) {
           result.skipped++;
         } else {
           result.downloaded++;
@@ -289,9 +326,6 @@ export async function fetchSeedBundle(
           queue: queue.length,
           status: 'progress',
         });
-        const manifestStart = performance.now();
-        manifest = await readPackageManifest(downloaded.path);
-        timings.manifestReadMs += elapsedMs(manifestStart);
       } else {
         result.wouldDownload++;
         const manifestStart = performance.now();

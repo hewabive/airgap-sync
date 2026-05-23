@@ -17,6 +17,10 @@ function isErrorWithName(error: unknown, name: string): boolean {
   return error instanceof Error && error.name === name;
 }
 
+function errorCause(error: Error): unknown {
+  return 'cause' in error ? error.cause : undefined;
+}
+
 function isRetryableNetworkError(error: unknown): boolean {
   if (isErrorWithName(error, 'AbortError') || isErrorWithName(error, 'TimeoutError')) {
     return true;
@@ -26,9 +30,23 @@ function isRetryableNetworkError(error: unknown): boolean {
     return false;
   }
 
-  return ['ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'ETIMEDOUT'].some((code) =>
-    error.message.includes(code)
-  );
+  if (error.name === 'TypeError' && error.message === 'fetch failed') {
+    return true;
+  }
+
+  if (isRetryableNetworkError(errorCause(error))) {
+    return true;
+  }
+
+  return [
+    'aborted due to timeout',
+    'fetch failed',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'EAI_AGAIN',
+    'ENOTFOUND',
+    'ETIMEDOUT',
+  ].some((code) => error.message.includes(code));
 }
 
 function isRetryableHttpStatus(status: number): boolean {

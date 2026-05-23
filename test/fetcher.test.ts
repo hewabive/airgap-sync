@@ -135,11 +135,9 @@ describe('fetchSeedBundle', () => {
     expect(tarballMocks.downloadResolvedPackage).toHaveBeenCalledOnce();
   });
 
-  it('records tarball download failures without rejecting the whole fetch', async () => {
+  it('records permanent tarball download failures without rejecting the whole fetch', async () => {
     const progress: string[] = [];
-    tarballMocks.downloadResolvedPackage.mockRejectedValueOnce(
-      new DOMException('The operation was aborted due to timeout', 'TimeoutError')
-    );
+    tarballMocks.downloadResolvedPackage.mockRejectedValueOnce(new Error('permanent failure'));
 
     const result = await fetchSeedBundle({
       onProgress(event) {
@@ -163,11 +161,42 @@ describe('fetchSeedBundle', () => {
       {
         name: 'demo',
         raw: 'demo@latest',
-        reason: 'TimeoutError: The operation was aborted due to timeout',
+        reason: 'permanent failure',
         specifier: 'latest',
         type: 'tag',
       },
     ]);
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@2.0.0']);
+  });
+
+  it('retries truncated tarballs after manifest read errors', async () => {
+    const zlibError = new Error('zlib: unexpected end of file');
+    zlibError.name = 'ZlibError';
+    tarballMocks.readPackageManifest
+      .mockRejectedValueOnce(zlibError)
+      .mockImplementation((path: string) => {
+        const manifest = tarballMocks.manifests.get(path);
+        if (!manifest) {
+          throw new Error(`Missing manifest for ${path}`);
+        }
+        return manifest;
+      });
+
+    const result = await fetchSeedBundle({
+      outputDir: '/virtual/seed',
+      registry,
+      requirements: [
+        requirement({
+          raw: 'demo@latest',
+          specifier: 'latest',
+          type: 'tag',
+        }),
+      ],
+    });
+
+    expect(tarballMocks.downloadResolvedPackage).toHaveBeenCalledTimes(2);
+    expect(result.errors).toEqual([]);
+    expect(result.downloaded).toBe(1);
     expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@2.0.0']);
   });
 
