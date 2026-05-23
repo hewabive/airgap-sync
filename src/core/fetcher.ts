@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import path from 'node:path';
 import type {
   FetchTimings,
   GitRequirement,
@@ -10,6 +11,7 @@ import type {
 } from '../types.js';
 import type { RegistryClient } from './registry.js';
 import { resolveRootRequirements } from './resolver.js';
+import * as fs from './fs.js';
 import { isRetryableFetchError, retry } from './retry.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import {
@@ -149,6 +151,20 @@ function manifestFromResolvedPackage(pkg: ResolvedRootPackage): PackageManifest 
   };
 }
 
+async function readExistingPackageFiles(outputDir: string): Promise<Set<string>> {
+  const packageDir = path.join(outputDir, 'packages');
+
+  try {
+    const entries = await fs.readdir(packageDir);
+    return new Set(entries.filter((entry) => entry.endsWith('.tgz')));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return new Set();
+    }
+    throw error;
+  }
+}
+
 export async function fetchSeedBundle(
   options: FetchSeedBundleOptions
 ): Promise<FetchSeedBundleResult> {
@@ -162,6 +178,9 @@ export async function fetchSeedBundle(
   const resolvedById = new Map<string, ResolvedRootPackage>();
   const tagRequirements = new Set<string>();
   const timings = createFetchTimings();
+  const existingPackageFiles = shouldDownload
+    ? await readExistingPackageFiles(options.outputDir)
+    : new Set<string>();
   const result: FetchSeedBundleResult = {
     downloaded: 0,
     skipped: 0,
@@ -267,7 +286,9 @@ export async function fetchSeedBundle(
         const fetched = await retry(
           async (): Promise<DownloadedTarball> => {
             const downloadStart = performance.now();
-            const downloadedTarball = await downloadResolvedPackage(resolved, options.outputDir);
+            const downloadedTarball = await downloadResolvedPackage(resolved, options.outputDir, {
+              existingPackageFiles,
+            });
             timings.downloadMs += elapsedMs(downloadStart);
             return downloadedTarball;
           },

@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -15,15 +16,25 @@ export interface DownloadedTarball {
   version: string;
 }
 
+export interface DownloadResolvedPackageOptions {
+  existingPackageFiles?: Set<string>;
+}
+
 export async function downloadResolvedPackage(
   pkg: ResolvedRootPackage,
-  outputDir: string
+  outputDir: string,
+  options: DownloadResolvedPackageOptions = {}
 ): Promise<DownloadedTarball> {
   const file = packageFileName(pkg.name, pkg.version);
   const packageDir = path.join(outputDir, 'packages');
   const outputPath = path.join(packageDir, file);
 
-  if (await fs.pathExists(outputPath)) {
+  const knownPackageFiles = options.existingPackageFiles;
+  const alreadyExists = knownPackageFiles
+    ? knownPackageFiles.has(file)
+    : await fs.pathExists(outputPath);
+
+  if (alreadyExists) {
     return {
       file: path.posix.join('packages', file),
       name: pkg.name,
@@ -34,33 +45,41 @@ export async function downloadResolvedPackage(
   }
 
   await fs.ensureDir(packageDir);
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-tarball-'));
+  const tempPath = path.join(tempDir, file);
 
-  await retry(
-    async () => {
-      const tarballResponse = await fetch(pkg.dist.tarball, {
-        signal: AbortSignal.timeout(60_000),
-      });
+  try {
+    await retry(
+      async () => {
+        const tarballResponse = await fetch(pkg.dist.tarball, {
+          signal: AbortSignal.timeout(60_000),
+        });
 
-      if (tarballResponse.status !== 200) {
-        throw new HttpStatusError(
-          `Tarball download failed with status ${String(tarballResponse.status)}`,
-          tarballResponse.status
-        );
-      }
+        if (tarballResponse.status !== 200) {
+          throw new HttpStatusError(
+            `Tarball download failed with status ${String(tarballResponse.status)}`,
+            tarballResponse.status
+          );
+        }
 
-      if (!tarballResponse.body) {
-        throw new Error(`Tarball download returned an empty response body: ${pkg.dist.tarball}`);
-      }
+        if (!tarballResponse.body) {
+          throw new Error(`Tarball download returned an empty response body: ${pkg.dist.tarball}`);
+        }
 
-      try {
-        await pipeline(Readable.fromWeb(tarballResponse.body), fs.createWriteStream(outputPath));
-      } catch (error) {
-        await fs.remove(outputPath);
-        throw error;
-      }
-    },
-    { isRetryable: isRetryableFetchError }
-  );
+        try {
+          await pipeline(Readable.fromWeb(tarballResponse.body), fs.createWriteStream(tempPath));
+          await fs.copyFile(tempPath, outputPath);
+          knownPackageFiles?.add(file);
+        } catch (error) {
+          await fs.remove(outputPath);
+          throw error;
+        }
+      },
+      { isRetryable: isRetryableFetchError }
+    );
+  } finally {
+    await fs.remove(tempDir);
+  }
 
   return {
     file: path.posix.join('packages', file),
