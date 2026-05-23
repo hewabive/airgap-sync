@@ -270,6 +270,7 @@ export interface PackageVersionMetadata {
   name: string;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   version: string;
 }
 
@@ -334,6 +335,7 @@ export interface PackageManifest {
   name: string;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   version: string;
 }
 
@@ -343,6 +345,7 @@ export interface ProjectPackageManifest {
   name?: string;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   private?: boolean;
   version?: string;
   workspaces?: string[] | { packages?: string[] };

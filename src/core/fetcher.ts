@@ -178,6 +178,9 @@ async function manifestFromRegistry(
     ...(versionMetadata.peerDependencies
       ? { peerDependencies: versionMetadata.peerDependencies }
       : {}),
+    ...(versionMetadata.peerDependenciesMeta
+      ? { peerDependenciesMeta: versionMetadata.peerDependenciesMeta }
+      : {}),
   };
 }
 

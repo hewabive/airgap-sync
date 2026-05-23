@@ -117,6 +117,12 @@ describe('dependencySpecsFromManifest', () => {
     },
     peerDependencies: {
       c: '^3.0.0',
+      d: '^4.0.0',
+    },
+    peerDependenciesMeta: {
+      d: {
+        optional: true,
+      },
     },
   };
 

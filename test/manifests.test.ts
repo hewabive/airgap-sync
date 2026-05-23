@@ -36,7 +36,13 @@ describe('readManifestRequirements', () => {
         typescript: '^5.0.0',
       },
       peerDependencies: {
+        '@types/react': '^19.0.0',
         zod: '^4.0.0',
+      },
+      peerDependenciesMeta: {
+        '@types/react': {
+          optional: true,
+        },
       },
     });
     await writePackageJson('node_modules/ignored/package.json', {

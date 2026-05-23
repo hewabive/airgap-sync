@@ -1438,6 +1438,10 @@ program
         const gitTargets = createWorkspaceGitSources(config);
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
+        const includeDev =
+          options.includeDev === true ? true : config.defaults.download.includeDev === true;
+        const includePeer =
+          options.includePeer === true ? true : config.defaults.download.includePeer === true;
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -1445,8 +1449,8 @@ program
         const report = await collectBundle({
           dryRun: options.dryRun === true,
           concurrency: options.concurrency,
-          includeDev: options.includeDev === true,
-          includePeer: options.includePeer === true,
+          includeDev,
+          includePeer,
           initialGitRequirements: parsedTargets.gitRequirements,
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,

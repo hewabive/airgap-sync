@@ -87,6 +87,11 @@ describe('parseNpmLockRequirementsFromContent', () => {
         packages: {
           '': { version: '0.0.0' },
           'node_modules/@scope/demo': { version: '1.2.3' },
+          'node_modules/@types/react': {
+            optional: true,
+            peer: true,
+            version: '19.0.0',
+          },
           'node_modules/plain': { version: '2.0.0' },
           'node_modules/local': { link: true, version: '1.0.0' },
           'node_modules/git-dep': {

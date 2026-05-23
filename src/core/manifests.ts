@@ -36,11 +36,20 @@ function dependencySpecsFromProjectManifest(
   manifest: ProjectPackageManifest,
   options: ReadManifestRequirementsOptions
 ): Record<string, string> {
+  const peerDependencies =
+    options.includePeer === true
+      ? Object.fromEntries(
+          Object.entries(manifest.peerDependencies ?? {}).filter(
+            ([name]) => manifest.peerDependenciesMeta?.[name]?.optional !== true
+          )
+        )
+      : {};
+
   return {
     ...manifest.dependencies,
     ...manifest.optionalDependencies,
     ...(options.includeDev === true ? manifest.devDependencies : {}),
-    ...(options.includePeer === true ? manifest.peerDependencies : {}),
+    ...peerDependencies,
   };
 }
 

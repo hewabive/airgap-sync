@@ -27,6 +27,8 @@ const ignoredDirectoryNames = new Set([
 
 interface PackageLockPackageEntry {
   link?: boolean;
+  optional?: boolean;
+  peer?: boolean;
   resolved?: string;
   version?: string;
 }
@@ -288,7 +290,7 @@ export function parseNpmLockRequirementsFromContent(
       continue;
     }
 
-    if (name && entry.version) {
+    if (name && entry.version && !(entry.peer === true && entry.optional === true)) {
       addRequirement(requirements, seen, registryRequirement(name, entry.version, requiredBy));
     }
   }
