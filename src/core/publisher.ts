@@ -2,6 +2,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
+import semver from 'semver';
 import type {
   BundleManifest,
   DistTagsManifest,
@@ -120,6 +121,23 @@ function normalizeConcurrency(value: number | undefined, fallback: number): numb
 
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
+}
+
+function isBundledLatestRequirement(requirement: TagRequirement): boolean {
+  return requirement.tag === 'latest' && requirement.requiredBy === 'airgap-sync:bundled-latest';
+}
+
+function shouldKeepCurrentBundledLatest(
+  requirement: TagRequirement,
+  currentVersion: string | undefined
+): boolean {
+  return (
+    isBundledLatestRequirement(requirement) &&
+    currentVersion !== undefined &&
+    semver.valid(currentVersion) !== null &&
+    semver.valid(requirement.version) !== null &&
+    semver.gt(currentVersion, requirement.version)
+  );
 }
 
 function groupByPackageName<T extends { name: string }>(items: T[]): T[][] {
@@ -656,7 +674,11 @@ export async function publishBundle(
   });
 
   async function restoreDistTag(requirement: TagRequirement): Promise<DistTagResult> {
-    if (currentDistTags.get(requirement.name)?.[requirement.tag] === requirement.version) {
+    const currentVersion = currentDistTags.get(requirement.name)?.[requirement.tag];
+    if (
+      currentVersion === requirement.version ||
+      shouldKeepCurrentBundledLatest(requirement, currentVersion)
+    ) {
       tagProgress++;
       options.onProgress?.({
         current: tagProgress,

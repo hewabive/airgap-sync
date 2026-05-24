@@ -129,6 +129,10 @@ bundle, `latest` is restored to the newest version already present in that bundl
 bundle should also fetch the source registry's current `latest` version for every
 included package name.
 
+When publishing a `bundled` latest decision, `airgap-sync` will not downgrade an
+existing Verdaccio `latest` that already points to a newer semver version. Explicit tags
+from real package specs are still restored exactly.
+
 Before transfer, inspect the bundle:
 
 ```bash

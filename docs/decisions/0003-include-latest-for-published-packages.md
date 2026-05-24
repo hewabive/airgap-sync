@@ -36,6 +36,9 @@ but make the source of that decision configurable:
   downloads the source registry's current `latest` target for every included package
   name and traverses its dependencies.
 
+Bundled latest requirements are soft during publish: they must not downgrade an
+existing target registry `latest` that already points to a newer semver version.
+
 Real tag dependencies still resolve through the source registry regardless of this
 setting. For example, `node-fetch@cjs` must restore `cjs` to the source registry's
 version, and an explicit target such as `eslint@latest` resolves `latest` as a real
@@ -47,6 +50,8 @@ operator request.
   on Verdaccio's publish-time behavior.
 - Default bundles stay smaller because deep transitive packages do not automatically
   pull an additional upstream latest version and its dependency closure.
+- Repeated imports can apply older bundles without moving an already newer Verdaccio
+  `latest` backward.
 - Operators can still choose source-aligned `latest` when storage and update breadth are
   more important than bundle size.
 - Old bundles created without this policy are rejected before they can corrupt a fresh

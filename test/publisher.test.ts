@@ -265,4 +265,81 @@ describe('publishBundle', () => {
       await fs.remove(bundleDir);
     }
   });
+
+  it('does not downgrade a newer registry latest for bundled latest requirements', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const progress: PublishProgressEvent[] = [];
+
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          'dist-tags': {
+            latest: '2.0.0',
+          },
+          name: 'demo',
+          versions: {
+            '1.0.0': {
+              dist: {
+                tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
+              },
+              name: 'demo',
+              version: '1.0.0',
+            },
+            '2.0.0': {
+              dist: {
+                tarball: 'https://registry.example/demo/-/demo-2.0.0.tgz',
+              },
+              name: 'demo',
+              version: '2.0.0',
+            },
+          },
+        }),
+        { status: 200 }
+      )
+    );
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+
+      const report = await publishBundle(
+        manifest,
+        {
+          ...distTags,
+          requirements: [
+            {
+              name: 'demo',
+              version: '1.0.0',
+              requiredBy: 'airgap-sync:bundled-latest',
+              tag: 'latest',
+            },
+          ],
+        },
+        {
+          bundleDir,
+          onProgress(event) {
+            progress.push(event);
+          },
+          registryUrl: 'http://localhost:4873',
+        }
+      );
+
+      expect(report).toMatchObject({
+        errors: [],
+        published: 0,
+        restoredTags: 1,
+        skipped: 1,
+      });
+      expect(progress).toContainEqual({
+        current: 1,
+        package: 'demo@1.0.0',
+        phase: 'dist-tags',
+        status: 'skipped',
+        tag: 'latest',
+        total: 1,
+      });
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
 });

@@ -203,6 +203,11 @@ assigns `latest` to the newest version already present in the bundle for each pa
 name. This keeps regular update bundles smaller and avoids pulling fresh upstream
 versions for deep transitive packages that were not otherwise needed.
 
+`bundled` latest requirements are publish-time safety defaults, not strict tag
+restorations. During publish, they must not move an existing target registry `latest`
+backward to an older version from the bundle. If Verdaccio already has a semantically
+newer `latest`, the bundled latest operation is skipped.
+
 The optional `latestPolicy: "source"` mode preserves the older, more aggressive
 behavior. When any package name is included in a bundle, the fetch step also includes
 the source registry's `latest` target for that package name and traverses its
