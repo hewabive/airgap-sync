@@ -112,6 +112,83 @@ describe('resolveRootRequirementFromMetadata', () => {
     expect(result.resolved?.resolvedVia).toBe('range');
   });
 
+  it('resolves mixed range and dist-tag alternatives to the newest available version', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({
+        name: 'tailwindcss',
+        raw: 'tailwindcss@>=3.0.0 || insiders || >=4.0.0-alpha.20 || >=4.0.0-beta.1',
+        specifier: '>=3.0.0 || insiders || >=4.0.0-alpha.20 || >=4.0.0-beta.1',
+        type: 'range',
+      }),
+      {
+        name: 'tailwindcss',
+        'dist-tags': {
+          insiders: '4.0.0-insiders.1',
+          latest: '4.3.0',
+        },
+        versions: {
+          '3.4.17': {
+            name: 'tailwindcss',
+            version: '3.4.17',
+            dist: { tarball: 'https://registry.example/tailwindcss/-/tailwindcss-3.4.17.tgz' },
+          },
+          '4.0.0-insiders.1': {
+            name: 'tailwindcss',
+            version: '4.0.0-insiders.1',
+            dist: {
+              tarball: 'https://registry.example/tailwindcss/-/tailwindcss-4.0.0-insiders.1.tgz',
+            },
+          },
+          '4.3.0': {
+            name: 'tailwindcss',
+            version: '4.3.0',
+            dist: { tarball: 'https://registry.example/tailwindcss/-/tailwindcss-4.3.0.tgz' },
+          },
+        },
+      }
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.resolved).toMatchObject({
+      name: 'tailwindcss',
+      resolvedVia: 'range',
+      specifier: '>=3.0.0 || insiders || >=4.0.0-alpha.20 || >=4.0.0-beta.1',
+      type: 'range',
+      version: '4.3.0',
+    });
+    expect(result.tagRequirement).toBeUndefined();
+  });
+
+  it('records the winning tag when a mixed alternative resolves through a dist-tag', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({
+        raw: 'demo@insiders || nightly',
+        specifier: 'insiders || nightly',
+        type: 'range',
+      }),
+      {
+        ...metadata,
+        'dist-tags': {
+          insiders: '2.0.0-beta.1',
+        },
+      }
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.resolved).toMatchObject({
+      resolvedVia: 'tag',
+      specifier: 'insiders || nightly',
+      type: 'range',
+      version: '2.0.0-beta.1',
+    });
+    expect(result.tagRequirement).toEqual({
+      name: 'demo',
+      requiredBy: 'root',
+      tag: 'insiders',
+      version: '2.0.0-beta.1',
+    });
+  });
+
   it('resolves exact versions', () => {
     const result = resolveRootRequirementFromMetadata(
       requirement({ raw: 'demo@1.0.0', specifier: '1.0.0', type: 'version' }),

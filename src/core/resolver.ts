@@ -15,6 +15,37 @@ function specTypeForResolution(
   return requirement.type === 'alias' ? (requirement.aliasTargetType ?? 'tag') : requirement.type;
 }
 
+interface VersionCandidate {
+  resolvedVia: Exclude<RootPackageRequirement['type'], 'alias'>;
+  tag?: string;
+  version: string;
+}
+
+function newestCandidate(
+  best: VersionCandidate | undefined,
+  candidate: VersionCandidate
+): VersionCandidate {
+  if (!best) {
+    return candidate;
+  }
+
+  const bestVersion = semver.valid(best.version);
+  const candidateVersion = semver.valid(candidate.version);
+  if (bestVersion && candidateVersion) {
+    return semver.gt(candidateVersion, bestVersion) ? candidate : best;
+  }
+
+  if (candidateVersion && !bestVersion) {
+    return candidate;
+  }
+
+  if (!candidateVersion && !bestVersion && candidate.version.localeCompare(best.version) > 0) {
+    return candidate;
+  }
+
+  return best;
+}
+
 function chooseVersion(
   requirement: RootPackageRequirement,
   metadata: PackageMetadata
@@ -22,13 +53,14 @@ function chooseVersion(
   version?: string;
   reason?: string;
   resolvedVia: Exclude<RootPackageRequirement['type'], 'alias'>;
+  tag?: string;
 } {
   const resolvedVia = specTypeForResolution(requirement);
 
   if (resolvedVia === 'tag') {
     const version = metadata['dist-tags']?.[requirement.specifier];
     return version
-      ? { version, resolvedVia }
+      ? { version, resolvedVia, tag: requirement.specifier }
       : { reason: `Tag "${requirement.specifier}" does not exist`, resolvedVia };
   }
 
@@ -38,15 +70,36 @@ function chooseVersion(
       : { reason: `Version "${requirement.specifier}" does not exist`, resolvedVia };
   }
 
-  const latest = metadata['dist-tags']?.latest;
-  if (latest && semver.satisfies(latest, requirement.specifier)) {
-    return { version: latest, resolvedVia };
+  const validRange = semver.validRange(requirement.specifier);
+  if (validRange) {
+    const latest = metadata['dist-tags']?.latest;
+    if (latest && semver.satisfies(latest, requirement.specifier)) {
+      return { version: latest, resolvedVia };
+    }
+
+    const version = semver.maxSatisfying(Object.keys(metadata.versions), requirement.specifier);
+    return version
+      ? { version, resolvedVia }
+      : { reason: `No version satisfies range "${requirement.specifier}"`, resolvedVia };
   }
 
-  const version = semver.maxSatisfying(Object.keys(metadata.versions), requirement.specifier);
-  return version
-    ? { version, resolvedVia }
-    : { reason: `No version satisfies range "${requirement.specifier}"`, resolvedVia };
+  const candidates: VersionCandidate[] = requirement.specifier
+    .split('||')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part): VersionCandidate[] => {
+      if (semver.validRange(part)) {
+        const version = semver.maxSatisfying(Object.keys(metadata.versions), part);
+        return version ? [{ version, resolvedVia }] : [];
+      }
+
+      const taggedVersion = metadata['dist-tags']?.[part];
+      return taggedVersion ? [{ version: taggedVersion, resolvedVia: 'tag' as const, tag: part }] : [];
+    });
+
+  const version = candidates.reduce<VersionCandidate | undefined>(newestCandidate, undefined);
+
+  return version ?? { reason: `No version satisfies range "${requirement.specifier}"`, resolvedVia };
 }
 
 export function resolveRootRequirementFromMetadata(
@@ -112,7 +165,7 @@ export function resolveRootRequirementFromMetadata(
         name: requirement.name,
         version: selected.version,
         requiredBy: requirement.requiredBy,
-        tag: requirement.specifier,
+        tag: selected.tag ?? requirement.specifier,
       },
     };
   }

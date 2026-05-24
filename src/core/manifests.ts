@@ -64,6 +64,23 @@ function manifestRequiredBy(entry: ProjectManifestEntry, rootDir: string): strin
   return `manifest:${relativePath}`;
 }
 
+function isComponentPackageManifest(manifest: ProjectPackageManifest): boolean {
+  const record = manifest as ProjectPackageManifest & Record<string, unknown>;
+  const src = record.src;
+  const hasComponentSourceList = Array.isArray(src) || typeof src === 'string';
+
+  return (
+    typeof record.repo === 'string' &&
+    hasComponentSourceList &&
+    record.scripts === undefined &&
+    record.bin === undefined &&
+    record.main === undefined &&
+    record.module === undefined &&
+    record.exports === undefined &&
+    record.workspaces === undefined
+  );
+}
+
 function isLocalDependency(
   name: string,
   specifier: string,
@@ -149,7 +166,7 @@ export function parseManifestRequirementsFromEntries(
 ): ParseRootSpecsResult {
   const localPackageNames = new Set<string>();
   for (const entry of entries) {
-    if (entry.manifest.name) {
+    if (!isComponentPackageManifest(entry.manifest) && entry.manifest.name) {
       localPackageNames.add(entry.manifest.name);
     }
   }
@@ -160,6 +177,10 @@ export function parseManifestRequirementsFromEntries(
   const seenRequirements = new Set<string>();
 
   for (const entry of entries) {
+    if (isComponentPackageManifest(entry.manifest)) {
+      continue;
+    }
+
     const requiredBy = manifestRequiredBy(entry, rootDir);
     const dependencies = dependencySpecsFromProjectManifest(entry.manifest, options);
 

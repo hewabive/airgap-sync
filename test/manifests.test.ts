@@ -93,4 +93,21 @@ describe('readManifestRequirements', () => {
       'zod',
     ]);
   });
+
+  it('skips component package manifests that are not npm packages', async () => {
+    await writePackageJson('components/sha256/package.json', {
+      name: 'sha256',
+      version: '0.0.2',
+      repo: 'jb55/sha256.c',
+      src: ['sha256.c', 'sha256.h'],
+      dependencies: {
+        'jb55/rotate-bits.h': '0.1.1',
+      },
+    });
+
+    const result = await readManifestRequirements(tempDir);
+
+    expect(result.unsupported).toEqual([]);
+    expect(result.requirements.some((requirement) => requirement.raw.includes('jb55'))).toBe(false);
+  });
 });
