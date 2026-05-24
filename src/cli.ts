@@ -64,6 +64,7 @@ import type {
   CollectReport,
   CollectProgressEvent,
   FetchSeedBundleResult,
+  LatestPolicy,
   PublishProgressEvent,
   PublishProgressPhase,
   ResolveRootRequirementsResult,
@@ -81,6 +82,7 @@ interface FetchOptions {
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
+  latestPolicy?: LatestPolicy;
   manifest?: string;
   output: string;
   registry: string;
@@ -126,6 +128,7 @@ interface CollectOptions {
   includeDev?: boolean;
   includePeer?: boolean;
   json?: boolean;
+  latestPolicy?: LatestPolicy;
   output?: string;
   registry?: string;
 }
@@ -152,6 +155,14 @@ function parsePositiveInteger(value: string): number {
     throw new Error(`Expected a positive integer, got: ${value}`);
   }
   return parsed;
+}
+
+function parseLatestPolicy(value: string): LatestPolicy {
+  if (value === 'bundled' || value === 'source') {
+    return value;
+  }
+
+  throw new Error(`Expected latest policy to be "bundled" or "source"; got: ${value}`);
 }
 
 function addNpmPublishOptions(command: Command): Command {
@@ -315,6 +326,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
+    `Latest policy: ${config.defaults.download.latestPolicy}`,
     `Publish public repositories: ${promptBooleanToString(config.defaults.publish.publicRepositories)}`,
     `Configure global Git rewrites: ${promptBooleanToString(config.defaults.publish.configureGitGlobal)}`,
     `Verify install ignore scripts: ${promptBooleanToString(config.defaults.verifyInstall.ignoreScripts)}`,
@@ -723,6 +735,14 @@ async function askPromptBoolean(
   );
 }
 
+async function askLatestPolicy(
+  rl: ReadlineInterface,
+  current: LatestPolicy
+): Promise<LatestPolicy> {
+  const answer = await ask(rl, 'Latest policy (bundled/source)', current);
+  return parseLatestPolicy(answer || current);
+}
+
 async function resolvePromptBoolean(
   rl: ReadlineInterface,
   question: string,
@@ -851,6 +871,7 @@ async function configureDownloadDefaults(
     'Traverse peerDependencies by default',
     config.defaults.download.includePeer
   );
+  const latestPolicy = await askLatestPolicy(rl, config.defaults.download.latestPolicy);
   const nextConfig: WorkspaceConfig = {
     ...config,
     defaults: {
@@ -858,6 +879,7 @@ async function configureDownloadDefaults(
       download: {
         includeDev,
         includePeer,
+        latestPolicy,
       },
     },
   };
@@ -1570,6 +1592,11 @@ program
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option(
+    '--latest-policy <policy>',
+    'Latest dist-tag policy: bundled or source',
+    parseLatestPolicy
+  )
+  .option(
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
@@ -1592,6 +1619,7 @@ program
           options.includeDev === true ? true : config.defaults.download.includeDev === true;
         const includePeer =
           options.includePeer === true ? true : config.defaults.download.includePeer === true;
+        const latestPolicy = options.latestPolicy ?? config.defaults.download.latestPolicy;
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -1605,6 +1633,7 @@ program
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
           initialUnsupported: parsedTargets.unsupported,
+          latestPolicy,
           onProgress: createCollectProgressLogger(),
           outputDir,
           registry,
@@ -1651,6 +1680,7 @@ program
         concurrency: options.concurrency,
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
+        latestPolicy: options.latestPolicy ?? 'bundled',
         onProgress: createCollectProgressLogger(),
         outputDir,
         registry,
@@ -1681,6 +1711,12 @@ program
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option(
+    '--latest-policy <policy>',
+    'Latest dist-tag policy: bundled or source',
+    parseLatestPolicy,
+    'bundled'
+  )
+  .option(
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
@@ -1704,6 +1740,7 @@ program
     const requirements = [...parsedSpecs.requirements, ...parsedManifest.requirements];
     const unsupported = [...parsedSpecs.unsupported, ...parsedManifest.unsupported];
     const gitRequirements = [...parsedSpecs.gitRequirements, ...parsedManifest.gitRequirements];
+    const latestPolicy = options.latestPolicy ?? 'bundled';
 
     if (requirements.length === 0) {
       console.error('Error: no supported package specs to resolve');
@@ -1719,6 +1756,7 @@ program
         concurrency: options.concurrency,
         download: false,
         includePeer: options.includePeer === true,
+        latestPolicy,
         outputDir: options.output,
         registry,
         gitRequirements,
@@ -1735,6 +1773,7 @@ program
     const resolution = await fetchSeedBundle({
       concurrency: options.concurrency,
       includePeer: options.includePeer === true,
+      latestPolicy,
       outputDir: options.output,
       registry,
       gitRequirements,
@@ -1746,6 +1785,7 @@ program
     if (success) {
       const documents = createBundleDocuments({
         outputDir: options.output,
+        latestPolicy,
         resolved: resolution.resolved,
         sourceRegistry: options.registry,
         tagRequirements: resolution.tagRequirements,

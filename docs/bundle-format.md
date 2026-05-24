@@ -44,7 +44,8 @@ Describes every tarball in the bundle and why it was included.
 
 ## dist-tags.json
 
-Records tags required by dependency specs.
+Records tags required by dependency specs and publish-time `latest` decisions selected
+by the configured latest policy.
 
 ```json
 {

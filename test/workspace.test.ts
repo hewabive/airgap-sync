@@ -34,6 +34,7 @@ describe('workspace config', () => {
         download: {
           includeDev: 'ask',
           includePeer: false,
+          latestPolicy: 'bundled',
         },
         publish: {
           configureGitGlobal: 'ask',
@@ -117,6 +118,7 @@ describe('workspace config', () => {
         download: {
           includeDev: 'ask',
           includePeer: false,
+          latestPolicy: 'bundled',
         },
         publish: {
           configureGitGlobal: 'ask',
@@ -140,6 +142,7 @@ describe('workspace config', () => {
           download: {
             includeDev: false,
             includePeer: true,
+            latestPolicy: 'source',
           },
           publish: {
             configureGitGlobal: true,
@@ -161,6 +164,7 @@ describe('workspace config', () => {
       download: {
         includeDev: false,
         includePeer: true,
+        latestPolicy: 'source',
       },
       publish: {
         configureGitGlobal: true,

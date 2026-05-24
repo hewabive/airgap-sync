@@ -88,9 +88,21 @@ describe('fetchSeedBundle', () => {
     );
   });
 
-  it('adds the upstream latest target for packages resolved by exact version', async () => {
+  it('does not add upstream latest targets by default', async () => {
+    const result = await fetchSeedBundle({
+      outputDir: '/virtual/seed',
+      registry,
+      requirements: [requirement({})],
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@1.0.0']);
+    expect(result.tagRequirements).toEqual([]);
+  });
+
+  it('adds the upstream latest target for packages resolved by exact version in source latest policy', async () => {
     const progress: string[] = [];
     const result = await fetchSeedBundle({
+      latestPolicy: 'source',
       onProgress(event) {
         progress.push(`${event.phase}:${event.status}`);
       },
@@ -234,6 +246,7 @@ describe('fetchSeedBundle', () => {
     };
 
     const result = await fetchSeedBundle({
+      latestPolicy: 'source',
       download: false,
       outputDir: '/virtual/seed',
       registry: registryWithDependencies,
@@ -316,6 +329,7 @@ describe('fetchSeedBundle', () => {
     };
 
     const result = await fetchSeedBundle({
+      latestPolicy: 'source',
       download: false,
       outputDir: '/virtual/seed',
       registry: registryWithTaggedDependency,

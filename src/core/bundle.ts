@@ -1,4 +1,5 @@
 import path from 'node:path';
+import semver from 'semver';
 import * as fs from './fs.js';
 import type {
   ApplyBundleReport,
@@ -12,6 +13,7 @@ import type {
   GitConfigReport,
   GitFetchReport,
   GitRequirement,
+  LatestPolicy,
   PublishReport,
   ResolvedPackage,
   ResolvedRootPackage,
@@ -27,6 +29,7 @@ import type { WorkspaceSnapshot } from './workspace.js';
 export interface BundleDocumentsOptions {
   createdAt?: string;
   outputDir: string;
+  latestPolicy?: LatestPolicy;
   resolved: ResolvedRootPackage[];
   sourceRegistry: string;
   tagRequirements: TagRequirement[];
@@ -48,8 +51,68 @@ export interface FetchReportOptions {
   unsupported: UnsupportedRootPackageRequirement[];
 }
 
+function compareVersions(left: string, right: string): number {
+  if (semver.valid(left) && semver.valid(right)) {
+    return semver.compare(left, right);
+  }
+
+  return left.localeCompare(right);
+}
+
+function isArtificialSourceLatestRequirement(requirement: TagRequirement): boolean {
+  return requirement.tag === 'latest' && requirement.requiredBy === 'airgap-sync:publish-latest';
+}
+
+function bundledLatestRequirements(
+  packages: ResolvedRootPackage[],
+  existingLatestNames = new Set<string>()
+): TagRequirement[] {
+  const latestByName = new Map<string, string>();
+
+  for (const pkg of packages) {
+    if (existingLatestNames.has(pkg.name)) {
+      continue;
+    }
+
+    const current = latestByName.get(pkg.name);
+    if (!current || compareVersions(current, pkg.version) < 0) {
+      latestByName.set(pkg.name, pkg.version);
+    }
+  }
+
+  return [...latestByName]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([name, version]) => ({
+      name,
+      requiredBy: 'airgap-sync:bundled-latest',
+      tag: 'latest',
+      version,
+    }));
+}
+
+function tagRequirementsForPolicy(options: BundleDocumentsOptions): TagRequirement[] {
+  if ((options.latestPolicy ?? 'bundled') === 'source') {
+    return options.tagRequirements;
+  }
+
+  const explicitRequirements = options.tagRequirements.filter(
+    (requirement) => !isArtificialSourceLatestRequirement(requirement)
+  );
+  const explicitLatestNames = new Set(
+    explicitRequirements
+      .filter((requirement) => requirement.tag === 'latest')
+      .map((requirement) => requirement.name)
+  );
+
+  return [
+    ...explicitRequirements,
+    ...bundledLatestRequirements(options.resolved, explicitLatestNames),
+  ];
+}
+
 export function createBundleDocuments(options: BundleDocumentsOptions): BundleDocuments {
   const createdAt = options.createdAt ?? new Date().toISOString();
+  const tagRequirements = tagRequirementsForPolicy(options);
   const packages: ResolvedPackage[] = options.resolved.map((pkg) => ({
     name: pkg.name,
     version: pkg.version,
@@ -66,7 +129,7 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
   }));
 
   const tags: Record<string, Record<string, string>> = {};
-  for (const requirement of options.tagRequirements) {
+  for (const requirement of tagRequirements) {
     const packageTags = (tags[requirement.name] ??= {});
     packageTags[requirement.tag] = requirement.version;
   }
@@ -83,7 +146,7 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
       createdAt,
       sourceRegistry: options.sourceRegistry,
       tags,
-      requirements: options.tagRequirements,
+      requirements: tagRequirements,
     },
   };
 }

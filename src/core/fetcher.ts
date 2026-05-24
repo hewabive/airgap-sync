@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   FetchTimings,
   GitRequirement,
+  LatestPolicy,
   PackageManifest,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
@@ -24,6 +25,7 @@ export interface FetchSeedBundleOptions {
   concurrency?: number;
   download?: boolean;
   includePeer?: boolean;
+  latestPolicy?: LatestPolicy;
   onProgress?: (event: FetchProgressEvent) => void;
   outputDir: string;
   registry: RegistryClient;
@@ -170,6 +172,7 @@ export async function fetchSeedBundle(
 ): Promise<FetchSeedBundleResult> {
   const totalStart = performance.now();
   const shouldDownload = options.download !== false;
+  const latestPolicy = options.latestPolicy ?? 'bundled';
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
   const queue = [...options.requirements];
   const latestRequirements = new Set<string>();
@@ -257,7 +260,10 @@ export async function fetchSeedBundle(
     if (!latestRequirements.has(resolved.name)) {
       latestRequirements.add(resolved.name);
 
-      if (!(resolved.resolvedVia === 'tag' && resolved.specifier === 'latest')) {
+      if (
+        latestPolicy === 'source' &&
+        !(resolved.resolvedVia === 'tag' && resolved.specifier === 'latest')
+      ) {
         enqueueRequirement(publishLatestRequirement(resolved.name));
       }
     }

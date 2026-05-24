@@ -72,6 +72,89 @@ describe('createBundleDocuments', () => {
       },
     });
   });
+
+  it('sets bundled latest to the newest included version', () => {
+    const documents = createBundleDocuments({
+      createdAt: '2026-05-20T00:00:00.000Z',
+      outputDir: './airgap-bundle',
+      resolved: [
+        {
+          ...resolvedPackage,
+          raw: '@scope/demo@1.0.0',
+          resolvedVia: 'version',
+          specifier: '1.0.0',
+          type: 'version',
+          version: '1.0.0',
+        },
+        resolvedPackage,
+      ],
+      sourceRegistry: 'https://registry.example',
+      tagRequirements: [],
+    });
+
+    expect(documents.distTagsManifest).toMatchObject({
+      tags: {
+        '@scope/demo': {
+          latest: '1.2.3',
+        },
+      },
+      requirements: [
+        {
+          name: '@scope/demo',
+          requiredBy: 'airgap-sync:bundled-latest',
+          tag: 'latest',
+          version: '1.2.3',
+        },
+      ],
+    });
+  });
+
+  it('keeps explicit latest requirements in bundled latest mode', () => {
+    const documents = createBundleDocuments({
+      createdAt: '2026-05-20T00:00:00.000Z',
+      outputDir: './airgap-bundle',
+      resolved: [
+        resolvedPackage,
+        {
+          ...resolvedPackage,
+          raw: '@scope/demo@2.0.0-beta.1',
+          resolvedVia: 'version',
+          specifier: '2.0.0-beta.1',
+          type: 'version',
+          version: '2.0.0-beta.1',
+        },
+      ],
+      sourceRegistry: 'https://registry.example',
+      tagRequirements: [
+        {
+          name: '@scope/demo',
+          requiredBy: 'root',
+          tag: 'latest',
+          version: '1.2.3',
+        },
+        {
+          name: '@scope/demo',
+          requiredBy: 'airgap-sync:publish-latest',
+          tag: 'latest',
+          version: '2.0.0-beta.1',
+        },
+      ],
+    });
+
+    expect(documents.distTagsManifest.tags).toEqual({
+      '@scope/demo': {
+        latest: '1.2.3',
+      },
+    });
+    expect(documents.distTagsManifest.requirements).toEqual([
+      {
+        name: '@scope/demo',
+        requiredBy: 'root',
+        tag: 'latest',
+        version: '1.2.3',
+      },
+    ]);
+  });
 });
 
 describe('createFetchReport', () => {

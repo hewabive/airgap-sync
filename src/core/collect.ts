@@ -8,6 +8,7 @@ import type {
   CollectTimings,
   GitRequirement,
   GitSource,
+  LatestPolicy,
   RepositoryUpdateReport,
   RootPackageRequirement,
   UnsupportedRootPackageRequirement,
@@ -43,6 +44,7 @@ export interface CollectBundleOptions {
   initialGitSources?: GitSource[];
   initialRequirements?: RootPackageRequirement[];
   initialUnsupported?: UnsupportedRootPackageRequirement[];
+  latestPolicy?: LatestPolicy;
   maxIterations?: number;
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
@@ -386,6 +388,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       download: !dryRun,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
+      latestPolicy: options.latestPolicy ?? 'bundled',
       onProgress: (event: FetchProgressEvent) => {
         const detail = [event.phase, event.package].filter(Boolean).join(' ');
         options.onProgress?.({
@@ -570,6 +573,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         outputDir,
         resolved: resolution.resolved,
         sourceRegistry: options.registryUrl,
+        latestPolicy: options.latestPolicy ?? 'bundled',
         tagRequirements: resolution.tagRequirements,
       });
       await writeBundleDocuments(outputDir, documents);

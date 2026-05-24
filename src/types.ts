@@ -4,6 +4,7 @@ export interface PackageIdentity {
 }
 
 export type SupportedSpecType = 'version' | 'range' | 'tag' | 'alias';
+export type LatestPolicy = 'bundled' | 'source';
 
 export interface RootPackageRequirement {
   name: string;

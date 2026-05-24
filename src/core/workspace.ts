@@ -1,7 +1,7 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import { createGitSourceFromUrl } from './git-sources.js';
-import type { GitSource } from '../types.js';
+import type { GitSource, LatestPolicy } from '../types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
@@ -26,6 +26,7 @@ export interface WorkspaceDefaults {
   download: {
     includeDev: WorkspacePromptBoolean;
     includePeer: WorkspacePromptBoolean;
+    latestPolicy: LatestPolicy;
   };
   publish: {
     configureGitGlobal: WorkspacePromptBoolean;
@@ -94,6 +95,7 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
       download: {
         includeDev: 'ask',
         includePeer: false,
+        latestPolicy: 'bundled',
       },
       publish: {
         configureGitGlobal: 'ask',
@@ -172,6 +174,10 @@ function normalizePromptBoolean(
   return fallback;
 }
 
+function normalizeLatestPolicy(value: unknown, fallback: LatestPolicy): LatestPolicy {
+  return value === 'source' || value === 'bundled' ? value : fallback;
+}
+
 function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   const defaults = createDefaultWorkspaceConfig().defaults;
   const input = isRecord(value) ? value : {};
@@ -183,6 +189,7 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
     download: {
       includeDev: normalizePromptBoolean(download.includeDev, defaults.download.includeDev),
       includePeer: normalizePromptBoolean(download.includePeer, defaults.download.includePeer),
+      latestPolicy: normalizeLatestPolicy(download.latestPolicy, defaults.download.latestPolicy),
     },
     publish: {
       configureGitGlobal: normalizePromptBoolean(

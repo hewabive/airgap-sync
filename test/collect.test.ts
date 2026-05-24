@@ -542,6 +542,7 @@ __metadata:
 
       const report = await collectBundle({
         generatedAt: '2026-05-21T00:00:00.000Z',
+        latestPolicy: 'source',
         outputDir: path.join(tempDir, 'airgap-bundle'),
         registry: {
           getPackageMetadata(name) {

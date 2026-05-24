@@ -196,6 +196,7 @@ export type {
   GitRequirement,
   GitSource,
   GitSourcesManifest,
+  LatestPolicy,
   PackageMetadata,
   PackageManifest,
   PackageVersionMetadata,

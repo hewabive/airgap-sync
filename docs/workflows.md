@@ -63,8 +63,10 @@ Keep this file in the workspace root on removable media, next to `airgap-bundle/
 is long-lived workspace state rather than a file inside one generated bundle. The same
 file stores endpoint URLs, bundle output, and menu defaults; boolean defaults can be
 set to `true`, `false`, or `ask` under `defaults.download`, `defaults.publish`, and
-`defaults.verifyInstall`. When the interactive menu initializes a workspace, it asks
-for these defaults during setup.
+`defaults.verifyInstall`. `defaults.download.latestPolicy` controls whether artificial
+`latest` tags are assigned to bundled versions or resolved from the source registry.
+When the interactive menu initializes a workspace, it asks for these defaults during
+setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
@@ -120,6 +122,12 @@ The download step writes npm metadata and Git source metadata:
 - package tarballs under `packages/`
 - local bare Git mirrors under `git-mirrors/`
 - Git source records for offline publish
+
+By default, download uses `latestPolicy: "bundled"`: for each package name in the
+bundle, `latest` is restored to the newest version already present in that bundle. Use
+`latestPolicy: "source"` or `airgap-sync download --latest-policy source` when the
+bundle should also fetch the source registry's current `latest` version for every
+included package name.
 
 Before transfer, inspect the bundle:
 

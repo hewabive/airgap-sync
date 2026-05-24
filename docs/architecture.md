@@ -164,8 +164,7 @@ match local packages discovered in the same scan root are skipped for local
 `workspace:`, `file:`, and `link:` specs.
 
 Dry-run fetch uses the same traversal policy as a normal fetch, but reads dependency
-metadata from the source registry instead of downloading tarballs and extracting
-package.json files.
+metadata from the source registry without downloading tarballs.
 
 ## Collection Fixed Point
 
@@ -189,20 +188,31 @@ npm resolver must run again before the bundle is considered complete.
 
 ## Tag Policy
 
-For shared registries, tags must match the source registry targets at fetch time.
-
-The tool must not assign `latest` to a lockfile version simply because that version was
-downloaded. That would make one project's seed corrupt another project's dependency
-resolution in the same Verdaccio instance.
-
-Tags that are required by discovered dependency specs should be restored.
+Tags that are required by discovered dependency specs should be restored. This matters
+for real dependency specs such as `node-fetch@cjs`, where the package manager asks the
+registry for a tag instead of a concrete version.
 
 `latest` is a special case. Verdaccio may create or keep `latest` during `npm publish`
 even when publishing with a custom temporary tag, and deleting the last `latest` tag is
-not reliable enough to use as a safety mechanism. Therefore, when any package name is
-included in a bundle, the fetch step also includes the source registry's `latest` target
-for that package name and records a `latest` tag requirement. If that pulls in an
-additional version, its dependencies are traversed too.
+not reliable enough to use as a safety mechanism. The bundle must therefore contain a
+`latest` decision for every package name that may be newly published.
+
+The default `latestPolicy` is `bundled`. In this mode, the tool does not fetch the
+source registry's `latest` for every transitive package. Instead, `dist-tags.json`
+assigns `latest` to the newest version already present in the bundle for each package
+name. This keeps regular update bundles smaller and avoids pulling fresh upstream
+versions for deep transitive packages that were not otherwise needed.
+
+The optional `latestPolicy: "source"` mode preserves the older, more aggressive
+behavior. When any package name is included in a bundle, the fetch step also includes
+the source registry's `latest` target for that package name and traverses its
+dependencies. Use this mode when the operator wants a fresher local registry and accepts
+larger bundles.
+
+Explicit tag requirements still resolve through the source registry. A target such as
+`eslint@latest` or a dependency such as `node-fetch@cjs` is treated as a real tag
+request. The latest policy only controls the artificial publish-time `latest` tag added
+for package names that are already in the bundle.
 
 ## Publish Policy
 

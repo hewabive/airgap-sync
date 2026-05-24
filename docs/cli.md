@@ -54,8 +54,9 @@ The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry`, `giteaUrl`, bundle output, and default answers in `airgap-sync.json`.
 When the menu initializes a new workspace, it asks for these values up front.
 Default answers live under `defaults.download`, `defaults.publish`, and
-`defaults.verifyInstall`. They can be `yes`, `no`, or `ask`; `ask` keeps the prompt for
-that action.
+`defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
+the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
+`source`.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## secrets
@@ -92,6 +93,7 @@ airgap-sync download
 airgap-sync download ./repos \
   --registry https://registry.npmjs.org \
   --include-dev \
+  --latest-policy bundled \
   --concurrency 16 \
   --output ./airgap-bundle
 ```
@@ -107,6 +109,10 @@ bundle-local mirror paths for later verification.
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
 
+`--latest-policy bundled` is the default. It records `latest` as the newest version
+already included in the bundle for each package name. `--latest-policy source` also
+resolves and downloads the source registry's `latest` for each included package name.
+
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
 The online bundle should store Git source identities and local mirrors, not
@@ -118,6 +124,7 @@ Gitea-specific target URLs.
 airgap-sync fetch react@latest @types/node@^22 \
   --output ./airgap-bundle \
   --registry https://registry.npmjs.org \
+  --latest-policy bundled \
   --concurrency 16
 
 # Or from a project manifest. The manifest directory is scanned recursively for nested
@@ -135,6 +142,7 @@ Supported options:
 --manifest <path>         Read dependencies from a package.json or directory
 --include-dev             Include devDependencies from discovered manifests
 --include-peer            Traverse peerDependencies
+--latest-policy <policy>  Latest dist-tag policy: bundled or source
 --concurrency <number>    Concurrent registry and download operations
 --dry-run                 Resolve and report without downloading
 ```
@@ -142,8 +150,9 @@ Supported options:
 At least one package spec or `--manifest` is required.
 
 `--dry-run` performs the same dependency traversal as a normal fetch, including
-transitive dependencies and publish-time `latest` targets, but reads package manifests
-from registry metadata instead of downloading tarballs.
+transitive dependencies and publish-time `latest` targets required by the selected
+latest policy, but reads package manifests from registry metadata without downloading
+tarballs.
 
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
