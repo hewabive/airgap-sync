@@ -111,9 +111,11 @@ bundle-local mirror paths for later verification.
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
 
-`--latest-policy bundled` is the default. It records `latest` as the newest version
-already included in the bundle for each package name. `--latest-policy source` also
-resolves and downloads the source registry's `latest` for each included package name.
+`--latest-policy bundled` is the default. It does not store computed `latest` entries
+in `dist-tags.json`; publish derives them from the newest version already included in
+the bundle for each package name. `--latest-policy source` also resolves and downloads
+the source registry's `latest` for each included package name and records those tag
+requirements in `dist-tags.json`.
 
 `--tag-resolution-policy reuse-stable` is the default. It reuses a previous
 `dist-tags.json` tag mapping only when the same `name + tag + requiredBy` existed in the

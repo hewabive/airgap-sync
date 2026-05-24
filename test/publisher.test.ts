@@ -86,6 +86,50 @@ describe('createPublishPlan', () => {
       },
     ]);
   });
+
+  it('plans computed bundled latest actions without persisted dist-tags', () => {
+    expect(
+      createPublishPlan(
+        {
+          ...manifest,
+          packages: [
+            ...manifest.packages,
+            {
+              name: 'untagged',
+              version: '1.0.0',
+              file: 'packages/untagged-1.0.0.tgz',
+              tarball: 'https://registry.example/untagged/-/untagged-1.0.0.tgz',
+              resolvedFrom: [],
+            },
+          ],
+        },
+        distTags
+      )
+    ).toEqual([
+      {
+        action: 'publish',
+        package: 'demo@1.0.0',
+        status: 'planned',
+      },
+      {
+        action: 'publish',
+        package: 'untagged@1.0.0',
+        status: 'planned',
+      },
+      {
+        action: 'dist-tag',
+        package: 'demo@1.0.0',
+        status: 'planned',
+        tag: 'latest',
+      },
+      {
+        action: 'dist-tag',
+        package: 'untagged@1.0.0',
+        status: 'planned',
+        tag: 'latest',
+      },
+    ]);
+  });
 });
 
 describe('publishBundle', () => {
@@ -153,42 +197,6 @@ describe('publishBundle', () => {
         registryUrl: 'https://registry.npmjs.org',
       })
     ).rejects.toThrow('Refusing to publish to public registry');
-  });
-
-  it('requires latest tags for package names missing from the target registry', async () => {
-    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
-    fetchMock.mockResolvedValue(new Response('', { status: 404 }));
-
-    try {
-      await fs.ensureDir(path.join(bundleDir, 'packages'));
-      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
-      await fs.writeFile(path.join(bundleDir, 'packages/untagged-1.0.0.tgz'), '');
-
-      await expect(
-        publishBundle(
-          {
-            ...manifest,
-            packages: [
-              ...manifest.packages,
-              {
-                name: 'untagged',
-                version: '1.0.0',
-                file: 'packages/untagged-1.0.0.tgz',
-                tarball: 'https://registry.example/untagged/-/untagged-1.0.0.tgz',
-                resolvedFrom: [],
-              },
-            ],
-          },
-          distTags,
-          {
-            bundleDir,
-            registryUrl: 'http://localhost:4873',
-          }
-        )
-      ).rejects.toThrow('Bundle is missing upstream latest tags');
-    } finally {
-      await fs.remove(bundleDir);
-    }
   });
 
   it('uses package metadata to skip existing versions and tags', async () => {
@@ -306,14 +314,8 @@ describe('publishBundle', () => {
         manifest,
         {
           ...distTags,
-          requirements: [
-            {
-              name: 'demo',
-              version: '1.0.0',
-              requiredBy: 'airgap-sync:bundled-latest',
-              tag: 'latest',
-            },
-          ],
+          requirements: [],
+          tags: {},
         },
         {
           bundleDir,

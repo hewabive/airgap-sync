@@ -124,11 +124,12 @@ The download step writes npm metadata and Git source metadata:
 - local bare Git mirrors under `git-mirrors/`
 - Git source records for offline publish
 
-By default, download uses `latestPolicy: "bundled"`: for each package name in the
-bundle, `latest` is restored to the newest version already present in that bundle. Use
+By default, download uses `latestPolicy: "bundled"`: publish computes `latest` from
+`seed-manifest.json`, using the newest version already present in the bundle for each
+package name. These computed latest decisions are not written to `dist-tags.json`. Use
 `latestPolicy: "source"` or `airgap-sync download --latest-policy source` when the
 bundle should also fetch the source registry's current `latest` version for every
-included package name.
+included package name and record those tag requirements.
 
 When publishing a `bundled` latest decision, `airgap-sync` will not downgrade an
 existing Verdaccio `latest` that already points to a newer semver version. Explicit tags

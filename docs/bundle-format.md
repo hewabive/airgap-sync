@@ -44,10 +44,12 @@ Describes every tarball in the bundle and why it was included.
 
 ## dist-tags.json
 
-Records tags required by dependency specs and publish-time `latest` decisions selected
-by the configured latest policy. On repeated downloads, `airgap-sync` can also use this
-file as the previous bundle's stable tag map: reuse requires the same `name`, `tag`, and
-`requiredBy` plus a still-present mapped tarball.
+Records real tags required by package specs, such as `foo@latest`, `foo@next`, or
+`node-fetch@cjs`. In `latestPolicy: "bundled"` mode, computed publish-time `latest`
+tags are not stored here; publish derives them from `seed-manifest.json`. On repeated
+downloads, `airgap-sync` can also use this file as the previous bundle's stable tag
+map: reuse requires the same `name`, `tag`, and `requiredBy` plus a still-present
+mapped tarball.
 
 ```json
 {

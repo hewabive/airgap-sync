@@ -123,6 +123,14 @@ function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
 }
 
+function compareVersions(left: string, right: string): number {
+  if (semver.valid(left) && semver.valid(right)) {
+    return semver.compare(left, right);
+  }
+
+  return left.localeCompare(right);
+}
+
 function isBundledLatestRequirement(requirement: TagRequirement): boolean {
   return requirement.tag === 'latest' && requirement.requiredBy === 'airgap-sync:bundled-latest';
 }
@@ -218,18 +226,36 @@ async function runNpm(args: string[], options: NpmRunOptions): Promise<{ stdout:
   });
 }
 
-function packageNamesMissingLatestTags(
+function bundledLatestRequirements(
   manifest: BundleManifest,
   distTags: DistTagsManifest
-): string[] {
-  const packageNames = new Set(manifest.packages.map((pkg) => pkg.name));
+): TagRequirement[] {
   const namesWithLatest = new Set(
     distTags.requirements
       .filter((requirement) => requirement.tag === 'latest')
       .map((requirement) => requirement.name)
   );
+  const latestByName = new Map<string, string>();
 
-  return [...packageNames].filter((name) => !namesWithLatest.has(name));
+  for (const pkg of manifest.packages) {
+    if (namesWithLatest.has(pkg.name)) {
+      continue;
+    }
+
+    const current = latestByName.get(pkg.name);
+    if (!current || compareVersions(current, pkg.version) < 0) {
+      latestByName.set(pkg.name, pkg.version);
+    }
+  }
+
+  return [...latestByName]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([name, version]) => ({
+      name,
+      requiredBy: 'airgap-sync:bundled-latest',
+      tag: 'latest',
+      version,
+    }));
 }
 
 async function npmPublish(tarballPath: string, registryUrl: string): Promise<void> {
@@ -432,21 +458,21 @@ async function lookupPackageSnapshots(
   return new Map(entries);
 }
 
-async function npmPackageNameExists(packageName: string, registryUrl: string): Promise<boolean> {
-  return (await npmPackageSnapshot(packageName, registryUrl)).versions.size > 0;
-}
-
 export function createPublishPlan(
   manifest: BundleManifest,
   distTags: DistTagsManifest
 ): PublishActionResult[] {
+  const tagRequirements = [
+    ...distTags.requirements,
+    ...bundledLatestRequirements(manifest, distTags),
+  ];
   return [
     ...manifest.packages.map((pkg) => ({
       action: 'publish' as const,
       package: packageId(pkg),
       status: 'planned' as const,
     })),
-    ...distTags.requirements.map((requirement) => ({
+    ...tagRequirements.map((requirement) => ({
       action: 'dist-tag' as const,
       package: packageId(requirement),
       status: 'planned' as const,
@@ -477,6 +503,10 @@ export async function publishBundle(
   let published = 0;
   let skipped = 0;
   let restoredTags = 0;
+  const tagRequirements = [
+    ...distTags.requirements,
+    ...bundledLatestRequirements(manifest, distTags),
+  ];
 
   if (options.dryRun) {
     const dryRunStart = performance.now();
@@ -503,7 +533,6 @@ export async function publishBundle(
   }
 
   const lookupMetadataStart = performance.now();
-  const existingPackageNames = new Set<string>();
   const packageSnapshots =
     options.skipExisting === false
       ? new Map<string, PackageRegistrySnapshot>()
@@ -515,33 +544,6 @@ export async function publishBundle(
     [...packageSnapshots].map(([name, snapshot]) => [name, snapshot.distTags] as const)
   );
   const publishedPackageNames = new Set<string>();
-
-  const packageNamesWithoutLatest = packageNamesMissingLatestTags(manifest, distTags);
-  for (const packageName of packageNamesWithoutLatest) {
-    if (existingPackageNames.has(packageName)) {
-      continue;
-    }
-
-    const existingVersions = existingVersionsByPackage.get(packageName);
-    if (
-      (existingVersions && existingVersions.size > 0) ||
-      (await npmPackageNameExists(packageName, options.registryUrl))
-    ) {
-      existingPackageNames.add(packageName);
-    }
-  }
-
-  const missingLatest = packageNamesWithoutLatest.filter((name) => !existingPackageNames.has(name));
-
-  if (missingLatest.length > 0) {
-    throw new Error(
-      [
-        'Bundle is missing upstream latest tags for packages that do not exist in the target registry.',
-        'Regenerate the bundle with a current airgap-sync fetch command.',
-        `Packages: ${missingLatest.join(', ')}`,
-      ].join(' ')
-    );
-  }
   timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
 
   const publishStart = performance.now();
@@ -670,7 +672,7 @@ export async function publishBundle(
     current: tagProgress,
     phase: 'dist-tags',
     status: 'start',
-    total: distTags.requirements.length,
+    total: tagRequirements.length,
   });
 
   async function restoreDistTag(requirement: TagRequirement): Promise<DistTagResult> {
@@ -686,7 +688,7 @@ export async function publishBundle(
         phase: 'dist-tags',
         status: 'skipped',
         tag: requirement.tag,
-        total: distTags.requirements.length,
+        total: tagRequirements.length,
       });
       return {
         package: packageId(requirement),
@@ -707,7 +709,7 @@ export async function publishBundle(
         phase: 'dist-tags',
         status: 'tagged',
         tag: requirement.tag,
-        total: distTags.requirements.length,
+        total: tagRequirements.length,
       });
       return {
         package: packageId(requirement),
@@ -722,7 +724,7 @@ export async function publishBundle(
         phase: 'dist-tags',
         status: 'error',
         tag: requirement.tag,
-        total: distTags.requirements.length,
+        total: tagRequirements.length,
       });
       return {
         error: errorSummary(error),
@@ -734,7 +736,7 @@ export async function publishBundle(
   }
 
   const distTagResultGroups = await mapWithConcurrency(
-    groupByPackageName(distTags.requirements),
+    groupByPackageName(tagRequirements),
     distTagConcurrency,
     async (group) => {
       const results: DistTagResult[] = [];
@@ -761,7 +763,7 @@ export async function publishBundle(
     current: tagProgress,
     phase: 'dist-tags',
     status: 'done',
-    total: distTags.requirements.length,
+    total: tagRequirements.length,
   });
   timings.distTagsMs = elapsedMs(distTagsStart);
 

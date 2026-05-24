@@ -11,6 +11,8 @@
 - Added Verdaccio publish with dist-tag restoration and skip-existing checks.
 - Added configurable `latest` dist-tag policy for smaller default bundles or
   source-aligned latest mirrors.
+- Changed bundled latest handling so generated latest decisions are computed during
+  publish instead of stored as hundreds of entries in `dist-tags.json`.
 - Added stable tag dependency reuse so repeated downloads do not follow moved tags when
   the declaring parent did not change.
 - Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.

@@ -220,14 +220,16 @@ or keep separate registries for independent update streams.
 
 `latest` is a special case. Verdaccio may create or keep `latest` during `npm publish`
 even when publishing with a custom temporary tag, and deleting the last `latest` tag is
-not reliable enough to use as a safety mechanism. The bundle must therefore contain a
-`latest` decision for every package name that may be newly published.
+not reliable enough to use as a safety mechanism. The publish step must therefore make
+an explicit `latest` decision for every package name that may be newly published.
 
 The default `latestPolicy` is `bundled`. In this mode, the tool does not fetch the
-source registry's `latest` for every transitive package. Instead, `dist-tags.json`
-assigns `latest` to the newest version already present in the bundle for each package
-name. This keeps regular update bundles smaller and avoids pulling fresh upstream
-versions for deep transitive packages that were not otherwise needed.
+source registry's `latest` for every transitive package. Instead, publish computes
+`latest` from `seed-manifest.json`: for each package name, it uses the newest version
+already present in the bundle unless a real `latest` tag requirement exists in
+`dist-tags.json`. This keeps regular update bundles smaller, avoids pulling fresh
+upstream versions for deep transitive packages that were not otherwise needed, and
+keeps `dist-tags.json` focused on real tag requirements.
 
 `bundled` latest requirements are publish-time safety defaults, not strict tag
 restorations. During publish, they must not move an existing target registry `latest`
@@ -238,7 +240,8 @@ The optional `latestPolicy: "source"` mode preserves the older, more aggressive
 behavior. When any package name is included in a bundle, the fetch step also includes
 the source registry's `latest` target for that package name and traverses its
 dependencies. Use this mode when the operator wants a fresher local registry and accepts
-larger bundles.
+larger bundles. In this mode, the source registry's `latest` tag requirements are
+stored in `dist-tags.json`.
 
 Explicit root tag requirements still resolve through the source registry. Dependency
 tag requirements such as `node-fetch@cjs` follow `tagResolutionPolicy` and are restored

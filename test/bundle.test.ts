@@ -73,7 +73,7 @@ describe('createBundleDocuments', () => {
     });
   });
 
-  it('sets bundled latest to the newest included version', () => {
+  it('does not persist computed bundled latest requirements', () => {
     const documents = createBundleDocuments({
       createdAt: '2026-05-20T00:00:00.000Z',
       outputDir: './airgap-bundle',
@@ -92,20 +92,12 @@ describe('createBundleDocuments', () => {
       tagRequirements: [],
     });
 
-    expect(documents.distTagsManifest).toMatchObject({
-      tags: {
-        '@scope/demo': {
-          latest: '1.2.3',
-        },
-      },
-      requirements: [
-        {
-          name: '@scope/demo',
-          requiredBy: 'airgap-sync:bundled-latest',
-          tag: 'latest',
-          version: '1.2.3',
-        },
-      ],
+    expect(documents.distTagsManifest).toEqual({
+      schemaVersion: 1,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      sourceRegistry: 'https://registry.example',
+      tags: {},
+      requirements: [],
     });
   });
 

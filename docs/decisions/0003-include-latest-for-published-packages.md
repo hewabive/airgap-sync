@@ -31,7 +31,9 @@ Always require a `latest` tag decision for each package name that may be newly p
 but make the source of that decision configurable:
 
 - `latestPolicy: "bundled"` is the default. It assigns `latest` to the newest version
-  already present in the bundle for each package name.
+  already present in the bundle for each package name, computed from
+  `seed-manifest.json` during publish instead of stored as generated entries in
+  `dist-tags.json`.
 - `latestPolicy: "source"` preserves the original decision. It also resolves and
   downloads the source registry's current `latest` target for every included package
   name and traverses its dependencies.
