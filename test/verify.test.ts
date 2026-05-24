@@ -100,6 +100,8 @@ const collectReport: CollectReport = {
   fixedPoint: true,
   generatedAt: '2026-05-21T00:01:00.000Z',
   gitFetch: {
+    actions: [],
+    changed: 0,
     cloned: 0,
     dryRun: false,
     errors: [],
@@ -107,6 +109,7 @@ const collectReport: CollectReport = {
     mirrorsDir: '/bundle/git-mirrors',
     planned: 0,
     totalRepositories: 0,
+    unchanged: 0,
     updated: 0,
   },
   gitManifestScanErrors: [],

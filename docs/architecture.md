@@ -192,6 +192,24 @@ Tags that are required by discovered dependency specs should be restored. This m
 for real dependency specs such as `node-fetch@cjs`, where the package manager asks the
 registry for a tag instead of a concrete version.
 
+The default `tagResolutionPolicy` is `reuse-stable`. During repeated downloads, a tag
+dependency can reuse the previous bundle's tag resolution only when all of these are
+true:
+
+- the previous `dist-tags.json` contains the same `name + tag + requiredBy` mapping;
+- the mapped package version is still present in `seed-manifest.json`;
+- the mapped tarball still exists on disk;
+- the declaring parent is stable.
+
+For npm registry parents, stable means the declaring `package@version` is already in
+the previous bundle. For Git/project parents, stable means the source mirror fetch did
+not change refs in this run. If a Git mirror was cloned or fetched new refs, tag
+dependencies from its package.json files are resolved from the source registry.
+
+Root tag targets such as `eslint@latest` are always explicit operator requests and are
+resolved from the source registry. `tagResolutionPolicy: "refresh"` disables reuse and
+resolves all tag dependencies from source metadata.
+
 `latest` is a special case. Verdaccio may create or keep `latest` during `npm publish`
 even when publishing with a custom temporary tag, and deleting the last `latest` tag is
 not reliable enough to use as a safety mechanism. The bundle must therefore contain a
@@ -214,10 +232,10 @@ the source registry's `latest` target for that package name and traverses its
 dependencies. Use this mode when the operator wants a fresher local registry and accepts
 larger bundles.
 
-Explicit tag requirements still resolve through the source registry. A target such as
-`eslint@latest` or a dependency such as `node-fetch@cjs` is treated as a real tag
-request. The latest policy only controls the artificial publish-time `latest` tag added
-for package names that are already in the bundle.
+Explicit root tag requirements still resolve through the source registry. Dependency
+tag requirements such as `node-fetch@cjs` follow `tagResolutionPolicy`. The latest
+policy only controls the artificial publish-time `latest` tag added for package names
+that are already in the bundle.
 
 ## Publish Policy
 

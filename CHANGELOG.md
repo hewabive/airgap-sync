@@ -11,6 +11,8 @@
 - Added Verdaccio publish with dist-tag restoration and skip-existing checks.
 - Added configurable `latest` dist-tag policy for smaller default bundles or
   source-aligned latest mirrors.
+- Added stable tag dependency reuse so repeated downloads do not follow moved tags when
+  the declaring parent did not change.
 - Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.
 - Added `verify install --ignore-scripts` and documented the tool security model.
 - Switched the project development and portable CLI install workflow from pnpm to npm.

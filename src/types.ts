@@ -5,6 +5,7 @@ export interface PackageIdentity {
 
 export type SupportedSpecType = 'version' | 'range' | 'tag' | 'alias';
 export type LatestPolicy = 'bundled' | 'source';
+export type TagResolutionPolicy = 'refresh' | 'reuse-stable';
 
 export interface RootPackageRequirement {
   name: string;
@@ -123,6 +124,7 @@ export interface CollectReport {
 export type GitFetchActionStatus = 'planned' | 'cloned' | 'updated' | 'error';
 
 export interface GitFetchActionResult {
+  changed?: boolean;
   error?: string;
   repository: string;
   sourceUrl: string;
@@ -131,6 +133,8 @@ export interface GitFetchActionResult {
 }
 
 export interface GitFetchReport {
+  actions: GitFetchActionResult[];
+  changed: number;
   cloned: number;
   dryRun: boolean;
   errors: GitFetchActionResult[];
@@ -138,6 +142,7 @@ export interface GitFetchReport {
   mirrorsDir: string;
   planned: number;
   totalRepositories: number;
+  unchanged: number;
   updated: number;
 }
 

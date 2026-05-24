@@ -121,9 +121,9 @@ airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 workspace configuration for repeated syncs, not part of a single transfer bundle. It
 stores endpoints, target lists, bundle output, and menu defaults such as whether to
 include dev dependencies, whether to traverse peer dependencies, and how to handle the
-`latest` dist-tag. Menu defaults are grouped by workflow step: `defaults.download`,
-`defaults.publish`, and `defaults.verifyInstall`. The interactive menu asks for these
-defaults while initializing a new workspace.
+`latest` dist-tag and reusable tag dependencies. Menu defaults are grouped by workflow
+step: `defaults.download`, `defaults.publish`, and `defaults.verifyInstall`. The
+interactive menu asks for these defaults while initializing a new workspace.
 If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.
 
 The lower-level commands remain available for debugging and one-off use:
@@ -145,6 +145,8 @@ airgap-sync publish ./airgap-bundle \
 - Resolve `version`, `range`, `tag`, and `alias` specs using npm registry metadata.
 - Download only the dependency graph needed by the input manifests, not the entire npm registry.
 - Restore required tags and assign `latest` according to the configured latest policy.
+- Reuse stable tag resolutions across repeated downloads when the declaring parent did
+  not change.
 - Keep generated reports explicit enough to audit what was fetched and why.
 - Support both package specs (`react@latest`) and project manifests (`package.json`).
 - Treat Git dependencies as first-class external dependencies, not as registry packages.

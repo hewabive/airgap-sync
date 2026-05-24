@@ -56,7 +56,8 @@ When the menu initializes a new workspace, it asks for these values up front.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
-`source`.
+`source`; `defaults.download.tagResolutionPolicy` is either `reuse-stable` or
+`refresh`.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## secrets
@@ -94,6 +95,7 @@ airgap-sync download ./repos \
   --registry https://registry.npmjs.org \
   --include-dev \
   --latest-policy bundled \
+  --tag-resolution-policy reuse-stable \
   --concurrency 16 \
   --output ./airgap-bundle
 ```
@@ -113,6 +115,12 @@ directly.
 already included in the bundle for each package name. `--latest-policy source` also
 resolves and downloads the source registry's `latest` for each included package name.
 
+`--tag-resolution-policy reuse-stable` is the default. It reuses a previous
+`dist-tags.json` tag mapping only when the same `name + tag + requiredBy` existed in the
+previous bundle and the mapped package tarball is still present. Root tag targets are
+always resolved from the source registry. `--tag-resolution-policy refresh` resolves
+all tag dependencies from the source registry.
+
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
 The online bundle should store Git source identities and local mirrors, not
@@ -125,6 +133,7 @@ airgap-sync fetch react@latest @types/node@^22 \
   --output ./airgap-bundle \
   --registry https://registry.npmjs.org \
   --latest-policy bundled \
+  --tag-resolution-policy reuse-stable \
   --concurrency 16
 
 # Or from a project manifest. The manifest directory is scanned recursively for nested
@@ -143,6 +152,8 @@ Supported options:
 --include-dev             Include devDependencies from discovered manifests
 --include-peer            Traverse peerDependencies
 --latest-policy <policy>  Latest dist-tag policy: bundled or source
+--tag-resolution-policy <policy>
+                          Tag dependency policy: reuse-stable or refresh
 --concurrency <number>    Concurrent registry and download operations
 --dry-run                 Resolve and report without downloading
 ```

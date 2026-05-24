@@ -65,8 +65,9 @@ file stores endpoint URLs, bundle output, and menu defaults; boolean defaults ca
 set to `true`, `false`, or `ask` under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. `defaults.download.latestPolicy` controls whether artificial
 `latest` tags are assigned to bundled versions or resolved from the source registry.
-When the interactive menu initializes a workspace, it asks for these defaults during
-setup.
+`defaults.download.tagResolutionPolicy` controls whether stable tag dependencies can
+reuse previous bundle mappings. When the interactive menu initializes a workspace, it
+asks for these defaults during setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
@@ -132,6 +133,12 @@ included package name.
 When publishing a `bundled` latest decision, `airgap-sync` will not downgrade an
 existing Verdaccio `latest` that already points to a newer semver version. Explicit tags
 from real package specs are still restored exactly.
+
+By default, download also uses `tagResolutionPolicy: "reuse-stable"`. If a dependency
+tag such as `node-fetch@cjs` was already mapped in the previous bundle for the same
+declaring parent, and that parent did not change, the old mapped version is reused.
+Use `--tag-resolution-policy refresh` when every tag dependency should be checked
+against the source registry during this run.
 
 Before transfer, inspect the bundle:
 

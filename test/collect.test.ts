@@ -266,11 +266,12 @@ describe('collectBundle', () => {
       },
       registryUrl: 'https://registry.example',
       root: tempDir,
-      async runGitCommand(invocation): Promise<void> {
+      async runGitCommand(invocation): Promise<undefined> {
         gitCalls.push(invocation);
         if (invocation.args[0] === 'clone') {
           await fs.ensureDir(invocation.args.at(-1) ?? '');
         }
+        return undefined;
       },
       runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
         gitOutputCalls.push(invocation);
@@ -320,6 +321,14 @@ describe('collectBundle', () => {
         args: [
           '-C',
           path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
           'remote',
           'set-url',
           'origin',
@@ -333,6 +342,14 @@ describe('collectBundle', () => {
           'remote',
           'update',
           '--prune',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
         ],
       },
     ]);
@@ -406,13 +423,13 @@ describe('collectBundle', () => {
         },
       },
       registryUrl: 'https://registry.example',
-      async runGitCommand(invocation): Promise<void> {
+      async runGitCommand(invocation): Promise<undefined> {
         gitCalls.push(invocation);
         if (invocation.args[0] === 'clone') {
           await fs.ensureDir(invocation.args.at(-1) ?? '');
-          return;
+          return undefined;
         }
-        return;
+        return undefined;
       },
       runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
         gitOutputCalls.push(invocation);
@@ -483,6 +500,135 @@ describe('collectBundle', () => {
       'rev-parse --verify main^{tree}',
       'ls-tree -r --name-only main',
       'show main:package.json',
+    ]);
+  });
+
+  it('reuses previous tag resolutions from unchanged Git source manifests', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');
+    await fs.ensureDir(path.join(outputDir, 'packages'));
+    await fs.ensureDir(mirrorPath);
+    await fs.writeFile(path.join(outputDir, 'packages/extra-1.0.0.tgz'), '');
+    await fs.writeJson(path.join(outputDir, 'seed-manifest.json'), {
+      schemaVersion: 1,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      sourceRegistry: 'https://registry.example',
+      packages: [
+        {
+          name: 'extra',
+          version: '1.0.0',
+          file: 'packages/extra-1.0.0.tgz',
+          tarball: 'https://registry.example/extra/-/extra-1.0.0.tgz',
+          resolvedFrom: [],
+        },
+      ],
+    });
+    await fs.writeJson(path.join(outputDir, 'dist-tags.json'), {
+      schemaVersion: 1,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      sourceRegistry: 'https://registry.example',
+      tags: {
+        extra: {
+          latest: '1.0.0',
+        },
+      },
+      requirements: [
+        {
+          name: 'extra',
+          requiredBy: 'app@1.0.0',
+          tag: 'latest',
+          version: '1.0.0',
+        },
+      ],
+    });
+
+    const gitCalls: GitCommandInvocation[] = [];
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      initialGitSources: [
+        {
+          committish: 'main',
+          host: 'github.com',
+          id: 'github.com/acme/app',
+          localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+          owner: 'acme',
+          repo: 'app',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/app.git',
+          target: true,
+        },
+      ],
+      maxIterations: 5,
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          expect(name).toBe('extra');
+          return Promise.resolve(packageMetadata('extra', ['1.0.0', '2.0.0'], '2.0.0'));
+        },
+      },
+      registryUrl: 'https://registry.example',
+      runGitCommand(invocation) {
+        gitCalls.push(invocation);
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({ stderr: '', stdout: 'refs/heads/main abc123\n' });
+        }
+        return Promise.resolve(undefined);
+      },
+      runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
+        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+          return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
+        }
+        if (invocation.args.join(' ') === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              dependencies: {
+                extra: 'latest',
+              },
+              name: 'app',
+              version: '1.0.0',
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(report.gitFetch).toMatchObject({
+      changed: 0,
+      unchanged: 1,
+      updated: 1,
+    });
+    expect(report.fetch).toMatchObject({
+      errors: [],
+      resolved: 1,
+    });
+    expect(
+      tarballMocks.downloadResolvedPackage.mock.calls.map((call) => {
+        const pkg = call[0] as ResolvedRootPackage;
+        return `${pkg.name}@${pkg.version}`;
+      })
+    ).toEqual(['extra@1.0.0']);
+    await expect(fs.readJson(path.join(outputDir, 'dist-tags.json'))).resolves.toMatchObject({
+      tags: {
+        extra: {
+          latest: '1.0.0',
+        },
+      },
+    });
+    expect(gitCalls.map((call) => call.args.join(' '))).toEqual([
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
+      `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
+      `-C ${mirrorPath} remote update --prune`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
+      `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
+      `-C ${mirrorPath} remote update --prune`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
     ]);
   });
 

@@ -102,7 +102,7 @@ describe('configureGitRewrites', () => {
       generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
       manifest,
-      runner: () => Promise.reject(new Error('permission denied')),
+      runner: () => Promise.reject<undefined>(new Error('permission denied')),
     });
 
     expect(report).toMatchObject({

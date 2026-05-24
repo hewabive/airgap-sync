@@ -1,7 +1,7 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import { createGitSourceFromUrl } from './git-sources.js';
-import type { GitSource, LatestPolicy } from '../types.js';
+import type { GitSource, LatestPolicy, TagResolutionPolicy } from '../types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
@@ -27,6 +27,7 @@ export interface WorkspaceDefaults {
     includeDev: WorkspacePromptBoolean;
     includePeer: WorkspacePromptBoolean;
     latestPolicy: LatestPolicy;
+    tagResolutionPolicy: TagResolutionPolicy;
   };
   publish: {
     configureGitGlobal: WorkspacePromptBoolean;
@@ -96,6 +97,7 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
         includeDev: 'ask',
         includePeer: false,
         latestPolicy: 'bundled',
+        tagResolutionPolicy: 'reuse-stable',
       },
       publish: {
         configureGitGlobal: 'ask',
@@ -178,6 +180,13 @@ function normalizeLatestPolicy(value: unknown, fallback: LatestPolicy): LatestPo
   return value === 'source' || value === 'bundled' ? value : fallback;
 }
 
+function normalizeTagResolutionPolicy(
+  value: unknown,
+  fallback: TagResolutionPolicy
+): TagResolutionPolicy {
+  return value === 'refresh' || value === 'reuse-stable' ? value : fallback;
+}
+
 function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   const defaults = createDefaultWorkspaceConfig().defaults;
   const input = isRecord(value) ? value : {};
@@ -190,6 +199,10 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
       includeDev: normalizePromptBoolean(download.includeDev, defaults.download.includeDev),
       includePeer: normalizePromptBoolean(download.includePeer, defaults.download.includePeer),
       latestPolicy: normalizeLatestPolicy(download.latestPolicy, defaults.download.latestPolicy),
+      tagResolutionPolicy: normalizeTagResolutionPolicy(
+        download.tagResolutionPolicy,
+        defaults.download.tagResolutionPolicy
+      ),
     },
     publish: {
       configureGitGlobal: normalizePromptBoolean(

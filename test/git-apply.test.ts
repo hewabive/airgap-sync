@@ -205,7 +205,7 @@ describe('applyGitSources', () => {
       generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
       manifest,
-      runner: () => Promise.reject(new Error('push rejected')),
+      runner: () => Promise.reject<undefined>(new Error('push rejected')),
     });
 
     expect(report).toMatchObject({

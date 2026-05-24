@@ -48,6 +48,15 @@ describe('fetchGitSources', () => {
 
     expect(calls).toEqual([]);
     expect(report).toEqual({
+      actions: [
+        {
+          repository: 'github.com/owner/repo',
+          sourceUrl: 'https://github.com/owner/repo.git',
+          status: 'planned',
+          targetPath: path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
+        },
+      ],
+      changed: 0,
       cloned: 0,
       dryRun: true,
       errors: [],
@@ -55,6 +64,7 @@ describe('fetchGitSources', () => {
       mirrorsDir: path.join(bundleDir, 'git-mirrors'),
       planned: 1,
       totalRepositories: 1,
+      unchanged: 0,
       updated: 0,
     });
   });
@@ -82,16 +92,18 @@ describe('fetchGitSources', () => {
       },
     ]);
     expect(report).toMatchObject({
+      changed: 1,
       cloned: 1,
       dryRun: false,
       errors: [],
       planned: 0,
       totalRepositories: 1,
+      unchanged: 0,
       updated: 0,
     });
   });
 
-  it('updates existing source mirrors', async () => {
+  it('updates existing source mirrors and records unchanged refs', async () => {
     const targetPath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
     await fs.ensureDir(targetPath);
     const calls: GitCommandInvocation[] = [];
@@ -102,11 +114,18 @@ describe('fetchGitSources', () => {
       manifest: sourcesManifest,
       runner: (invocation) => {
         calls.push(invocation);
-        return Promise.resolve();
+        return Promise.resolve(
+          invocation.args.includes('for-each-ref')
+            ? { stderr: '', stdout: 'refs/heads/main abc123\n' }
+            : undefined
+        );
       },
     });
 
     expect(calls).toEqual([
+      {
+        args: ['-C', targetPath, 'for-each-ref', '--format=%(refname) %(objectname)'],
+      },
       {
         args: [
           '-C',
@@ -120,11 +139,21 @@ describe('fetchGitSources', () => {
       {
         args: ['-C', targetPath, 'remote', 'update', '--prune'],
       },
+      {
+        args: ['-C', targetPath, 'for-each-ref', '--format=%(refname) %(objectname)'],
+      },
     ]);
     expect(report).toMatchObject({
+      changed: 0,
       cloned: 0,
       errors: [],
+      unchanged: 1,
       updated: 1,
+    });
+    expect(report.actions[0]).toMatchObject({
+      changed: false,
+      repository: 'github.com/owner/repo',
+      status: 'updated',
     });
   });
 
@@ -133,7 +162,7 @@ describe('fetchGitSources', () => {
       bundleDir,
       generatedAt: '2026-05-21T00:00:00.000Z',
       manifest: sourcesManifest,
-      runner: () => Promise.reject(new Error('network unavailable')),
+      runner: () => Promise.reject<undefined>(new Error('network unavailable')),
     });
 
     expect(report).toMatchObject({

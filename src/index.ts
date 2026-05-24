@@ -29,6 +29,7 @@ export { packageFileName } from './core/files.js';
 export { readGitSourceManifestRequirements } from './core/git-manifests.js';
 export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
 export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
+export { readStableTagResolutionIndex } from './core/tag-resolution.js';
 export {
   createGitSourcesManifest,
   createGitSourceFromUrl,
@@ -197,6 +198,7 @@ export type {
   GitSource,
   GitSourcesManifest,
   LatestPolicy,
+  TagResolutionPolicy,
   PackageMetadata,
   PackageManifest,
   PackageVersionMetadata,

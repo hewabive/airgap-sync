@@ -35,6 +35,7 @@ describe('workspace config', () => {
           includeDev: 'ask',
           includePeer: false,
           latestPolicy: 'bundled',
+          tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
           configureGitGlobal: 'ask',
@@ -119,6 +120,7 @@ describe('workspace config', () => {
           includeDev: 'ask',
           includePeer: false,
           latestPolicy: 'bundled',
+          tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
           configureGitGlobal: 'ask',
@@ -143,6 +145,7 @@ describe('workspace config', () => {
             includeDev: false,
             includePeer: true,
             latestPolicy: 'source',
+            tagResolutionPolicy: 'refresh',
           },
           publish: {
             configureGitGlobal: true,
@@ -165,6 +168,7 @@ describe('workspace config', () => {
         includeDev: false,
         includePeer: true,
         latestPolicy: 'source',
+        tagResolutionPolicy: 'refresh',
       },
       publish: {
         configureGitGlobal: true,

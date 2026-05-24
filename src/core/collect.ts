@@ -11,6 +11,7 @@ import type {
   LatestPolicy,
   RepositoryUpdateReport,
   RootPackageRequirement,
+  TagResolutionPolicy,
   UnsupportedRootPackageRequirement,
 } from '../types.js';
 import {
@@ -33,6 +34,7 @@ import { readManifestRequirements } from './manifests.js';
 import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
 import type { RepositoryUpdateProgressEvent } from './repos.js';
+import { readStableTagResolutionIndex } from './tag-resolution.js';
 
 export interface CollectBundleOptions {
   concurrency?: number;
@@ -53,6 +55,7 @@ export interface CollectBundleOptions {
   root?: string;
   runGitCommand?: GitCommandRunner;
   runGitOutputCommand?: GitOutputCommandRunner;
+  tagResolutionPolicy?: TagResolutionPolicy;
 }
 
 export type CollectProgressPhase =
@@ -170,12 +173,15 @@ async function scanGitSourceManifests(options: {
   runGitOutputCommand?: GitOutputCommandRunner;
   scannedSourceIds: Set<string>;
   sources: GitSource[];
+  unchangedSourceIds?: Set<string>;
 }): Promise<{
   errors: CollectGitManifestScanError[];
   scanned: number;
+  stableRequiredBy: Set<string>;
   state: RequirementState;
 }> {
   const errors: CollectGitManifestScanError[] = [];
+  const stableRequiredBy = new Set<string>();
   const state: RequirementState = {
     gitRequirements: [],
     requirements: [],
@@ -211,6 +217,11 @@ async function scanGitSourceManifests(options: {
       });
       options.scannedSourceIds.add(source.id);
       scanned++;
+      if (options.unchangedSourceIds?.has(source.id)) {
+        for (const requirement of result.requirements) {
+          stableRequiredBy.add(requirement.requiredBy);
+        }
+      }
       state.requirements.push(...result.requirements);
       state.gitRequirements.push(...result.gitRequirements);
       state.unsupported.push(...result.unsupported);
@@ -223,7 +234,7 @@ async function scanGitSourceManifests(options: {
     }
   }
 
-  return { errors, scanned, state };
+  return { errors, scanned, stableRequiredBy, state };
 }
 
 export async function collectBundle(options: CollectBundleOptions): Promise<CollectReport> {
@@ -236,6 +247,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const includeDev = options.includeDev === true;
   const includePeer = options.includePeer === true;
   const maxIterations = options.maxIterations ?? 10;
+  const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
+  const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
+  const stableRequiredBy = new Set<string>();
 
   const repositoryUpdateStart = performance.now();
   options.onProgress?.({
@@ -402,6 +416,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       },
       outputDir,
       registry: options.registry,
+      stableRequiredBy,
+      stableTagResolutions,
+      tagResolutionPolicy,
       gitRequirements: state.gitRequirements,
       requirements: state.requirements,
       unsupported: state.unsupported,
@@ -474,8 +491,16 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
           : {}),
         scannedSourceIds,
         sources: gitSources.sources,
+        unchangedSourceIds: new Set(
+          gitFetch.actions
+            .filter((action) => action.changed === false)
+            .map((action) => action.repository)
+        ),
       });
       scannedGitSources = scan.scanned;
+      for (const requiredBy of scan.stableRequiredBy) {
+        stableRequiredBy.add(requiredBy);
+      }
       scanErrors.push(...scan.errors);
       addUnique(state.requirements, seenRequirements, scan.state.requirements, requirementKey);
       addUnique(

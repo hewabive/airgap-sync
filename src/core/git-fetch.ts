@@ -10,7 +10,14 @@ export interface GitCommandInvocation {
   env?: NodeJS.ProcessEnv;
 }
 
-export type GitCommandRunner = (invocation: GitCommandInvocation) => Promise<void>;
+export interface GitCommandResult {
+  stderr: string;
+  stdout: string;
+}
+
+export type GitCommandRunner = (
+  invocation: GitCommandInvocation
+) => Promise<GitCommandResult | undefined> | Promise<void>;
 
 export interface FetchGitSourcesOptions {
   bundleDir: string;
@@ -41,22 +48,29 @@ function redactGitArg(arg: string): string {
   return arg.startsWith('http.extraHeader=') ? 'http.extraHeader=<redacted>' : arg;
 }
 
-export async function runGitCommand(invocation: GitCommandInvocation): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+export async function runGitCommand(invocation: GitCommandInvocation): Promise<GitCommandResult> {
+  return await new Promise<GitCommandResult>((resolve, reject) => {
     const child = spawn('git', invocation.args, {
       cwd: invocation.cwd,
       env: { ...process.env, ...invocation.env },
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
 
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout.push(chunk);
+    });
     child.stderr.on('data', (chunk: Buffer) => {
       stderr.push(chunk);
     });
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
-        resolve();
+        resolve({
+          stderr: Buffer.concat(stderr).toString('utf8'),
+          stdout: Buffer.concat(stdout).toString('utf8'),
+        });
         return;
       }
 
@@ -71,19 +85,42 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<v
   });
 }
 
+function normalizeRefs(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .sort()
+    .join('\n');
+}
+
+async function refsFingerprint(
+  targetPath: string,
+  runner: GitCommandRunner
+): Promise<string | undefined> {
+  const result = await runner({
+    args: ['-C', targetPath, 'for-each-ref', '--format=%(refname) %(objectname)'],
+  });
+
+  return result ? normalizeRefs(result.stdout) : undefined;
+}
+
 async function fetchEntry(
   entry: FetchEntry,
   runner: GitCommandRunner
 ): Promise<GitFetchActionResult> {
   try {
     if (await fs.pathExists(entry.targetPath)) {
+      const before = await refsFingerprint(entry.targetPath, runner);
       await runner({
         args: ['-C', entry.targetPath, 'remote', 'set-url', 'origin', entry.sourceUrl],
       });
       await runner({
         args: ['-C', entry.targetPath, 'remote', 'update', '--prune'],
       });
+      const after = await refsFingerprint(entry.targetPath, runner);
       return {
+        ...(before !== undefined && after !== undefined ? { changed: before !== after } : {}),
         repository: entry.id,
         sourceUrl: entry.sourceUrl,
         status: 'updated',
@@ -96,6 +133,7 @@ async function fetchEntry(
       args: ['clone', '--mirror', entry.sourceUrl, entry.targetPath],
     });
     return {
+      changed: true,
       repository: entry.id,
       sourceUrl: entry.sourceUrl,
       status: 'cloned',
@@ -157,6 +195,8 @@ async function fetchEntries(options: {
   const errors = actions.filter((action) => action.status === 'error');
 
   return {
+    actions,
+    changed: actions.filter((action) => action.changed === true).length,
     cloned: actions.filter((action) => action.status === 'cloned').length,
     dryRun: options.dryRun,
     errors,
@@ -164,6 +204,7 @@ async function fetchEntries(options: {
     mirrorsDir: options.mirrorsDir,
     planned: actions.filter((action) => action.status === 'planned').length,
     totalRepositories: actions.length,
+    unchanged: actions.filter((action) => action.changed === false).length,
     updated: actions.filter((action) => action.status === 'updated').length,
   };
 }

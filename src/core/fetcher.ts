@@ -8,6 +8,8 @@ import type {
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
   RootPackageRequirement,
+  TagRequirement,
+  TagResolutionPolicy,
   UnsupportedRootPackageRequirement,
 } from '../types.js';
 import type { RegistryClient } from './registry.js';
@@ -20,6 +22,7 @@ import {
   dependencySpecsFromManifest,
   downloadResolvedPackage,
 } from './tarball.js';
+import { stableTagRequirement, type StableTagResolutionIndex } from './tag-resolution.js';
 
 export interface FetchSeedBundleOptions {
   concurrency?: number;
@@ -29,6 +32,9 @@ export interface FetchSeedBundleOptions {
   onProgress?: (event: FetchProgressEvent) => void;
   outputDir: string;
   registry: RegistryClient;
+  stableRequiredBy?: Set<string>;
+  stableTagResolutions?: StableTagResolutionIndex;
+  tagResolutionPolicy?: TagResolutionPolicy;
   gitRequirements?: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported?: UnsupportedRootPackageRequirement[];
@@ -120,6 +126,19 @@ function publishLatestRequirement(name: string): RootPackageRequirement {
   };
 }
 
+function exactRequirementFromStableTag(
+  requirement: RootPackageRequirement,
+  tagRequirement: TagRequirement
+): RootPackageRequirement {
+  return {
+    name: requirement.name,
+    raw: `${requirement.name}@${tagRequirement.version}`,
+    requiredBy: requirement.requiredBy,
+    specifier: tagRequirement.version,
+    type: 'version',
+  };
+}
+
 function createFetchTimings(): FetchTimings {
   return {
     dependencyScanMs: 0,
@@ -173,8 +192,12 @@ export async function fetchSeedBundle(
   const totalStart = performance.now();
   const shouldDownload = options.download !== false;
   const latestPolicy = options.latestPolicy ?? 'bundled';
+  const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
-  const queue = [...options.requirements];
+  const stableTagRequirements = new Map<string, TagRequirement>();
+  const stablePackageIds = options.stableTagResolutions?.packageIds ?? new Set<string>();
+  const stableRequiredBy = new Set([...(options.stableRequiredBy ?? []), ...stablePackageIds]);
+  const queue = options.requirements.map((requirement) => rewriteStableTagRequirement(requirement));
   const latestRequirements = new Set<string>();
   const processedRequirements = new Set<string>();
   const scannedPackages = new Set<string>();
@@ -199,6 +222,37 @@ export async function fetchSeedBundle(
   let drainResolved = false;
   let resolveDrain: (() => void) | undefined;
 
+  function rewriteStableTagRequirement(
+    requirement: RootPackageRequirement
+  ): RootPackageRequirement {
+    if (
+      tagResolutionPolicy !== 'reuse-stable' ||
+      requirement.type !== 'tag' ||
+      requirement.requiredBy === 'root' ||
+      !stableRequiredBy.has(requirement.requiredBy) ||
+      !options.stableTagResolutions
+    ) {
+      return requirement;
+    }
+
+    const tagRequirement = stableTagRequirement(requirement, options.stableTagResolutions);
+    if (!tagRequirement) {
+      return requirement;
+    }
+
+    const exactRequirement = exactRequirementFromStableTag(requirement, tagRequirement);
+    stableTagRequirements.set(requirementId(exactRequirement), tagRequirement);
+    return exactRequirement;
+  }
+
+  function addTagRequirement(tagRequirement: TagRequirement): void {
+    const id = tagRequirementId(tagRequirement);
+    if (!tagRequirements.has(id)) {
+      tagRequirements.add(id);
+      result.tagRequirements.push(tagRequirement);
+    }
+  }
+
   options.onProgress?.({
     current: 0,
     phase: 'resolve',
@@ -214,7 +268,7 @@ export async function fetchSeedBundle(
   }
 
   function enqueueRequirement(requirement: RootPackageRequirement): void {
-    queue.push(requirement);
+    queue.push(rewriteStableTagRequirement(requirement));
     scheduleWorkers();
   }
 
@@ -384,10 +438,16 @@ export async function fetchSeedBundle(
       }
 
       for (const tagRequirement of resolution.tagRequirements) {
-        const id = tagRequirementId(tagRequirement);
-        if (!tagRequirements.has(id)) {
-          tagRequirements.add(id);
-          result.tagRequirements.push(tagRequirement);
+        addTagRequirement(tagRequirement);
+      }
+
+      const stableTag = stableTagRequirements.get(requirementId(requirement));
+      if (stableTag) {
+        const resolvedStableTag = resolution.resolved.some(
+          (pkg) => pkg.name === stableTag.name && pkg.version === stableTag.version
+        );
+        if (resolvedStableTag) {
+          addTagRequirement(stableTag);
         }
       }
 

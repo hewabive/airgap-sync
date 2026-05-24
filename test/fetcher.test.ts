@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchSeedBundle } from '../src/core/fetcher.js';
+import { stableTagResolutionKey } from '../src/core/tag-resolution.js';
 import type {
   PackageManifest,
   PackageMetadata,
@@ -365,6 +366,166 @@ describe('fetchSeedBundle', () => {
         requiredBy: 'airgap-sync:publish-latest',
         tag: 'latest',
         version: '3.3.2',
+      },
+    ]);
+  });
+
+  it('reuses a previous tag resolution only when the same parent tag mapping exists', async () => {
+    const requestedNames: string[] = [];
+    const registryWithMovedTag: RegistryClient = {
+      getPackageMetadata(name) {
+        requestedNames.push(name);
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            'dist-tags': {
+              latest: '1.0.0',
+            },
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  'node-fetch': 'cjs',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('node-fetch');
+        return Promise.resolve({
+          name: 'node-fetch',
+          'dist-tags': {
+            cjs: '2.7.0',
+          },
+          versions: {
+            '2.6.7': {
+              name: 'node-fetch',
+              version: '2.6.7',
+              dist: {
+                tarball: 'https://registry.example/node-fetch/-/node-fetch-2.6.7.tgz',
+              },
+            },
+            '2.7.0': {
+              name: 'node-fetch',
+              version: '2.7.0',
+              dist: {
+                tarball: 'https://registry.example/node-fetch/-/node-fetch-2.7.0.tgz',
+              },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithMovedTag,
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0', 'node-fetch@2.6.7']),
+        tagVersions: new Map([
+          [
+            stableTagResolutionKey({
+              name: 'node-fetch',
+              requiredBy: 'demo@1.0.0',
+              tag: 'cjs',
+            }),
+            '2.6.7',
+          ],
+        ]),
+      },
+      tagResolutionPolicy: 'reuse-stable',
+    });
+
+    expect(requestedNames).toEqual(['demo', 'node-fetch']);
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'node-fetch@2.6.7',
+    ]);
+    expect(result.tagRequirements).toEqual([
+      {
+        name: 'node-fetch',
+        requiredBy: 'demo@1.0.0',
+        tag: 'cjs',
+        version: '2.6.7',
+      },
+    ]);
+  });
+
+  it('refreshes a moved tag when the previous parent tag mapping is absent', async () => {
+    const registryWithMovedTag: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            'dist-tags': {
+              latest: '1.0.0',
+            },
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  'node-fetch': 'cjs',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('node-fetch');
+        return Promise.resolve({
+          name: 'node-fetch',
+          'dist-tags': {
+            cjs: '2.7.0',
+          },
+          versions: {
+            '2.6.7': {
+              name: 'node-fetch',
+              version: '2.6.7',
+              dist: {
+                tarball: 'https://registry.example/node-fetch/-/node-fetch-2.6.7.tgz',
+              },
+            },
+            '2.7.0': {
+              name: 'node-fetch',
+              version: '2.7.0',
+              dist: {
+                tarball: 'https://registry.example/node-fetch/-/node-fetch-2.7.0.tgz',
+              },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithMovedTag,
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0', 'node-fetch@2.6.7']),
+        tagVersions: new Map(),
+      },
+      tagResolutionPolicy: 'reuse-stable',
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'node-fetch@2.7.0',
+    ]);
+    expect(result.tagRequirements).toEqual([
+      {
+        name: 'node-fetch',
+        requiredBy: 'demo@1.0.0',
+        tag: 'cjs',
+        version: '2.7.0',
       },
     ]);
   });

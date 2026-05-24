@@ -35,6 +35,7 @@ import {
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
+  readStableTagResolutionIndex,
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
@@ -68,6 +69,7 @@ import type {
   PublishProgressEvent,
   PublishProgressPhase,
   ResolveRootRequirementsResult,
+  TagResolutionPolicy,
   VerifyReport,
   VerifyInstallReport,
   WorkspaceConfig,
@@ -86,6 +88,7 @@ interface FetchOptions {
   manifest?: string;
   output: string;
   registry: string;
+  tagResolutionPolicy?: TagResolutionPolicy;
 }
 
 interface PublishOptions {
@@ -131,6 +134,7 @@ interface CollectOptions {
   latestPolicy?: LatestPolicy;
   output?: string;
   registry?: string;
+  tagResolutionPolicy?: TagResolutionPolicy;
 }
 
 interface InitOptions {
@@ -163,6 +167,16 @@ function parseLatestPolicy(value: string): LatestPolicy {
   }
 
   throw new Error(`Expected latest policy to be "bundled" or "source"; got: ${value}`);
+}
+
+function parseTagResolutionPolicy(value: string): TagResolutionPolicy {
+  if (value === 'refresh' || value === 'reuse-stable') {
+    return value;
+  }
+
+  throw new Error(
+    `Expected tag resolution policy to be "refresh" or "reuse-stable"; got: ${value}`
+  );
 }
 
 function addNpmPublishOptions(command: Command): Command {
@@ -327,6 +341,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
+    `Tag resolution policy: ${config.defaults.download.tagResolutionPolicy}`,
     `Publish public repositories: ${promptBooleanToString(config.defaults.publish.publicRepositories)}`,
     `Configure global Git rewrites: ${promptBooleanToString(config.defaults.publish.configureGitGlobal)}`,
     `Verify install ignore scripts: ${promptBooleanToString(config.defaults.verifyInstall.ignoreScripts)}`,
@@ -743,6 +758,14 @@ async function askLatestPolicy(
   return parseLatestPolicy(answer || current);
 }
 
+async function askTagResolutionPolicy(
+  rl: ReadlineInterface,
+  current: TagResolutionPolicy
+): Promise<TagResolutionPolicy> {
+  const answer = await ask(rl, 'Tag resolution policy (reuse-stable/refresh)', current);
+  return parseTagResolutionPolicy(answer || current);
+}
+
 async function resolvePromptBoolean(
   rl: ReadlineInterface,
   question: string,
@@ -872,6 +895,10 @@ async function configureDownloadDefaults(
     config.defaults.download.includePeer
   );
   const latestPolicy = await askLatestPolicy(rl, config.defaults.download.latestPolicy);
+  const tagResolutionPolicy = await askTagResolutionPolicy(
+    rl,
+    config.defaults.download.tagResolutionPolicy
+  );
   const nextConfig: WorkspaceConfig = {
     ...config,
     defaults: {
@@ -880,6 +907,7 @@ async function configureDownloadDefaults(
         includeDev,
         includePeer,
         latestPolicy,
+        tagResolutionPolicy,
       },
     },
   };
@@ -1597,6 +1625,11 @@ program
     parseLatestPolicy
   )
   .option(
+    '--tag-resolution-policy <policy>',
+    'Tag dependency policy: reuse-stable or refresh',
+    parseTagResolutionPolicy
+  )
+  .option(
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
@@ -1620,6 +1653,8 @@ program
         const includePeer =
           options.includePeer === true ? true : config.defaults.download.includePeer === true;
         const latestPolicy = options.latestPolicy ?? config.defaults.download.latestPolicy;
+        const tagResolutionPolicy =
+          options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -1634,6 +1669,7 @@ program
           initialRequirements: parsedTargets.requirements,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
+          tagResolutionPolicy,
           onProgress: createCollectProgressLogger(),
           outputDir,
           registry,
@@ -1681,6 +1717,7 @@ program
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
         latestPolicy: options.latestPolicy ?? 'bundled',
+        tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
         onProgress: createCollectProgressLogger(),
         outputDir,
         registry,
@@ -1717,6 +1754,12 @@ program
     'bundled'
   )
   .option(
+    '--tag-resolution-policy <policy>',
+    'Tag dependency policy: reuse-stable or refresh',
+    parseTagResolutionPolicy,
+    'reuse-stable'
+  )
+  .option(
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
@@ -1741,6 +1784,7 @@ program
     const unsupported = [...parsedSpecs.unsupported, ...parsedManifest.unsupported];
     const gitRequirements = [...parsedSpecs.gitRequirements, ...parsedManifest.gitRequirements];
     const latestPolicy = options.latestPolicy ?? 'bundled';
+    const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
 
     if (requirements.length === 0) {
       console.error('Error: no supported package specs to resolve');
@@ -1750,6 +1794,7 @@ program
     }
 
     const registry = new CachedRegistryClient(new HttpRegistryClient(options.registry));
+    const stableTagResolutions = await readStableTagResolutionIndex(options.output);
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
@@ -1759,6 +1804,8 @@ program
         latestPolicy,
         outputDir: options.output,
         registry,
+        stableTagResolutions,
+        tagResolutionPolicy,
         gitRequirements,
         requirements,
         unsupported,
@@ -1776,6 +1823,8 @@ program
       latestPolicy,
       outputDir: options.output,
       registry,
+      stableTagResolutions,
+      tagResolutionPolicy,
       gitRequirements,
       requirements,
       unsupported,
