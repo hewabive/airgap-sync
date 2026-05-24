@@ -140,6 +140,13 @@ declaring parent, and that parent did not change, the old mapped version is reus
 Use `--tag-resolution-policy refresh` when every tag dependency should be checked
 against the source registry during this run.
 
+Use `reuse-stable` when this workspace is the only source of Verdaccio updates and
+imports are applied in order. Avoid it when the same Verdaccio is updated through other
+paths or by independently generated bundles on different removable drives: reused tag
+dependencies are restored strictly and can move a shared tag such as `latest` backward.
+For mixed update sources, prefer `--tag-resolution-policy refresh` and avoid importing
+older bundles after newer ones.
+
 Before transfer, inspect the bundle:
 
 ```bash

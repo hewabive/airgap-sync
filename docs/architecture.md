@@ -210,6 +210,14 @@ Root tag targets such as `eslint@latest` are always explicit operator requests a
 resolved from the source registry. `tagResolutionPolicy: "refresh"` disables reuse and
 resolves all tag dependencies from source metadata.
 
+`reuse-stable` assumes a single linear update stream where the bundle is the
+authoritative source for registry tag state. npm dist-tags are global per package name,
+not per declaring parent. If Verdaccio is also updated by other tools, by manually
+published packages, or by multiple removable drives carrying independently generated
+bundles, a reused old dependency tag can move a shared registry tag backward. In those
+environments use `tagResolutionPolicy: "refresh"` and apply bundles in generation order,
+or keep separate registries for independent update streams.
+
 `latest` is a special case. Verdaccio may create or keep `latest` during `npm publish`
 even when publishing with a custom temporary tag, and deleting the last `latest` tag is
 not reliable enough to use as a safety mechanism. The bundle must therefore contain a
@@ -233,9 +241,9 @@ dependencies. Use this mode when the operator wants a fresher local registry and
 larger bundles.
 
 Explicit root tag requirements still resolve through the source registry. Dependency
-tag requirements such as `node-fetch@cjs` follow `tagResolutionPolicy`. The latest
-policy only controls the artificial publish-time `latest` tag added for package names
-that are already in the bundle.
+tag requirements such as `node-fetch@cjs` follow `tagResolutionPolicy` and are restored
+strictly during publish. The latest policy only controls the artificial publish-time
+`latest` tag added for package names that are already in the bundle.
 
 ## Publish Policy
 

@@ -121,6 +121,11 @@ previous bundle and the mapped package tarball is still present. Root tag target
 always resolved from the source registry. `--tag-resolution-policy refresh` resolves
 all tag dependencies from the source registry.
 
+Use `reuse-stable` for one linear update stream where the bundle is the only source of
+Verdaccio updates. If the same registry is updated through other paths or independently
+generated bundles, prefer `refresh`; reused dependency tags are restored strictly and
+can move shared registry tags backward.
+
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
 The online bundle should store Git source identities and local mirrors, not
