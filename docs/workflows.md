@@ -280,6 +280,20 @@ npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
+pnpm v11 applies `minimumReleaseAge: 1440` by default and verifies loaded lockfiles
+unless `trustLockfile` is enabled. Because `airgap-sync` fills Verdaccio through
+`npm publish`, imported packages look newly published to pnpm even when the original
+npmjs.org release is old. On closed-network consumer machines that install trusted
+project lockfiles, set:
+
+```bash
+pnpm config set --global trustLockfile true
+```
+
+If consumers intentionally install without a lockfile or update lockfiles inside the
+closed network, either wait for the local publish age window to pass or explicitly set a
+different policy, for example `minimumReleaseAge: 0` in pnpm configuration.
+
 If install still tries to reach the public internet, inspect:
 
 - Git errors: check Git source metadata, Gitea apply reports, and consumer rewrite

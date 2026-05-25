@@ -191,10 +191,12 @@ function installEnv(options: {
     npm_config_replace_registry_host: 'npmjs',
     npm_config_registry: options.registryUrl,
     npm_config_store_dir: pnpmStore,
+    npm_config_trust_lockfile: 'true',
     NPM_CONFIG_CACHE: npmCache,
     NPM_CONFIG_REPLACE_REGISTRY_HOST: 'npmjs',
     NPM_CONFIG_REGISTRY: options.registryUrl,
     NPM_CONFIG_STORE_DIR: pnpmStore,
+    NPM_CONFIG_TRUST_LOCKFILE: 'true',
     YARN_CACHE_FOLDER: yarnCache,
   };
 }

@@ -196,6 +196,14 @@ closest automated check to the final consumer workflow, but it does not yet enfo
 network-deny sandbox. Use `--ignore-scripts` when install scripts should not run during
 verification.
 
+pnpm v11 treats packages published into local Verdaccio as newly published packages.
+For closed-network consumers that install trusted project lockfiles, configure pnpm to
+trust those lockfiles:
+
+```bash
+pnpm config set --global trustLockfile true
+```
+
 ## Development
 
 ```bash

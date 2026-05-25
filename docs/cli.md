@@ -292,6 +292,11 @@ mirror into a temporary directory, detects the package manager from the lockfile
 the npm registry, and uses a temporary Git config with source-host rewrites to the
 provided Gitea URL. It writes `verify-install-report.json`.
 
+When the detected package manager is pnpm, `verify install` sets `trustLockfile: true`
+for that verification process. This avoids false failures from pnpm v11's default
+`minimumReleaseAge` policy after packages have just been re-published into the local
+registry.
+
 By default `verify install` runs the same lifecycle scripts that a normal install
 would run. Add `--ignore-scripts` to check dependency resolution and Git/npm
 rewrites without running package scripts.

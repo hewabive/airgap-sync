@@ -19,4 +19,6 @@
   the declaring parent did not change.
 - Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.
 - Added `verify install --ignore-scripts` and documented the tool security model.
+- Changed pnpm install verification to trust loaded lockfiles so Verdaccio import time
+  does not trip pnpm v11 `minimumReleaseAge`.
 - Switched the project development and portable CLI install workflow from pnpm to npm.

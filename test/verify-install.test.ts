@@ -171,6 +171,8 @@ describe('verifyInstall', () => {
       args: ['install', '--frozen-lockfile'],
       command: 'pnpm',
     });
+    expect(calls[0]?.env.npm_config_trust_lockfile).toBe('true');
+    expect(calls[0]?.env.NPM_CONFIG_TRUST_LOCKFILE).toBe('true');
   });
 
   it('can skip package manager lifecycle scripts', async () => {
