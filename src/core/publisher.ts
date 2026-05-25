@@ -177,12 +177,80 @@ function isAlreadyExistsError(error: unknown): boolean {
   );
 }
 
+function parseNpmJsonError(output: string): string | undefined {
+  const startMatch = /\{\s*"error"\s*:/u.exec(output);
+
+  if (!startMatch) {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  const start = startMatch.index;
+
+  for (let index = start; index < output.length; index++) {
+    const char = output[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === '{') {
+      depth++;
+      continue;
+    }
+
+    if (char !== '}') {
+      continue;
+    }
+
+    depth--;
+    if (depth !== 0) {
+      continue;
+    }
+
+    const parsed = JSON.parse(output.slice(start, index + 1)) as {
+      error?: {
+        detail?: unknown;
+        summary?: unknown;
+      };
+    };
+    const summary = typeof parsed.error?.summary === 'string' ? parsed.error.summary.trim() : '';
+    const detail = typeof parsed.error?.detail === 'string' ? parsed.error.detail.trim() : '';
+    return [summary, detail].filter((part) => part.length > 0).join('\n') || undefined;
+  }
+
+  return undefined;
+}
+
 function errorSummary(error: unknown): string {
   const stderr =
     error && typeof error === 'object' && 'stderr' in error ? String(error.stderr).trim() : '';
   const stdout =
     error && typeof error === 'object' && 'stdout' in error ? String(error.stdout).trim() : '';
   const message = error instanceof Error ? error.message : String(error);
+  const jsonSummary = parseNpmJsonError([stderr, stdout, message].join('\n'));
+
+  if (jsonSummary) {
+    return jsonSummary;
+  }
+
   const lines = [stderr, stdout, message]
     .filter((part) => part.length > 0)
     .join('\n')
@@ -288,8 +356,9 @@ async function npmPublish(
       tempPublishTag,
       '--provenance',
       'false',
+      '--json',
     ],
-    { maxBuffer: 10 * 1024 * 1024, timeout: 120_000 },
+    { maxBuffer: 10 * 1024 * 1024, timeout: 300_000 },
     runner
   );
 }

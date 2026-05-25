@@ -417,9 +417,54 @@ describe('publishBundle', () => {
           'airgap-sync-temp',
           '--provenance',
           'false',
+          '--json',
         ],
       ]);
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('summarizes npm publish json errors', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const runNpm: NpmRunner = (args) => {
+      if (args[0] === 'publish') {
+        const error = new Error('Command failed: npm publish') as Error & {
+          stderr?: string;
+        };
+        error.stderr = [
+          'npm error You cannot publish over the previously published versions: 1.0.0.',
+          '{',
+          '  "error": {',
+          '    "summary": "You cannot publish over the previously published versions: 1.0.0.",',
+          '    "detail": ""',
+          '  }',
+          '}',
+        ].join('\n');
+        return Promise.reject(error);
+      }
+
+      return Promise.resolve({ stdout: '' });
+    };
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+
+      const report = await publishBundle(manifest, distTags, {
+        bundleDir,
+        registryUrl: 'http://localhost:4873',
+        runNpm,
+        skipExisting: false,
+      });
+
+      expect(report.errors).toContainEqual({
+        action: 'publish',
+        error: 'You cannot publish over the previously published versions: 1.0.0.',
+        package: 'demo@1.0.0',
+        status: 'error',
+      });
     } finally {
       await fs.remove(bundleDir);
     }
