@@ -222,6 +222,9 @@ export npm_config_nodedir=/opt/nodejs
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
+For a persistent setting, put `build-from-source=true` and `nodedir=/opt/nodejs` in the
+project `.npmrc`; recent pnpm versions reject those keys in global `config.yaml`.
+
 See [Workflows](./docs/workflows.md) for more detail.
 
 ## Development

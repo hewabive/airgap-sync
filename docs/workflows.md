@@ -314,12 +314,17 @@ export npm_config_nodedir=/opt/nodejs
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
-The equivalent persistent pnpm configuration is:
+The equivalent persistent project configuration is a local `.npmrc` in the project or
+workspace root:
 
-```bash
-pnpm config set --global build-from-source true
-pnpm config set --global nodedir /opt/nodejs
+```ini
+build-from-source=true
+nodedir=/opt/nodejs
 ```
+
+Do not use `pnpm config set --global` for these two keys: recent pnpm versions store
+global settings in a validated `config.yaml`, and `build-from-source`/`nodedir` are
+npm/node-gyp passthrough options rather than pnpm settings.
 
 Use a `nodedir` that matches the Node version used for the install; otherwise native
 addons may compile against the wrong ABI. If local headers are not available, bring the
