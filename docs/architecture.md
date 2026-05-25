@@ -44,7 +44,7 @@ workspace targets / package specs / package.json / package list
 airgap bundle
   -> npm publish tarballs
   -> npm dist-tag add required tags
-  -> create Gitea owners/repositories
+  -> create Gitea owners/repositories when using the Gitea provider
   -> push Git mirrors
 ```
 
@@ -63,11 +63,11 @@ online removable media
   -> write transfer bundle
 
 closed network
-  -> publish npm tarballs into Verdaccio
+  -> publish npm tarballs into an npm-compatible registry
   -> restore npm dist-tags
-  -> map Git sources to Gitea targets
-  -> create missing Gitea owners/repositories
-  -> push Git mirrors into Gitea
+  -> map Git sources to closed-network Git targets
+  -> create missing Gitea owners/repositories when enabled
+  -> push Git mirrors into the closed-network Git host
   -> generate install configuration
   -> verify install against closed-network services
 ```
@@ -78,8 +78,8 @@ The Git side should use standard Git primitives where possible:
 - branch/tag refspec pushes into Gitea;
 - `git bundle` for auditable file-based transfer when a Git server is not available.
 
-The npm side should continue to populate Verdaccio through `npm publish` and
-`npm dist-tag`, not by mutating Verdaccio storage.
+The npm side should continue to populate npm-compatible registries through
+`npm publish` and `npm dist-tag`, not by mutating registry storage.
 
 ## Repository Input Policy
 
@@ -290,7 +290,7 @@ tarballs into Verdaccio does not make those Git URLs resolvable.
 The preferred strategy is to mirror the referenced Git repository into the closed
 network and make the original spec resolve to that mirror.
 
-Online collection should store source Git identities, not Gitea-specific target URLs.
+Online collection should store source Git identities, not target Git-host-specific URLs.
 The bundle should be portable between closed networks. A source record should include:
 
 - canonical source URL;
@@ -300,7 +300,9 @@ The bundle should be portable between closed networks. A source record should in
 - local mirror path inside the bundle;
 - `requiredBy` edges that explain why the repository was included.
 
-Offline publish maps those source identities to the target Gitea instance.
+Offline publish maps those source identities to the target Git host. The first
+implemented provisioning provider is Gitea; generic Git hosts can be used when target
+repositories are created outside `airgap-sync`.
 
 ## Git Mirror Naming Policy
 
@@ -317,10 +319,10 @@ This keeps consumer configuration simple:
 git config --global url."http://gitea.local/".insteadOf "https://github.com/"
 ```
 
-The closed-network publish phase is responsible for creating missing Gitea owners or
-repositories. Flattened names such as `github.com-antvis-g2` should be treated as a
-temporary implementation detail or fallback for hosts that cannot be mapped cleanly to
-an owner/repository path.
+The closed-network publish phase can create missing Gitea owners or repositories, or it
+can skip provisioning and assume target repositories already exist. Flattened names
+such as `github.com-antvis-g2` should be treated as a temporary implementation detail
+or fallback for hosts that cannot be mapped cleanly to an owner/repository path.
 
 Possible mechanisms for making installs resolve to local mirrors:
 

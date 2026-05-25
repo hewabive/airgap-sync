@@ -26,9 +26,11 @@ The broader target is an airgap sync workflow for portable media:
 
 This repository is an early but usable implementation. The core workflow is in place:
 workspace targets, recursive npm dependency collection, lockfile and nested
-package.json scanning, Git target/dependency mirroring, Verdaccio publish, dist-tag
-restoration, Gitea repository creation, mirror push, static bundle validation, and
-install verification.
+package.json scanning, Git target/dependency mirroring, npm-compatible registry
+publish, dist-tag restoration, Gitea repository creation, mirror push, static bundle
+validation, and install verification. Verdaccio and Gitea are the tested closed-network
+services; other npm-compatible registries should work when they support `npm publish`
+and `npm dist-tag`.
 
 It still needs real-environment hardening around large repositories, authentication
 variants, performance tuning, and operator ergonomics.
@@ -37,7 +39,9 @@ Current limitations:
 
 - Source registry and upstream Git host authentication is still explicit; there is no
   automatic credential discovery yet. Closed-network Gitea authentication uses the
-  provided token for both repository creation and mirror push.
+  provided token for repository creation and, by default, mirror push. Non-Gitea Git
+  hosts are supported only when target repositories already exist and standard Git push
+  authentication is enough.
 - Verification proves package-manager installs for configured Git targets, but it does
   not yet enforce a network-deny sandbox around the process. Use
   `verify install --ignore-scripts` when install scripts should not execute during
@@ -77,7 +81,7 @@ airgap-sync target add npm eslint@latest
 airgap-sync download
 airgap-sync verify ./airgap-bundle
 
-# Closed network: populate Verdaccio and Gitea from the transfer bundle.
+# Closed network: populate Verdaccio and the closed-network Git host from the transfer bundle.
 airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
@@ -107,12 +111,32 @@ pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 
 Current lower-level commands are documented in the [CLI Reference](./docs/cli.md).
 
+## Compatibility
+
+- npm registry: any npm-compatible registry that supports `npm publish` and
+  `npm dist-tag`; tested with Verdaccio.
+- Git hosting: Gitea provisioning is implemented and tested. Forgejo-like APIs are
+  expected to be close but are not yet tested.
+- Generic Git host: supported when repositories already exist and can receive normal
+  Git pushes. Use `--skip-git-provision`; for HTTP auth use `--git-username` and
+  `--git-password`.
+
+For a Git host where repositories are created outside `airgap-sync`, skip the Gitea API
+provisioning step and push to existing target repositories:
+
+```bash
+airgap-sync publish ./airgap-bundle \
+  --registry http://registry.local:4873 \
+  --gitea http://git.local \
+  --skip-git-provision
+```
+
 The configured workspace lives on removable media:
 
 ```text
 airgap-sync.json          Target list and defaults
 airgap-sync.secrets.json  Optional local secrets, ignored by Git
-airgap-bundle/            Transfer bundle for Verdaccio and Gitea
+airgap-bundle/            Transfer bundle for the npm registry and Git host
 airgap-bundle/git-mirrors/ Git mirrors for target repositories and Git dependencies
 airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 ```

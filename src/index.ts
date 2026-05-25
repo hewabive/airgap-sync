@@ -27,7 +27,11 @@ export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { readGitSourceManifestRequirements } from './core/git-manifests.js';
-export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
+export {
+  assumeGiteaRepositoriesExist,
+  HttpGiteaClient,
+  provisionGiteaRepositories,
+} from './core/gitea.js';
 export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export { readStableTagResolutionIndex } from './core/tag-resolution.js';
 export {
@@ -113,6 +117,7 @@ export type { ConfigureGitRewritesOptions } from './core/git-config.js';
 export type {
   GiteaClient,
   HttpGiteaClientOptions,
+  AssumeGiteaRepositoriesExistOptions,
   ProvisionGiteaRepositoriesOptions,
 } from './core/gitea.js';
 export type {

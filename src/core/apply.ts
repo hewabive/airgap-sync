@@ -12,7 +12,11 @@ import {
 import { applyGitSources, type GitHttpAuth } from './git-apply.js';
 import { configureGitRewrites } from './git-config.js';
 import { type GitCommandRunner } from './git-fetch.js';
-import { provisionGiteaRepositories, type GiteaClient } from './gitea.js';
+import {
+  assumeGiteaRepositoriesExist,
+  provisionGiteaRepositories,
+  type GiteaClient,
+} from './gitea.js';
 import { publishBundle, type PublishBundleOptions } from './publisher.js';
 import type {
   ApplyBundleReport,
@@ -40,6 +44,7 @@ export interface ApplyBundleOptions {
   registryUrl: string;
   runGitCommand?: GitCommandRunner;
   skipExisting?: boolean;
+  skipGitProvision?: boolean;
 }
 
 export type ApplyProgressPhase = 'publish' | 'gitea' | 'git-apply' | 'git-config' | 'report';
@@ -113,15 +118,22 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   options.onProgress?.({ phase: 'publish', status: 'done' });
 
   options.onProgress?.({ phase: 'gitea', status: 'start' });
-  const gitea = await provisionGiteaRepositories({
-    client: options.giteaClient,
-    dryRun,
-    generatedAt,
-    ...(options.gitAuth ? { gitAuth: options.gitAuth } : {}),
-    giteaBaseUrl: options.giteaBaseUrl,
-    manifest: gitSources,
-    private: options.private ?? true,
-  });
+  const gitea =
+    options.skipGitProvision === true && !dryRun
+      ? assumeGiteaRepositoriesExist({
+          generatedAt,
+          giteaBaseUrl: options.giteaBaseUrl,
+          manifest: gitSources,
+          private: options.private ?? true,
+        })
+      : await provisionGiteaRepositories({
+          client: options.giteaClient,
+          dryRun,
+          generatedAt,
+          giteaBaseUrl: options.giteaBaseUrl,
+          manifest: gitSources,
+          private: options.private ?? true,
+        });
   await writeGiteaRepositoryProvisionReport(bundleDir, gitea);
   options.onProgress?.({ phase: 'gitea', status: 'done' });
 

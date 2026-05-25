@@ -347,9 +347,11 @@ airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --dry-run
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --mirrors-dir ./git-mirrors
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
+airgap-sync git apply ./airgap-bundle --gitea http://git.local --username git --password "$TOKEN"
 ```
 
-Reads `git-sources.json` and pushes local bare mirrors to Gitea by pruning and
+Reads `git-sources.json` and pushes local bare mirrors to the closed-network Git host
+by pruning and
 force-updating only branches and tags: `refs/heads/*` and `refs/tags/*`.
 Provider-specific refs such as GitHub pull-request refs are intentionally not pushed.
 Target URLs preserve upstream owner/repository paths: for example
@@ -359,6 +361,8 @@ create repositories on push.
 
 When `--token`, `GITEA_TOKEN`, or a saved token is available, the command uses it for
 Git HTTP push authentication instead of relying on an interactive credential helper.
+For non-Gitea HTTP Git hosts, pass `--username` and `--password` instead; no Gitea API
+call is made in that mode.
 
 The command writes `git-apply-report.json`, including generated `git config --global
 url.*.insteadOf` commands for redirecting installs from public Git URLs to Gitea.
@@ -399,18 +403,22 @@ airgap-sync publish ./airgap-bundle \
   --gitea http://gitea.local
 ```
 
-Publishes the whole bundle in the closed network: publish npm packages to Verdaccio,
-restore dist-tags, map Git sources to Gitea targets, create missing Gitea
-owners/repositories, push mirrors, and write import reports.
+Publishes the whole bundle in the closed network: publish npm packages to an
+npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, create
+missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
+import reports.
 
 Supported options:
 
 ```text
 -r, --registry <url>      Target npm registry URL
---gitea <url>             Closed-network Gitea base URL
+--gitea <url>             Closed-network Git host base URL
 --gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN or saved secrets
+--git-username <name>     Git HTTP username for non-Gitea push authentication
+--git-password <token>    Git HTTP password/token for non-Gitea push authentication
 --mirrors-dir <dir>       Directory containing bare Git mirrors
 --public                  Create public Gitea repositories instead of private repositories
+--skip-git-provision      Assume target Git repositories already exist and skip Gitea API provisioning
 --no-skip-existing        Attempt to publish npm versions that already exist
 --dist-tag-concurrency <n> Concurrent npm dist-tag operations, default 4
 --publish-concurrency <n> Concurrent npm publish operations, default 4
@@ -423,6 +431,12 @@ the token does not appear in shell history or process listings.
 
 The Gitea token is used for both API repository provisioning and Git HTTP mirror
 push authentication.
+
+Use `--skip-git-provision` when the closed-network Git repositories are created outside
+`airgap-sync`, or when the target Git host is not Gitea-compatible. In that mode
+`publish` does not call the Gitea API; it only pushes Git mirrors to URLs derived from
+`--gitea`. If the Git host needs HTTP credentials, provide `--git-username` and
+`--git-password`.
 
 Git target paths preserve source owner/repository names by default. For example,
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`, so

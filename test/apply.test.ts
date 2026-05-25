@@ -226,4 +226,55 @@ describe('applyBundle', () => {
       },
     });
   });
+
+  it('can skip Gitea provisioning when target Git repositories already exist', async () => {
+    const emptyManifest: BundleManifest = {
+      ...manifest,
+      packages: [],
+    };
+    const emptyDistTags: DistTagsManifest = {
+      ...distTags,
+      requirements: [],
+      tags: {},
+    };
+    const mirrorPath = path.join(bundleDir, 'git-mirrors/github.com/acme/app.git');
+    let repositoryExistsCalls = 0;
+    await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), emptyManifest, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), emptyDistTags, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
+    await fs.ensureDir(mirrorPath);
+
+    const report = await applyBundle({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://git.local',
+      giteaClient: {
+        ...noopClient,
+        repositoryExists() {
+          repositoryExistsCalls++;
+          return Promise.resolve(false);
+        },
+      },
+      registryUrl: 'http://verdaccio.local:4873',
+      runGitCommand() {
+        return Promise.resolve(undefined);
+      },
+      skipGitProvision: true,
+    });
+
+    expect(repositoryExistsCalls).toBe(0);
+    expect(report.gitea).toMatchObject({
+      created: 0,
+      errors: [],
+      exists: 1,
+      giteaBaseUrl: 'http://git.local',
+      totalRepositories: 1,
+    });
+    expect(report.gitApply).toMatchObject({
+      errors: [],
+      pushed: 1,
+      totalRepositories: 1,
+    });
+    expect(report.succeeded).toBe(true);
+  });
 });

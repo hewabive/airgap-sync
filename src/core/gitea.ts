@@ -42,6 +42,13 @@ export interface ProvisionGiteaRepositoriesOptions {
   private?: boolean;
 }
 
+export interface AssumeGiteaRepositoriesExistOptions {
+  generatedAt?: string;
+  giteaBaseUrl: string;
+  manifest: GitSourcesManifest;
+  private?: boolean;
+}
+
 function encodePathPart(value: string): string {
   return encodeURIComponent(value);
 }
@@ -411,6 +418,43 @@ export async function provisionGiteaRepositories(
     organizationPlanned: organizationActions.filter((action) => action.status === 'planned').length,
     organizations: organizationActions,
     planned: actions.filter((action) => action.status === 'planned').length,
+    private: isPrivate,
+    totalOrganizations: organizationActions.length,
+    totalRepositories: actions.length,
+  };
+}
+
+export function assumeGiteaRepositoriesExist(
+  options: AssumeGiteaRepositoriesExistOptions
+): GiteaRepositoryProvisionReport {
+  const isPrivate = options.private ?? true;
+  const organizationActions: GiteaOrganizationActionResult[] = uniqueOwners(options.manifest).map(
+    (owner) => ({
+      owner,
+      status: 'exists',
+    })
+  );
+  const actions: GiteaRepositoryActionResult[] = options.manifest.sources.map((source) => ({
+    owner: source.owner,
+    private: isPrivate,
+    repository: source.repo,
+    status: 'exists',
+    targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
+  }));
+
+  return {
+    created: 0,
+    dryRun: false,
+    errors: [],
+    exists: actions.length,
+    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    giteaBaseUrl: normalizeBaseUrl(options.giteaBaseUrl),
+    organizationCreated: 0,
+    organizationErrors: [],
+    organizationExists: organizationActions.length,
+    organizationPlanned: 0,
+    organizations: organizationActions,
+    planned: 0,
     private: isPrivate,
     totalOrganizations: organizationActions.length,
     totalRepositories: actions.length,

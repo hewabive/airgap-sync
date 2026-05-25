@@ -10,9 +10,10 @@ for debugging individual phases.
 - Project Git repositories are on removable media or in a directory that can be
   refreshed on the online machine.
 - The transfer bundle directory is on removable media or can be copied to it.
-- The closed network has Verdaccio and Gitea running.
-- Verdaccio is populated only through `npm publish` and `npm dist-tag`.
-- Verdaccio, and any reverse proxy in front of it, allows large package uploads. Large
+- The closed network has an npm-compatible registry and a Git host. Verdaccio and
+  Gitea are the tested path.
+- The npm registry is populated only through `npm publish` and `npm dist-tag`.
+- The registry, and any reverse proxy in front of it, allows large package uploads. Large
   native packages can fail with HTTP `E413` unless Verdaccio `max_body_size` and proxy
   upload limits are raised.
 - Gitea target repositories either can be created through the Gitea API or already
@@ -24,7 +25,7 @@ Example names used below:
 ./airgap-bundle                 Transfer bundle directory
 https://registry.npmjs.org      Source npm registry
 http://verdaccio.local:4873     Closed-network npm registry
-http://gitea.local              Closed-network Gitea base URL
+http://gitea.local              Closed-network Git host base URL
 ```
 
 ## First Setup
@@ -202,7 +203,7 @@ commands.
 
 ## Offline Phase
 
-Publish the bundle to Verdaccio and Gitea:
+Publish the bundle to the closed-network npm registry and Git host:
 
 ```bash
 export GITEA_TOKEN=...
@@ -224,11 +225,32 @@ The offline publish step should:
 
 - publish npm tarballs into Verdaccio;
 - restore npm dist-tags;
-- map source Git repositories to the closed-network Gitea instance;
+- map source Git repositories to the closed-network Git host;
 - preserve upstream owner/repository paths when possible;
 - create missing Gitea owners or repositories;
 - push local bare mirrors into Gitea using the provided Gitea token;
 - generate install configuration for consumer machines.
+
+If Git repositories are created by another process, or the target Git host is not
+Gitea-compatible, skip repository provisioning:
+
+```bash
+airgap-sync publish ./airgap-bundle \
+  --registry http://registry.local:4873 \
+  --gitea http://git.local \
+  --skip-git-provision
+```
+
+For non-Gitea HTTP push authentication, pass explicit Git credentials:
+
+```bash
+airgap-sync publish ./airgap-bundle \
+  --registry http://registry.local:4873 \
+  --gitea http://git.local \
+  --skip-git-provision \
+  --git-username git \
+  --git-password "$TOKEN"
+```
 
 By default `publish` reports the Git rewrite rules without changing global Git config.
 Pass `--configure-git-global` on the import machine when that machine should also be
@@ -289,6 +311,7 @@ airgap-sync git fetch ./airgap-bundle
 airgap-sync npm publish ./airgap-bundle --registry http://verdaccio.local:4873
 airgap-sync git create-repos ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
+airgap-sync git apply ./airgap-bundle --gitea http://git.local --username git --password "$TOKEN"
 airgap-sync git config ./airgap-bundle --gitea http://gitea.local --global
 ```
 

@@ -117,12 +117,15 @@ interface ApplyOptions {
   dryRun?: boolean;
   gitea: string;
   giteaToken?: string;
+  gitPassword?: string;
+  gitUsername?: string;
   json?: boolean;
   mirrorsDir?: string;
   publishConcurrency: number;
   public?: boolean;
   registry: string;
   skipExisting?: boolean;
+  skipGitProvision?: boolean;
 }
 
 interface VerifyOptions {
@@ -367,8 +370,8 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
   const status = report.succeeded
     ? green(
         report.dryRun
-          ? 'OK Publish dry run completed: planned npm, Gitea, Git mirror, and Git rewrite actions are available.'
-          : 'OK Publish completed: npm packages, dist-tags, Gitea repositories, and Git mirrors are up to date.'
+          ? 'OK Publish dry run completed: planned npm, Git repository, Git mirror, and Git rewrite actions are available.'
+          : 'OK Publish completed: npm packages, dist-tags, Git repositories, and Git mirrors are up to date.'
       )
     : red(`FAILED Publish incomplete: ${String(totalErrors)} errors.`);
   const npmPackageAction = report.dryRun ? 'planned' : 'published';
@@ -385,7 +388,7 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     `NPM dist-tags: ${String(report.publish.restoredTags)} ${npmTagAction}, ${String(
       npmTagErrors.length
     )} errors.`,
-    `Gitea repositories: ${String(report.gitea.totalRepositories)} total, ${String(
+    `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(
       report.gitea.created + report.gitea.planned
     )} ${giteaAction}, ${String(report.gitea.exists)} already existed, ${String(
       giteaErrors
@@ -505,8 +508,10 @@ interface GitFetchOptions {
 interface GitApplyOptions {
   dryRun?: boolean;
   gitea: string;
+  password?: string;
   token?: string;
   mirrorsDir?: string;
+  username?: string;
 }
 
 interface GitConfigOptions {
@@ -955,6 +960,24 @@ async function requireGiteaToken(options: {
   }
 
   return token;
+}
+
+function explicitGitAuth(options: {
+  password: string | undefined;
+  username: string | undefined;
+}): { password: string; username: string } | undefined {
+  if (!options.password && !options.username) {
+    return undefined;
+  }
+
+  if (!options.password || !options.username) {
+    throw new Error('provide both Git username and Git password/token');
+  }
+
+  return {
+    password: options.password,
+    username: options.username,
+  };
 }
 
 async function giteaTokenFromMenu(workspaceDir: string, rl: ReadlineInterface): Promise<string> {
@@ -1451,12 +1474,19 @@ async function runMenuAction(
       console.error(`[menu] publish updates: bundle ${bundle}`);
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
-      const publicRepos = await resolvePromptBoolean(
+      const provisionGit = await askYesNo(
         rl,
-        'Create public Gitea repositories?',
-        config.defaults.publish.publicRepositories,
-        false
+        'Create/check missing Git repositories through Gitea API?',
+        true
       );
+      const publicRepos = provisionGit
+        ? await resolvePromptBoolean(
+            rl,
+            'Create public Gitea repositories?',
+            config.defaults.publish.publicRepositories,
+            false
+          )
+        : false;
       const configureGitGlobal = await resolvePromptBoolean(
         rl,
         'Configure global Git rewrites on this machine?',
@@ -1466,10 +1496,17 @@ async function runMenuAction(
       console.error(
         `[menu] publish updates: registry=${targetRegistry} gitea=${giteaUrl} public=${String(
           publicRepos
-        )} configureGitGlobal=${String(configureGitGlobal)}`
+        )} provisionGit=${String(provisionGit)} configureGitGlobal=${String(configureGitGlobal)}`
       );
-      const token = await giteaTokenFromMenu(workspaceDir, rl);
-      console.error('[menu] publish updates: Gitea token is set');
+      const token = provisionGit
+        ? await giteaTokenFromMenu(workspaceDir, rl)
+        : await resolveGiteaToken({
+            cliToken: undefined,
+            workspaceDir,
+          });
+      if (token) {
+        console.error('[menu] publish updates: Gitea token is set');
+      }
       await runSelfCommand(
         compactArgs([
           'publish',
@@ -1479,6 +1516,7 @@ async function runMenuAction(
           '--gitea',
           giteaUrl,
           publicRepos ? '--public' : undefined,
+          provisionGit ? undefined : '--skip-git-provision',
           configureGitGlobal ? '--configure-git-global' : undefined,
         ]),
         workspaceDir,
@@ -2391,29 +2429,39 @@ gitCommand
 
 gitCommand
   .command('apply')
-  .description('Push local bare mirrors into Gitea and report Git rewrite rules')
+  .description('Push local bare mirrors into the closed-network Git host')
   .argument('<bundle>', 'Path to airgap bundle directory')
-  .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .requiredOption('--gitea <url>', 'Closed-network Git host base URL')
   .option(
     '--token <token>',
     `Gitea API token for Git push auth, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
   )
+  .option('--username <name>', 'Git HTTP username for non-Gitea push authentication')
+  .option('--password <token>', 'Git HTTP password/token for non-Gitea push authentication')
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
     try {
       const manifest = await readGitSourcesManifest(bundle);
-      const token = await resolveGiteaToken({
-        cliToken: options.token,
-        workspaceDir: process.cwd(),
+      const providedGitAuth = explicitGitAuth({
+        password: options.password,
+        username: options.username,
       });
+      const token = providedGitAuth
+        ? undefined
+        : await resolveGiteaToken({
+            cliToken: options.token,
+            workspaceDir: process.cwd(),
+          });
       const httpClient =
-        options.dryRun === true || !token
+        options.dryRun === true || !token || providedGitAuth
           ? undefined
           : new HttpGiteaClient(options.gitea, { authToken: token });
-      const gitAuth = httpClient
-        ? { password: token ?? '', username: await httpClient.currentUserLogin() }
-        : undefined;
+      const gitAuth =
+        providedGitAuth ??
+        (httpClient && token
+          ? { password: token, username: await httpClient.currentUserLogin() }
+          : undefined);
       const report = await applyGitSources({
         bundleDir: bundle,
         dryRun: options.dryRun === true,
@@ -2513,39 +2561,56 @@ gitCommand
 addNpmPublishOptions(
   program
     .command('publish')
-    .description('Publish an airgap bundle to Verdaccio and Gitea')
+    .description('Publish an airgap bundle to an npm registry and Git host')
     .argument('<bundle>', 'Path to airgap bundle directory')
     .requiredOption('-r, --registry <url>', 'Target npm registry URL')
-    .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+    .requiredOption('--gitea <url>', 'Closed-network Git host base URL')
     .option(
       '--gitea-token <token>',
       `Gitea API token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
     )
+    .option('--git-username <name>', 'Git HTTP username for non-Gitea push authentication')
+    .option('--git-password <token>', 'Git HTTP password/token for non-Gitea push authentication')
     .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
     .option('--public', 'Create public Gitea repositories instead of private repositories')
+    .option(
+      '--skip-git-provision',
+      'Assume target Git repositories already exist and skip Gitea API provisioning'
+    )
 )
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
   .option('--dry-run', 'Print planned publish operations without publishing or pushing')
   .option('--json', 'Print full publish report as JSON')
   .action(async (bundle: string, options: ApplyOptions) => {
     try {
+      const providedGitAuth = explicitGitAuth({
+        password: options.gitPassword,
+        username: options.gitUsername,
+      });
       const token =
-        options.dryRun === true
+        options.dryRun === true || providedGitAuth
           ? undefined
-          : await requireGiteaToken({
-              cliToken: options.giteaToken,
-              optionName: '--gitea-token <token>',
-              workspaceDir: process.cwd(),
-            });
+          : options.skipGitProvision === true
+            ? await resolveGiteaToken({
+                cliToken: options.giteaToken,
+                workspaceDir: process.cwd(),
+              })
+            : await requireGiteaToken({
+                cliToken: options.giteaToken,
+                optionName: '--gitea-token <token>',
+                workspaceDir: process.cwd(),
+              });
 
       const httpClient =
-        options.dryRun === true
+        options.dryRun === true || providedGitAuth || !token
           ? undefined
-          : new HttpGiteaClient(options.gitea, { authToken: token ?? '' });
+          : new HttpGiteaClient(options.gitea, { authToken: token });
       const client = httpClient ?? noopGiteaClient;
-      const gitAuth = httpClient
-        ? { password: token ?? '', username: await httpClient.currentUserLogin() }
-        : undefined;
+      const gitAuth =
+        providedGitAuth ??
+        (httpClient && token
+          ? { password: token, username: await httpClient.currentUserLogin() }
+          : undefined);
       const report = await applyBundle({
         bundleDir: bundle,
         configureGitGlobal: options.configureGitGlobal === true,
@@ -2561,6 +2626,7 @@ addNpmPublishOptions(
         publishConcurrency: options.publishConcurrency,
         registryUrl: options.registry,
         skipExisting: options.skipExisting !== false,
+        skipGitProvision: options.skipGitProvision === true,
       });
       await writePublishRunHistory({
         bundleDir: path.resolve(bundle),
