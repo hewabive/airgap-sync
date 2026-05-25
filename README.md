@@ -204,6 +204,13 @@ trust those lockfiles:
 pnpm config set --global trustLockfile true
 ```
 
+For consumers that need to install without a trusted lockfile or update lockfiles inside
+the closed network, disable pnpm's release-age quarantine instead:
+
+```bash
+pnpm config set --global minimumReleaseAge 0
+```
+
 ## Development
 
 ```bash

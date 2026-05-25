@@ -294,6 +294,10 @@ If consumers intentionally install without a lockfile or update lockfiles inside
 closed network, either wait for the local publish age window to pass or explicitly set a
 different policy, for example `minimumReleaseAge: 0` in pnpm configuration.
 
+```bash
+pnpm config set --global minimumReleaseAge 0
+```
+
 If install still tries to reach the public internet, inspect:
 
 - Git errors: check Git source metadata, Gitea apply reports, and consumer rewrite
