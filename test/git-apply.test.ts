@@ -133,12 +133,22 @@ describe('applyGitSources', () => {
           '-C',
           sourcePath,
           'push',
-          '--mirror',
+          '--prune',
           'http://gitea.local/owner/repo.git',
+          '+refs/heads/*:refs/heads/*',
+          '+refs/tags/*:refs/tags/*',
         ],
       },
     ]);
     expect(report).toMatchObject({
+      actions: [
+        {
+          repository: 'github.com/owner/repo',
+          sourcePath,
+          status: 'pushed',
+          targetUrl: 'http://gitea.local/owner/repo.git',
+        },
+      ],
       errors: [],
       missingMirrors: 0,
       planned: 0,
@@ -180,8 +190,10 @@ describe('applyGitSources', () => {
           '-C',
           sourcePath,
           'push',
-          '--mirror',
+          '--prune',
           'http://gitea.local/owner/repo.git',
+          '+refs/heads/*:refs/heads/*',
+          '+refs/tags/*:refs/tags/*',
         ],
         env: {
           GCM_INTERACTIVE: 'never',
@@ -220,5 +232,27 @@ describe('applyGitSources', () => {
       ],
       pushed: 0,
     });
+  });
+
+  it('truncates large push failures in the report', async () => {
+    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(sourcePath);
+    const longError = Array.from(
+      { length: 200 },
+      (_, index) => `remote: error: hook declined to update refs/pull/${String(index)}/head`
+    ).join('\n');
+
+    const report = await applyGitSources({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
+      runner: () => Promise.reject<undefined>(new Error(longError)),
+    });
+
+    expect(report.errors[0]?.error).toContain('truncated 120 git output lines');
+    expect(report.errors[0]?.error).toContain('refs/pull/0/head');
+    expect(report.errors[0]?.error).toContain('refs/pull/199/head');
+    expect(report.errors[0]?.error).not.toContain('refs/pull/100/head');
   });
 });

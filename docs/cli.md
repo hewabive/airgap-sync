@@ -320,8 +320,10 @@ airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --mirrors-dir .
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
 ```
 
-Reads `git-sources.json` and pushes local bare mirrors to Gitea with
-`git push --mirror`. Target URLs preserve upstream owner/repository paths: for example
+Reads `git-sources.json` and pushes local bare mirrors to Gitea by pruning and
+force-updating only branches and tags: `refs/heads/*` and `refs/tags/*`.
+Provider-specific refs such as GitHub pull-request refs are intentionally not pushed.
+Target URLs preserve upstream owner/repository paths: for example
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`.
 The target repositories must already exist unless the Gitea instance is configured to
 create repositories on push.

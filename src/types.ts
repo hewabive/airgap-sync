@@ -164,6 +164,7 @@ export interface GitApplyActionResult {
 }
 
 export interface GitApplyReport {
+  actions: GitApplyActionResult[];
   dryRun: boolean;
   errors: GitApplyActionResult[];
   generatedAt: string;

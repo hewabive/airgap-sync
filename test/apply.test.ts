@@ -215,8 +215,10 @@ describe('applyBundle', () => {
         '-C',
         mirrorPath,
         'push',
-        '--mirror',
+        '--prune',
         'http://gitea.local/acme/app.git',
+        '+refs/heads/*:refs/heads/*',
+        '+refs/tags/*:refs/tags/*',
       ],
       env: {
         GCM_INTERACTIVE: 'never',

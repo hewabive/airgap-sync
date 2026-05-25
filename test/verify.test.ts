@@ -151,6 +151,7 @@ const applyReport: ApplyBundleReport = {
   dryRun: false,
   generatedAt: '2026-05-21T00:02:00.000Z',
   gitApply: {
+    actions: [],
     dryRun: false,
     errors: [],
     generatedAt: '2026-05-21T00:02:00.000Z',

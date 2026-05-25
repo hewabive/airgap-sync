@@ -75,7 +75,7 @@ closed network
 The Git side should use standard Git primitives where possible:
 
 - `git clone --mirror` / `git fetch --all` for local mirrors;
-- `git push --mirror` or safer per-ref pushes into Gitea;
+- branch/tag refspec pushes into Gitea;
 - `git bundle` for auditable file-based transfer when a Git server is not available.
 
 The npm side should continue to populate Verdaccio through `npm publish` and

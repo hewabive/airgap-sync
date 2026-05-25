@@ -66,6 +66,10 @@ function gitHttpAuthHeader(auth: GitHttpAuth): string {
   )}`;
 }
 
+const giteaMirrorRefspecs = ['+refs/heads/*:refs/heads/*', '+refs/tags/*:refs/tags/*'];
+const maxErrorLines = 80;
+const maxErrorChars = 12_000;
+
 function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): string[] {
   return [
     '-c',
@@ -76,8 +80,9 @@ function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): st
     '-C',
     mirrorPath,
     'push',
-    '--mirror',
+    '--prune',
     targetUrl,
+    ...giteaMirrorRefspecs,
   ];
 }
 
@@ -86,6 +91,25 @@ function pushEnv(): NodeJS.ProcessEnv {
     GCM_INTERACTIVE: 'never',
     GIT_TERMINAL_PROMPT: '0',
   };
+}
+
+function summarizeErrorMessage(message: string): string {
+  const lines = message.trim().split(/\r?\n/);
+  const summarizedLines =
+    lines.length > maxErrorLines
+      ? [
+          ...lines.slice(0, maxErrorLines / 2),
+          `[airgap-sync] truncated ${String(lines.length - maxErrorLines)} git output lines`,
+          ...lines.slice(lines.length - maxErrorLines / 2),
+        ]
+      : lines;
+  const summarized = summarizedLines.join('\n');
+
+  if (summarized.length <= maxErrorChars) {
+    return summarized;
+  }
+
+  return `${summarized.slice(0, maxErrorChars)}\n[airgap-sync] truncated git error output`;
 }
 
 async function applyRepository(
@@ -118,7 +142,7 @@ async function applyRepository(
     };
   } catch (error) {
     return {
-      error: (error as Error).message,
+      error: summarizeErrorMessage((error as Error).message),
       repository: source.id,
       sourcePath: mirrorPath,
       status: 'error',
@@ -154,6 +178,7 @@ export async function applyGitSources(options: ApplyGitSourcesOptions): Promise<
   );
 
   return {
+    actions,
     dryRun: options.dryRun === true,
     errors,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
