@@ -36,6 +36,7 @@ describe('workspace config', () => {
           includePeer: false,
           latestPolicy: 'bundled',
           prune: false,
+          rangeResolutionPolicy: 'reuse-stable',
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
@@ -122,6 +123,7 @@ describe('workspace config', () => {
           includePeer: false,
           latestPolicy: 'bundled',
           prune: false,
+          rangeResolutionPolicy: 'reuse-stable',
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
@@ -148,6 +150,7 @@ describe('workspace config', () => {
             includePeer: true,
             latestPolicy: 'source',
             prune: 'ask',
+            rangeResolutionPolicy: 'refresh',
             tagResolutionPolicy: 'refresh',
           },
           publish: {
@@ -172,6 +175,7 @@ describe('workspace config', () => {
         includePeer: true,
         latestPolicy: 'source',
         prune: 'ask',
+        rangeResolutionPolicy: 'refresh',
         tagResolutionPolicy: 'refresh',
       },
       publish: {

@@ -1,13 +1,23 @@
 import path from 'node:path';
+import semver from 'semver';
 import type { BundleManifest, DistTagsManifest, TagRequirement } from '../types.js';
 import * as fs from './fs.js';
 
 export interface StableTagResolutionIndex {
+  rangeVersions: Map<string, string>;
   packageIds: Set<string>;
   tagVersions: Map<string, string>;
 }
 
+export interface StableRangeResolution {
+  name: string;
+  requiredBy: string;
+  specifier: string;
+  version: string;
+}
+
 const emptyStableTagResolutionIndex = (): StableTagResolutionIndex => ({
+  rangeVersions: new Map(),
   packageIds: new Set(),
   tagVersions: new Map(),
 });
@@ -22,6 +32,14 @@ export function stableTagResolutionKey(requirement: {
   tag: string;
 }): string {
   return [requirement.name, requirement.tag, requirement.requiredBy].join('\0');
+}
+
+export function stableRangeResolutionKey(requirement: {
+  name: string;
+  requiredBy: string;
+  specifier: string;
+}): string {
+  return [requirement.name, requirement.specifier, requirement.requiredBy].join('\0');
 }
 
 async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
@@ -62,7 +80,31 @@ export async function readStableTagResolutionIndex(
     }
   }
 
-  return { packageIds, tagVersions };
+  const rangeVersions = new Map<string, string>();
+  for (const pkg of manifest.packages) {
+    if (!packageIds.has(packageId(pkg.name, pkg.version))) {
+      continue;
+    }
+
+    for (const reason of pkg.resolvedFrom) {
+      if (
+        reason.type === 'range' &&
+        semver.validRange(reason.specifier) &&
+        semver.satisfies(pkg.version, reason.specifier)
+      ) {
+        rangeVersions.set(
+          stableRangeResolutionKey({
+            name: pkg.name,
+            requiredBy: reason.requiredBy,
+            specifier: reason.specifier,
+          }),
+          pkg.version
+        );
+      }
+    }
+  }
+
+  return { packageIds, rangeVersions, tagVersions };
 }
 
 export function stableTagRequirement(
@@ -82,6 +124,28 @@ export function stableTagRequirement(
         name: requirement.name,
         requiredBy: requirement.requiredBy,
         tag: requirement.specifier,
+        version,
+      }
+    : undefined;
+}
+
+export function stableRangeRequirement(
+  requirement: { name: string; requiredBy: string; specifier: string },
+  index: StableTagResolutionIndex
+): StableRangeResolution | undefined {
+  const version = index.rangeVersions.get(
+    stableRangeResolutionKey({
+      name: requirement.name,
+      requiredBy: requirement.requiredBy,
+      specifier: requirement.specifier,
+    })
+  );
+
+  return version
+    ? {
+        name: requirement.name,
+        requiredBy: requirement.requiredBy,
+        specifier: requirement.specifier,
         version,
       }
     : undefined;

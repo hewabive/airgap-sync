@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchSeedBundle } from '../src/core/fetcher.js';
-import { stableTagResolutionKey } from '../src/core/tag-resolution.js';
+import { stableRangeResolutionKey, stableTagResolutionKey } from '../src/core/tag-resolution.js';
 import type {
   PackageManifest,
   PackageMetadata,
@@ -432,6 +432,7 @@ describe('fetchSeedBundle', () => {
       requirements: [requirement({})],
       stableTagResolutions: {
         packageIds: new Set(['demo@1.0.0', 'node-fetch@2.6.7']),
+        rangeVersions: new Map(),
         tagVersions: new Map([
           [
             stableTagResolutionKey({
@@ -516,6 +517,7 @@ describe('fetchSeedBundle', () => {
       requirements: [requirement({})],
       stableTagResolutions: {
         packageIds: new Set(['demo@1.0.0', 'node-fetch@2.6.7']),
+        rangeVersions: new Map(),
         tagVersions: new Map(),
       },
       tagResolutionPolicy: 'reuse-stable',
@@ -532,6 +534,140 @@ describe('fetchSeedBundle', () => {
         tag: 'cjs',
         version: '2.7.0',
       },
+    ]);
+  });
+
+  it('reuses previous range resolutions for unchanged parents by default', async () => {
+    const registryWithMovedRange: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            'dist-tags': {
+              latest: '1.0.0',
+            },
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  dep: '^1.0.0',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('dep');
+        return Promise.resolve({
+          name: 'dep',
+          versions: {
+            '1.0.0': {
+              name: 'dep',
+              version: '1.0.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.0.0.tgz' },
+            },
+            '1.1.0': {
+              name: 'dep',
+              version: '1.1.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.1.0.tgz' },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithMovedRange,
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0', 'dep@1.0.0']),
+        rangeVersions: new Map([
+          [
+            stableRangeResolutionKey({
+              name: 'dep',
+              requiredBy: 'demo@1.0.0',
+              specifier: '^1.0.0',
+            }),
+            '1.0.0',
+          ],
+        ]),
+        tagVersions: new Map(),
+      },
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'dep@1.0.0',
+    ]);
+  });
+
+  it('refreshes range dependencies when range resolution policy is refresh', async () => {
+    const registryWithMovedRange: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  dep: '^1.0.0',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('dep');
+        return Promise.resolve({
+          name: 'dep',
+          versions: {
+            '1.0.0': {
+              name: 'dep',
+              version: '1.0.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.0.0.tgz' },
+            },
+            '1.1.0': {
+              name: 'dep',
+              version: '1.1.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.1.0.tgz' },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      rangeResolutionPolicy: 'refresh',
+      registry: registryWithMovedRange,
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0', 'dep@1.0.0']),
+        rangeVersions: new Map([
+          [
+            stableRangeResolutionKey({
+              name: 'dep',
+              requiredBy: 'demo@1.0.0',
+              specifier: '^1.0.0',
+            }),
+            '1.0.0',
+          ],
+        ]),
+        tagVersions: new Map(),
+      },
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'dep@1.1.0',
     ]);
   });
 

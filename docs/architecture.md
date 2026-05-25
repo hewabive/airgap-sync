@@ -210,6 +210,20 @@ Root tag targets such as `eslint@latest` are always explicit operator requests a
 resolved from the source registry. `tagResolutionPolicy: "refresh"` disables reuse and
 resolves all tag dependencies from source metadata.
 
+The default `rangeResolutionPolicy` is also `reuse-stable`. During repeated downloads,
+a transitive semver range can reuse the previous bundle's resolved version when all of
+these are true:
+
+- the previous `seed-manifest.json` contains the same `name + range + requiredBy`
+  reason;
+- the resolved package version is still present in `seed-manifest.json`;
+- the mapped tarball still exists on disk;
+- the declaring parent is stable.
+
+Root range targets are explicit operator requests and are always resolved from the
+source registry. `rangeResolutionPolicy: "refresh"` disables range reuse and lets
+transitive ranges float to the newest currently satisfying versions.
+
 `reuse-stable` assumes a single linear update stream where the bundle is the
 authoritative source for registry tag state. npm dist-tags are global per package name,
 not per declaring parent. If Verdaccio is also updated by other tools, by manually

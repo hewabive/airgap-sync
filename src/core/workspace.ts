@@ -1,7 +1,7 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import { createGitSourceFromUrl } from './git-sources.js';
-import type { GitSource, LatestPolicy, TagResolutionPolicy } from '../types.js';
+import type { GitSource, LatestPolicy, RangeResolutionPolicy, TagResolutionPolicy } from '../types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
@@ -28,6 +28,7 @@ export interface WorkspaceDefaults {
     includePeer: WorkspacePromptBoolean;
     latestPolicy: LatestPolicy;
     prune: WorkspacePromptBoolean;
+    rangeResolutionPolicy: RangeResolutionPolicy;
     tagResolutionPolicy: TagResolutionPolicy;
   };
   publish: {
@@ -99,6 +100,7 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
         includePeer: false,
         latestPolicy: 'bundled',
         prune: false,
+        rangeResolutionPolicy: 'reuse-stable',
         tagResolutionPolicy: 'reuse-stable',
       },
       publish: {
@@ -189,6 +191,13 @@ function normalizeTagResolutionPolicy(
   return value === 'refresh' || value === 'reuse-stable' ? value : fallback;
 }
 
+function normalizeRangeResolutionPolicy(
+  value: unknown,
+  fallback: RangeResolutionPolicy
+): RangeResolutionPolicy {
+  return value === 'refresh' || value === 'reuse-stable' ? value : fallback;
+}
+
 function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   const defaults = createDefaultWorkspaceConfig().defaults;
   const input = isRecord(value) ? value : {};
@@ -202,6 +211,10 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
       includePeer: normalizePromptBoolean(download.includePeer, defaults.download.includePeer),
       latestPolicy: normalizeLatestPolicy(download.latestPolicy, defaults.download.latestPolicy),
       prune: normalizePromptBoolean(download.prune, defaults.download.prune),
+      rangeResolutionPolicy: normalizeRangeResolutionPolicy(
+        download.rangeResolutionPolicy,
+        defaults.download.rangeResolutionPolicy
+      ),
       tagResolutionPolicy: normalizeTagResolutionPolicy(
         download.tagResolutionPolicy,
         defaults.download.tagResolutionPolicy

@@ -5,6 +5,7 @@ export interface PackageIdentity {
 
 export type SupportedSpecType = 'version' | 'range' | 'tag' | 'alias';
 export type LatestPolicy = 'bundled' | 'source';
+export type RangeResolutionPolicy = 'refresh' | 'reuse-stable';
 export type TagResolutionPolicy = 'refresh' | 'reuse-stable';
 
 export interface RootPackageRequirement {

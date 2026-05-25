@@ -205,6 +205,7 @@ export type {
   GitSource,
   GitSourcesManifest,
   LatestPolicy,
+  RangeResolutionPolicy,
   TagResolutionPolicy,
   PackageMetadata,
   PackageManifest,

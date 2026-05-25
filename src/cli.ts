@@ -71,6 +71,7 @@ import type {
   LatestPolicy,
   PublishProgressEvent,
   PublishProgressPhase,
+  RangeResolutionPolicy,
   ResolveRootRequirementsResult,
   TagResolutionPolicy,
   VerifyReport,
@@ -90,6 +91,7 @@ interface FetchOptions {
   latestPolicy?: LatestPolicy;
   manifest?: string;
   output: string;
+  rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: string;
   tagResolutionPolicy?: TagResolutionPolicy;
 }
@@ -137,6 +139,7 @@ interface CollectOptions {
   latestPolicy?: LatestPolicy;
   output?: string;
   prune?: boolean;
+  rangeResolutionPolicy?: RangeResolutionPolicy;
   registry?: string;
   tagResolutionPolicy?: TagResolutionPolicy;
 }
@@ -185,6 +188,16 @@ function parseTagResolutionPolicy(value: string): TagResolutionPolicy {
 
   throw new Error(
     `Expected tag resolution policy to be "refresh" or "reuse-stable"; got: ${value}`
+  );
+}
+
+function parseRangeResolutionPolicy(value: string): RangeResolutionPolicy {
+  if (value === 'refresh' || value === 'reuse-stable') {
+    return value;
+  }
+
+  throw new Error(
+    `Expected range resolution policy to be "refresh" or "reuse-stable"; got: ${value}`
   );
 }
 
@@ -390,6 +403,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
+    `Range resolution policy: ${config.defaults.download.rangeResolutionPolicy}`,
     `Tag resolution policy: ${config.defaults.download.tagResolutionPolicy}`,
     `Prune stale bundle objects: ${promptBooleanToString(config.defaults.download.prune)}`,
     `Publish public repositories: ${promptBooleanToString(config.defaults.publish.publicRepositories)}`,
@@ -816,6 +830,14 @@ async function askTagResolutionPolicy(
   return parseTagResolutionPolicy(answer || current);
 }
 
+async function askRangeResolutionPolicy(
+  rl: ReadlineInterface,
+  current: RangeResolutionPolicy
+): Promise<RangeResolutionPolicy> {
+  const answer = await ask(rl, 'Range resolution policy (reuse-stable/refresh)', current);
+  return parseRangeResolutionPolicy(answer || current);
+}
+
 async function resolvePromptBoolean(
   rl: ReadlineInterface,
   question: string,
@@ -945,6 +967,10 @@ async function configureDownloadDefaults(
     config.defaults.download.includePeer
   );
   const latestPolicy = await askLatestPolicy(rl, config.defaults.download.latestPolicy);
+  const rangeResolutionPolicy = await askRangeResolutionPolicy(
+    rl,
+    config.defaults.download.rangeResolutionPolicy
+  );
   const tagResolutionPolicy = await askTagResolutionPolicy(
     rl,
     config.defaults.download.tagResolutionPolicy
@@ -963,6 +989,7 @@ async function configureDownloadDefaults(
         includePeer,
         latestPolicy,
         prune,
+        rangeResolutionPolicy,
         tagResolutionPolicy,
       },
     },
@@ -1699,6 +1726,11 @@ program
     parseTagResolutionPolicy
   )
   .option(
+    '--range-resolution-policy <policy>',
+    'Range dependency policy: reuse-stable or refresh',
+    parseRangeResolutionPolicy
+  )
+  .option(
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
@@ -1723,6 +1755,8 @@ program
         const includePeer =
           options.includePeer === true ? true : config.defaults.download.includePeer === true;
         const latestPolicy = options.latestPolicy ?? config.defaults.download.latestPolicy;
+        const rangeResolutionPolicy =
+          options.rangeResolutionPolicy ?? config.defaults.download.rangeResolutionPolicy;
         const tagResolutionPolicy =
           options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
         const prune = options.prune === true || config.defaults.download.prune === true;
@@ -1740,6 +1774,7 @@ program
           initialRequirements: parsedTargets.requirements,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
+          rangeResolutionPolicy,
           tagResolutionPolicy,
           onProgress: createCollectProgressLogger(),
           outputDir,
@@ -1797,6 +1832,7 @@ program
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
         latestPolicy: options.latestPolicy ?? 'bundled',
+        rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
         tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
         onProgress: createCollectProgressLogger(),
         outputDir,
@@ -1851,6 +1887,12 @@ program
     'reuse-stable'
   )
   .option(
+    '--range-resolution-policy <policy>',
+    'Range dependency policy: reuse-stable or refresh',
+    parseRangeResolutionPolicy,
+    'reuse-stable'
+  )
+  .option(
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
@@ -1875,6 +1917,7 @@ program
     const unsupported = [...parsedSpecs.unsupported, ...parsedManifest.unsupported];
     const gitRequirements = [...parsedSpecs.gitRequirements, ...parsedManifest.gitRequirements];
     const latestPolicy = options.latestPolicy ?? 'bundled';
+    const rangeResolutionPolicy = options.rangeResolutionPolicy ?? 'reuse-stable';
     const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
 
     if (requirements.length === 0) {
@@ -1894,6 +1937,7 @@ program
         includePeer: options.includePeer === true,
         latestPolicy,
         outputDir: options.output,
+        rangeResolutionPolicy,
         registry,
         stableTagResolutions,
         tagResolutionPolicy,
@@ -1913,6 +1957,7 @@ program
       includePeer: options.includePeer === true,
       latestPolicy,
       outputDir: options.output,
+      rangeResolutionPolicy,
       registry,
       stableTagResolutions,
       tagResolutionPolicy,

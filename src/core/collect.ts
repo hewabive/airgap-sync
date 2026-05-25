@@ -9,6 +9,7 @@ import type {
   GitRequirement,
   GitSource,
   LatestPolicy,
+  RangeResolutionPolicy,
   RepositoryUpdateReport,
   RootPackageRequirement,
   TagResolutionPolicy,
@@ -50,6 +51,7 @@ export interface CollectBundleOptions {
   maxIterations?: number;
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
+  rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   registryUrl: string;
   root?: string;
@@ -403,6 +405,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
       latestPolicy: options.latestPolicy ?? 'bundled',
+      rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
       onProgress: (event: FetchProgressEvent) => {
         const detail = [event.phase, event.package].filter(Boolean).join(' ');
         options.onProgress?.({

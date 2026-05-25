@@ -66,9 +66,11 @@ set to `true`, `false`, or `ask` under `defaults.download`, `defaults.publish`, 
 `defaults.verifyInstall`. `defaults.download.latestPolicy` controls whether artificial
 `latest` tags are assigned to bundled versions or resolved from the source registry.
 `defaults.download.tagResolutionPolicy` controls whether stable tag dependencies can
-reuse previous bundle mappings. `defaults.download.prune` controls whether stale local
-bundle tarballs and Git mirrors are removed after a successful download. When the
-interactive menu initializes a workspace, it asks for these defaults during setup.
+reuse previous bundle mappings. `defaults.download.rangeResolutionPolicy` controls
+whether stable transitive semver range dependencies can reuse previous resolved
+versions. `defaults.download.prune` controls whether stale local bundle tarballs and Git
+mirrors are removed after a successful download. When the interactive menu initializes a
+workspace, it asks for these defaults during setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
@@ -142,12 +144,20 @@ declaring parent, and that parent did not change, the old mapped version is reus
 Use `--tag-resolution-policy refresh` when every tag dependency should be checked
 against the source registry during this run.
 
+Download also defaults to `rangeResolutionPolicy: "reuse-stable"`. If a transitive
+dependency range such as `hono@^4.11.4` was previously resolved for the same declaring
+parent, and that parent did not change, the old resolved version is reused while its
+tarball remains in the bundle. Root range targets are still explicit operator requests
+and are resolved from the source registry. Use `--range-resolution-policy refresh` when
+transitive ranges should float to the newest currently satisfying versions during this
+run.
+
 Use `reuse-stable` when this workspace is the only source of Verdaccio updates and
 imports are applied in order. Avoid it when the same Verdaccio is updated through other
 paths or by independently generated bundles on different removable drives: reused tag
 dependencies are restored strictly and can move a shared tag such as `latest` backward.
-For mixed update sources, prefer `--tag-resolution-policy refresh` and avoid importing
-older bundles after newer ones.
+For mixed update sources, prefer `--tag-resolution-policy refresh` and
+`--range-resolution-policy refresh`, and avoid importing older bundles after newer ones.
 
 To keep removable media from growing indefinitely, prune stale local bundle objects
 after a successful download:

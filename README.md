@@ -122,7 +122,7 @@ workspace configuration for repeated syncs, not part of a single transfer bundle
 stores endpoints, target lists, bundle output, and menu defaults such as whether to
 include dev dependencies, whether to traverse peer dependencies, whether to prune stale
 bundle objects after a successful download, and how to handle the `latest` dist-tag and
-reusable tag dependencies. Menu defaults are grouped by workflow step:
+reusable tag/range dependencies. Menu defaults are grouped by workflow step:
 `defaults.download`, `defaults.publish`, and `defaults.verifyInstall`. The interactive
 menu asks for these defaults while initializing a new workspace.
 If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.

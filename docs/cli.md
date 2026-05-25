@@ -56,9 +56,10 @@ When the menu initializes a new workspace, it asks for these values up front.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
-`source`; `defaults.download.tagResolutionPolicy` is either `reuse-stable` or
-`refresh`. `defaults.download.prune` controls whether a successful download removes
-stale tarballs and Git mirrors from the local bundle.
+`source`; `defaults.download.tagResolutionPolicy` and
+`defaults.download.rangeResolutionPolicy` are either `reuse-stable` or `refresh`.
+`defaults.download.prune` controls whether a successful download removes stale
+tarballs and Git mirrors from the local bundle.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## secrets
@@ -97,6 +98,7 @@ airgap-sync download ./repos \
   --include-dev \
   --latest-policy bundled \
   --tag-resolution-policy reuse-stable \
+  --range-resolution-policy reuse-stable \
   --concurrency 16 \
   --prune \
   --output ./airgap-bundle
@@ -125,10 +127,17 @@ previous bundle and the mapped package tarball is still present. Root tag target
 always resolved from the source registry. `--tag-resolution-policy refresh` resolves
 all tag dependencies from the source registry.
 
+`--range-resolution-policy reuse-stable` is also the default. It reuses a previous
+transitive semver range resolution only when the same `name + range + requiredBy`
+existed in the previous bundle, the resolved tarball is still present, and the declaring
+parent did not change. Root range targets are always resolved from the source registry.
+Use `--range-resolution-policy refresh` when transitive ranges should move to the newest
+currently satisfying versions on every download.
+
 Use `reuse-stable` for one linear update stream where the bundle is the only source of
 Verdaccio updates. If the same registry is updated through other paths or independently
-generated bundles, prefer `refresh`; reused dependency tags are restored strictly and
-can move shared registry tags backward.
+generated bundles, prefer `refresh` policies; reused dependency tags are restored
+strictly and can move shared registry tags backward.
 
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
@@ -181,6 +190,8 @@ Supported options:
 --latest-policy <policy>  Latest dist-tag policy: bundled or source
 --tag-resolution-policy <policy>
                           Tag dependency policy: reuse-stable or refresh
+--range-resolution-policy <policy>
+                          Range dependency policy: reuse-stable or refresh
 --concurrency <number>    Concurrent registry and download operations
 --dry-run                 Resolve and report without downloading
 ```

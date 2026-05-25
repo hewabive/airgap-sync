@@ -6,6 +6,7 @@ import type {
   LatestPolicy,
   PackageManifest,
   FetchPackageAction,
+  RangeResolutionPolicy,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
   RootPackageRequirement,
@@ -24,7 +25,11 @@ import {
   downloadResolvedPackage,
 } from './tarball.js';
 import { packageFileName } from './files.js';
-import { stableTagRequirement, type StableTagResolutionIndex } from './tag-resolution.js';
+import {
+  stableRangeRequirement,
+  stableTagRequirement,
+  type StableTagResolutionIndex,
+} from './tag-resolution.js';
 
 export interface FetchSeedBundleOptions {
   concurrency?: number;
@@ -33,6 +38,7 @@ export interface FetchSeedBundleOptions {
   latestPolicy?: LatestPolicy;
   onProgress?: (event: FetchProgressEvent) => void;
   outputDir: string;
+  rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   stableRequiredBy?: Set<string>;
   stableTagResolutions?: StableTagResolutionIndex;
@@ -212,12 +218,13 @@ export async function fetchSeedBundle(
   const totalStart = performance.now();
   const shouldDownload = options.download !== false;
   const latestPolicy = options.latestPolicy ?? 'bundled';
+  const rangeResolutionPolicy = options.rangeResolutionPolicy ?? 'reuse-stable';
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
   const stableTagRequirements = new Map<string, TagRequirement>();
   const stablePackageIds = options.stableTagResolutions?.packageIds ?? new Set<string>();
   const stableRequiredBy = new Set([...(options.stableRequiredBy ?? []), ...stablePackageIds]);
-  const queue = options.requirements.map((requirement) => rewriteStableTagRequirement(requirement));
+  const queue = options.requirements.map((requirement) => rewriteStableRequirement(requirement));
   const latestRequirements = new Set<string>();
   const processedRequirements = new Set<string>();
   const scannedPackages = new Set<string>();
@@ -244,9 +251,28 @@ export async function fetchSeedBundle(
   let drainResolved = false;
   let resolveDrain: (() => void) | undefined;
 
-  function rewriteStableTagRequirement(
+  function rewriteStableRequirement(
     requirement: RootPackageRequirement
   ): RootPackageRequirement {
+    if (
+      rangeResolutionPolicy === 'reuse-stable' &&
+      requirement.type === 'range' &&
+      requirement.requiredBy !== 'root' &&
+      stableRequiredBy.has(requirement.requiredBy) &&
+      options.stableTagResolutions
+    ) {
+      const rangeRequirement = stableRangeRequirement(requirement, options.stableTagResolutions);
+      if (rangeRequirement) {
+        return {
+          name: requirement.name,
+          raw: `${requirement.name}@${rangeRequirement.version}`,
+          requiredBy: requirement.requiredBy,
+          specifier: rangeRequirement.version,
+          type: 'version',
+        };
+      }
+    }
+
     if (
       tagResolutionPolicy !== 'reuse-stable' ||
       requirement.type !== 'tag' ||
@@ -290,7 +316,7 @@ export async function fetchSeedBundle(
   }
 
   function enqueueRequirement(requirement: RootPackageRequirement): void {
-    queue.push(rewriteStableTagRequirement(requirement));
+    queue.push(rewriteStableRequirement(requirement));
     scheduleWorkers();
   }
 
