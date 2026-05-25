@@ -8,6 +8,7 @@ import type {
   GitSourcesManifest,
 } from '../types.js';
 import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
+import { safeDirectoryGitArgs } from './git-safe.js';
 import { gitSourceMirrorPath, gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
 
 export interface ApplyGitSourcesOptions {
@@ -71,9 +72,7 @@ const maxErrorLines = 80;
 const maxErrorChars = 12_000;
 
 function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): string[] {
-  return [
-    '-c',
-    `safe.directory=${mirrorPath}`,
+  return safeDirectoryGitArgs(mirrorPath, [
     ...(auth
       ? ['-c', 'credential.helper=', '-c', `http.extraHeader=${gitHttpAuthHeader(auth)}`]
       : []),
@@ -83,7 +82,7 @@ function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): st
     '--prune',
     targetUrl,
     ...giteaMirrorRefspecs,
-  ];
+  ]);
 }
 
 function pushEnv(): NodeJS.ProcessEnv {

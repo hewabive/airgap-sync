@@ -93,6 +93,14 @@ function cleanRepositoryRunner(
   };
 }
 
+function gitCommand(invocation: { args: string[] }): string {
+  const args =
+    invocation.args[0] === '-c' && invocation.args[1]?.startsWith('safe.directory=')
+      ? invocation.args.slice(2)
+      : invocation.args;
+  return args.join(' ');
+}
+
 describe('collectBundle', () => {
   beforeEach(async () => {
     tarballMocks.manifests.clear();
@@ -285,13 +293,13 @@ describe('collectBundle', () => {
         if (invocation.args.join(' ') === 'pull --ff-only') {
           return Promise.resolve({ stderr: '', stdout: 'Already up to date.\n' });
         }
-        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
           return Promise.resolve({ stderr: '', stdout: 'tree\n' });
         }
-        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
           return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
         }
-        if (invocation.args.join(' ') === 'show main:package.json') {
+        if (gitCommand(invocation) === 'show main:package.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -308,112 +316,19 @@ describe('collectBundle', () => {
       },
     });
 
-    expect(gitCalls).toEqual([
-      {
-        args: [
-          'init',
-          '--bare',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'remote',
-          'add',
-          'origin',
-          'https://github.com/owner/repo.git',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'config',
-          '--replace-all',
-          'remote.origin.fetch',
-          '+refs/heads/*:refs/heads/*',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'config',
-          '--add',
-          'remote.origin.fetch',
-          '+refs/tags/*:refs/tags/*',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'fetch',
-          '--prune',
-          'origin',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'for-each-ref',
-          '--format=%(refname) %(objectname)',
-          'refs/heads',
-          'refs/tags',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'remote',
-          'set-url',
-          'origin',
-          'https://github.com/owner/repo.git',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'config',
-          '--replace-all',
-          'remote.origin.fetch',
-          '+refs/heads/*:refs/heads/*',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'config',
-          '--add',
-          'remote.origin.fetch',
-          '+refs/tags/*:refs/tags/*',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'fetch',
-          '--prune',
-          'origin',
-        ],
-      },
-      {
-        args: [
-          '-C',
-          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'for-each-ref',
-          '--format=%(refname) %(objectname)',
-          'refs/heads',
-          'refs/tags',
-        ],
-      },
+    const mirrorPath = path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git');
+    expect(gitCalls.map(gitCommand)).toEqual([
+      `init --bare ${mirrorPath}`,
+      `-C ${mirrorPath} remote add origin https://github.com/owner/repo.git`,
+      `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
+      `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
+      `-C ${mirrorPath} fetch --prune origin`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
+      `-C ${mirrorPath} remote set-url origin https://github.com/owner/repo.git`,
+      `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
+      `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
+      `-C ${mirrorPath} fetch --prune origin`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
     ]);
     expect(report).toMatchObject({
       dryRun: false,
@@ -447,7 +362,7 @@ describe('collectBundle', () => {
       wroteBundle: true,
     });
     expect(report.gitSources.sources).toHaveLength(1);
-    expect(gitOutputCalls.map((call) => call.args.join(' '))).toEqual([
+    expect(gitOutputCalls.map(gitCommand)).toEqual([
       'status --porcelain',
       'rev-parse --abbrev-ref HEAD',
       'pull --ff-only',
@@ -496,13 +411,13 @@ describe('collectBundle', () => {
       runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
         gitOutputCalls.push(invocation);
 
-        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
           return Promise.resolve({ stderr: '', stdout: 'tree\n' });
         }
-        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
           return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
         }
-        if (invocation.args.join(' ') === 'show main:package.json') {
+        if (gitCommand(invocation) === 'show main:package.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -557,7 +472,7 @@ describe('collectBundle', () => {
       id: 'github.com/acme/app',
       target: true,
     });
-    expect(gitOutputCalls.map((call) => call.args.join(' '))).toEqual([
+    expect(gitOutputCalls.map(gitCommand)).toEqual([
       'rev-parse --verify main^{tree}',
       'ls-tree -r --name-only main',
       'show main:package.json',
@@ -636,13 +551,13 @@ describe('collectBundle', () => {
         return Promise.resolve(undefined);
       },
       runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
-        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
           return Promise.resolve({ stderr: '', stdout: 'tree\n' });
         }
-        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
           return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
         }
-        if (invocation.args.join(' ') === 'show main:package.json') {
+        if (gitCommand(invocation) === 'show main:package.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -681,7 +596,7 @@ describe('collectBundle', () => {
         },
       },
     });
-    expect(gitCalls.map((call) => call.args.join(' '))).toEqual([
+    expect(gitCalls.map(gitCommand)).toEqual([
       `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
       `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
       `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,

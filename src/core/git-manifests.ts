@@ -5,6 +5,7 @@ import {
   type ProjectManifestEntry,
   type ReadManifestRequirementsOptions,
 } from './manifests.js';
+import { safeDirectoryGitArgs } from './git-safe.js';
 import { parseLockfileRequirementsFromContent } from './lockfiles.js';
 import { runGitOutputCommand, type GitOutputCommandRunner } from './repos.js';
 
@@ -91,7 +92,11 @@ async function assertRevisionExists(options: {
 }): Promise<void> {
   try {
     await options.runner({
-      args: ['rev-parse', '--verify', `${options.revision}^{tree}`],
+      args: safeDirectoryGitArgs(options.mirrorPath, [
+        'rev-parse',
+        '--verify',
+        `${options.revision}^{tree}`,
+      ]),
       cwd: options.mirrorPath,
     });
   } catch {
@@ -109,7 +114,12 @@ async function listRepositoryFilePaths(options: {
   subdir: string;
 }): Promise<string[]> {
   const result = await options.runner({
-    args: ['ls-tree', '-r', '--name-only', options.revision],
+    args: safeDirectoryGitArgs(options.mirrorPath, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      options.revision,
+    ]),
     cwd: options.mirrorPath,
   });
 
@@ -128,7 +138,10 @@ async function readFileFromGit(options: {
   runner: GitOutputCommandRunner;
 }): Promise<string> {
   const result = await options.runner({
-    args: ['show', `${options.revision}:${options.filePath}`],
+    args: safeDirectoryGitArgs(options.mirrorPath, [
+      'show',
+      `${options.revision}:${options.filePath}`,
+    ]),
     cwd: options.mirrorPath,
   });
 

@@ -14,6 +14,18 @@ const source: GitSource = {
   sourceUrl: 'https://github.com/owner/repo.git',
 };
 
+function gitCommand(invocation: GitOutputCommandInvocation): string {
+  const args =
+    invocation.args[0] === '-c' && invocation.args[1]?.startsWith('safe.directory=')
+      ? invocation.args.slice(2)
+      : invocation.args;
+  return args.join(' ');
+}
+
+function safeMirrorArgs(mirrorPath: string, args: string[]): string[] {
+  return ['-c', `safe.directory=${mirrorPath}`, ...args];
+}
+
 describe('readGitSourceManifestRequirements', () => {
   it('reads package manifests from a bare mirror revision', async () => {
     const calls: GitOutputCommandInvocation[] = [];
@@ -25,11 +37,11 @@ describe('readGitSourceManifestRequirements', () => {
       runner(invocation): Promise<GitOutputCommandResult> {
         calls.push(invocation);
 
-        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
           return Promise.resolve({ stderr: '', stdout: 'tree\n' });
         }
 
-        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
           return Promise.resolve({
             stderr: '',
             stdout: [
@@ -41,7 +53,7 @@ describe('readGitSourceManifestRequirements', () => {
           });
         }
 
-        if (invocation.args.join(' ') === 'show main:package.json') {
+        if (gitCommand(invocation) === 'show main:package.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -58,7 +70,7 @@ describe('readGitSourceManifestRequirements', () => {
           });
         }
 
-        if (invocation.args.join(' ') === 'show main:packages/lib/package.json') {
+        if (gitCommand(invocation) === 'show main:packages/lib/package.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -78,19 +90,34 @@ describe('readGitSourceManifestRequirements', () => {
 
     expect(calls).toEqual([
       {
-        args: ['rev-parse', '--verify', 'main^{tree}'],
+        args: safeMirrorArgs('/bundle/git-mirrors/github.com/owner/repo.git', [
+          'rev-parse',
+          '--verify',
+          'main^{tree}',
+        ]),
         cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
       },
       {
-        args: ['ls-tree', '-r', '--name-only', 'main'],
+        args: safeMirrorArgs('/bundle/git-mirrors/github.com/owner/repo.git', [
+          'ls-tree',
+          '-r',
+          '--name-only',
+          'main',
+        ]),
         cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
       },
       {
-        args: ['show', 'main:package.json'],
+        args: safeMirrorArgs('/bundle/git-mirrors/github.com/owner/repo.git', [
+          'show',
+          'main:package.json',
+        ]),
         cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
       },
       {
-        args: ['show', 'main:packages/lib/package.json'],
+        args: safeMirrorArgs('/bundle/git-mirrors/github.com/owner/repo.git', [
+          'show',
+          'main:packages/lib/package.json',
+        ]),
         cwd: '/bundle/git-mirrors/github.com/owner/repo.git',
       },
     ]);
@@ -144,18 +171,18 @@ describe('readGitSourceManifestRequirements', () => {
         gitSubdir: 'packages/plugin',
       },
       runner(invocation): Promise<GitOutputCommandResult> {
-        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
           return Promise.resolve({ stderr: '', stdout: 'tree\n' });
         }
 
-        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
           return Promise.resolve({
             stderr: '',
             stdout: ['package.json', 'packages/plugin/package.json'].join('\n'),
           });
         }
 
-        if (invocation.args.join(' ') === 'show main:packages/plugin/package.json') {
+        if (gitCommand(invocation) === 'show main:packages/plugin/package.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -188,11 +215,11 @@ describe('readGitSourceManifestRequirements', () => {
       mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
       source,
       runner(invocation): Promise<GitOutputCommandResult> {
-        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
           return Promise.resolve({ stderr: '', stdout: 'tree\n' });
         }
 
-        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
           return Promise.resolve({
             stderr: '',
             stdout: [
@@ -203,7 +230,7 @@ describe('readGitSourceManifestRequirements', () => {
           });
         }
 
-        if (invocation.args.join(' ') === 'show main:tools/ui/package-lock.json') {
+        if (gitCommand(invocation) === 'show main:tools/ui/package-lock.json') {
           return Promise.resolve({
             stderr: '',
             stdout: JSON.stringify({
@@ -245,7 +272,7 @@ describe('readGitSourceManifestRequirements', () => {
           committish: 'missing-sha',
         },
         runner(invocation): Promise<GitOutputCommandResult> {
-          if (invocation.args.join(' ') === 'rev-parse --verify missing-sha^{tree}') {
+          if (gitCommand(invocation) === 'rev-parse --verify missing-sha^{tree}') {
             return Promise.reject(new Error('fatal: Needed a single revision'));
           }
 

@@ -8,6 +8,8 @@
 - Added recursive npm package collection from package specs, manifests, and lockfiles.
 - Added Git target/dependency discovery, mirror fetch, Gitea repository creation, and
   mirror push.
+- Added per-command Git `safe.directory` handling for bundle mirrors moved between
+  Windows machines.
 - Added Verdaccio publish with dist-tag restoration and skip-existing checks.
 - Added configurable `latest` dist-tag policy for smaller default bundles or
   source-aligned latest mirrors.

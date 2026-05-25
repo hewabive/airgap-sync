@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import * as fs from './fs.js';
 import type { GitFetchActionResult, GitFetchReport, GitSourcesManifest } from '../types.js';
+import { safeDirectoryGitArgs } from './git-safe.js';
 import { gitSourceMirrorPath } from './git-targets.js';
 
 export interface GitCommandInvocation {
@@ -103,13 +104,13 @@ async function refsFingerprint(
   runner: GitCommandRunner
 ): Promise<string | undefined> {
   const result = await runner({
-    args: [
+    args: safeDirectoryGitArgs(targetPath, [
       '-C',
       targetPath,
       'for-each-ref',
       '--format=%(refname) %(objectname)',
       ...mirroredRefNamespaces,
-    ],
+    ]),
   });
 
   return result ? normalizeRefs(result.stdout) : undefined;
@@ -117,13 +118,27 @@ async function refsFingerprint(
 
 async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Promise<void> {
   await runner({
-    args: ['-C', targetPath, 'config', '--replace-all', 'remote.origin.fetch', mirrorBranchRefspec],
+    args: safeDirectoryGitArgs(targetPath, [
+      '-C',
+      targetPath,
+      'config',
+      '--replace-all',
+      'remote.origin.fetch',
+      mirrorBranchRefspec,
+    ]),
   });
   await runner({
-    args: ['-C', targetPath, 'config', '--add', 'remote.origin.fetch', mirrorTagRefspec],
+    args: safeDirectoryGitArgs(targetPath, [
+      '-C',
+      targetPath,
+      'config',
+      '--add',
+      'remote.origin.fetch',
+      mirrorTagRefspec,
+    ]),
   });
   await runner({
-    args: ['-C', targetPath, 'fetch', '--prune', 'origin'],
+    args: safeDirectoryGitArgs(targetPath, ['-C', targetPath, 'fetch', '--prune', 'origin']),
   });
 }
 
@@ -135,7 +150,14 @@ async function fetchEntry(
     if (await fs.pathExists(entry.targetPath)) {
       const before = await refsFingerprint(entry.targetPath, runner);
       await runner({
-        args: ['-C', entry.targetPath, 'remote', 'set-url', 'origin', entry.sourceUrl],
+        args: safeDirectoryGitArgs(entry.targetPath, [
+          '-C',
+          entry.targetPath,
+          'remote',
+          'set-url',
+          'origin',
+          entry.sourceUrl,
+        ]),
       });
       await fetchMirrorRefs(entry.targetPath, runner);
       const after = await refsFingerprint(entry.targetPath, runner);
@@ -153,7 +175,14 @@ async function fetchEntry(
       args: ['init', '--bare', entry.targetPath],
     });
     await runner({
-      args: ['-C', entry.targetPath, 'remote', 'add', 'origin', entry.sourceUrl],
+      args: safeDirectoryGitArgs(entry.targetPath, [
+        '-C',
+        entry.targetPath,
+        'remote',
+        'add',
+        'origin',
+        entry.sourceUrl,
+      ]),
     });
     await fetchMirrorRefs(entry.targetPath, runner);
     return {
