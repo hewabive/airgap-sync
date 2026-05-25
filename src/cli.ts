@@ -332,20 +332,29 @@ function formatDownloadSummary(report: CollectReport): string {
         `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
       )
     : green('OK Download completed: all resolved npm packages and Git mirrors are available.');
-  const gitDone = report.gitFetch.cloned + report.gitFetch.updated;
   const mode = report.dryRun ? 'dry run, ' : '';
   const downloadedThisRun = report.iterations.reduce(
     (total, iteration) => total + iteration.downloaded,
     0
   );
   const alreadyOnDisk = Math.max(0, report.fetch.resolved - downloadedThisRun);
+  const changedGitMirrors = report.gitFetch.actions.filter(
+    (action) => action.status === 'updated' && action.changed === true
+  ).length;
+  const unknownGitMirrors = Math.max(
+    0,
+    report.gitFetch.updated - changedGitMirrors - report.gitFetch.unchanged
+  );
   const npmLine = report.dryRun
     ? `NPM packages: ${String(report.fetch.resolved)} resolved, dry run only, ${String(npmErrors)} errors.`
     : `NPM packages: ${String(report.fetch.resolved)} resolved, ${String(downloadedThisRun)} downloaded, ${String(alreadyOnDisk)} already on disk, ${String(npmErrors)} errors.`;
+  const gitLine = report.dryRun
+    ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
+    : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
   const lines = [
     status,
     npmLine,
-    `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(gitDone)} cloned/updated, ${String(report.gitFetch.errors.length)} errors.`,
+    gitLine,
     `Bundle: ${report.outputDir} (${mode}reports written: ${report.wroteBundle ? 'yes' : 'no'}).`,
   ];
 
