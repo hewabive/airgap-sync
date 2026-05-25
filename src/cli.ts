@@ -63,6 +63,7 @@ import type { GiteaClient } from './index.js';
 import type {
   ApplyProgressEvent,
   ApplyProgressPhase,
+  ApplyBundleReport,
   BundleInfo,
   BundlePruneReport,
   CollectReport,
@@ -110,6 +111,7 @@ interface ApplyOptions {
   dryRun?: boolean;
   gitea: string;
   giteaToken?: string;
+  json?: boolean;
   mirrorsDir?: string;
   publishConcurrency: number;
   public?: boolean;
@@ -326,6 +328,63 @@ function formatDownloadSummary(report: CollectReport): string {
       `Attention: ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs, max iterations reached: ${String(report.maxIterationsReached)}.`
     );
   }
+
+  return lines.join('\n');
+}
+
+function formatPublishSummary(report: ApplyBundleReport, bundle: string): string {
+  const npmPublishErrors = report.publish.errors.filter((error) => error.action === 'publish');
+  const npmTagErrors = report.publish.errors.filter((error) => error.action === 'dist-tag');
+  const giteaErrors = report.gitea.errors.length + report.gitea.organizationErrors.length;
+  const gitApplyErrors = report.gitApply.errors.length;
+  const gitConfigErrors = report.gitConfig?.errors.length ?? 0;
+  const totalErrors =
+    npmPublishErrors.length + npmTagErrors.length + giteaErrors + gitApplyErrors + gitConfigErrors;
+  const mode = report.dryRun ? 'dry run, ' : '';
+  const status = report.succeeded
+    ? green(
+        report.dryRun
+          ? 'OK Publish dry run completed: planned npm, Gitea, Git mirror, and Git rewrite actions are available.'
+          : 'OK Publish completed: npm packages, dist-tags, Gitea repositories, and Git mirrors are up to date.'
+      )
+    : red(`FAILED Publish incomplete: ${String(totalErrors)} errors.`);
+  const npmPackageAction = report.dryRun ? 'planned' : 'published';
+  const npmTagAction = report.dryRun ? 'planned' : 'restored';
+  const giteaAction = report.dryRun ? 'planned' : 'created';
+  const gitAction = report.dryRun ? 'planned' : 'pushed';
+  const lines = [
+    status,
+    `NPM packages: ${String(report.publish.totalPackages)} total, ${String(
+      report.publish.published
+    )} ${npmPackageAction}, ${String(report.publish.skipped)} already in registry, ${String(
+      npmPublishErrors.length
+    )} errors.`,
+    `NPM dist-tags: ${String(report.publish.restoredTags)} ${npmTagAction}, ${String(
+      npmTagErrors.length
+    )} errors.`,
+    `Gitea repositories: ${String(report.gitea.totalRepositories)} total, ${String(
+      report.gitea.created + report.gitea.planned
+    )} ${giteaAction}, ${String(report.gitea.exists)} already existed, ${String(
+      giteaErrors
+    )} errors.`,
+    `Git mirrors: ${String(report.gitApply.totalRepositories)} total, ${String(
+      report.gitApply.pushed + report.gitApply.planned
+    )} ${gitAction}, ${String(report.gitApply.missingMirrors)} missing, ${String(
+      gitApplyErrors
+    )} errors.`,
+  ];
+
+  if (report.gitConfig) {
+    lines.push(
+      `Git rewrites: ${String(report.gitConfig.configured + report.gitConfig.planned)} ${
+        report.dryRun ? 'planned' : 'configured'
+      }, ${String(gitConfigErrors)} errors.`
+    );
+  }
+
+  lines.push(
+    `Bundle: ${path.resolve(bundle)} (${mode}reports written: yes, registry: ${report.registryUrl}).`
+  );
 
   return lines.join('\n');
 }
@@ -2366,6 +2425,7 @@ addNpmPublishOptions(
 )
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
   .option('--dry-run', 'Print planned publish operations without publishing or pushing')
+  .option('--json', 'Print full publish report as JSON')
   .action(async (bundle: string, options: ApplyOptions) => {
     try {
       const token =
@@ -2402,7 +2462,9 @@ addNpmPublishOptions(
         skipExisting: options.skipExisting !== false,
       });
 
-      console.log(JSON.stringify(report, null, 2));
+      console.log(
+        options.json === true ? JSON.stringify(report, null, 2) : formatPublishSummary(report, bundle)
+      );
 
       if (!report.succeeded) {
         process.exitCode = 1;
