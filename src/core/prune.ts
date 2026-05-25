@@ -48,11 +48,7 @@ async function readRequiredJson<T>(filePath: string, description: string): Promi
 
 function ensureRelativePath(value: string, description: string): string {
   const normalized = path.posix.normalize(value.replace(/\\/g, '/'));
-  if (
-    normalized.startsWith('../') ||
-    normalized === '..' ||
-    path.posix.isAbsolute(normalized)
-  ) {
+  if (normalized.startsWith('../') || normalized === '..' || path.posix.isAbsolute(normalized)) {
     throw new Error(`${description} must be a bundle-relative path: ${value}`);
   }
   return normalized;
@@ -224,7 +220,9 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     gitMirrors: summary(
       gitMirrors.length,
       staleGitMirrors.length,
-      dryRun ? 0 : staleGitMirrors.length - errors.filter((error) => error.type === 'git-mirror').length
+      dryRun
+        ? 0
+        : staleGitMirrors.length - errors.filter((error) => error.type === 'git-mirror').length
     ),
     npmPackages: summary(
       packageFiles.length,

@@ -94,12 +94,16 @@ function chooseVersion(
       }
 
       const taggedVersion = metadata['dist-tags']?.[part];
-      return taggedVersion ? [{ version: taggedVersion, resolvedVia: 'tag' as const, tag: part }] : [];
+      return taggedVersion
+        ? [{ version: taggedVersion, resolvedVia: 'tag' as const, tag: part }]
+        : [];
     });
 
   const version = candidates.reduce<VersionCandidate | undefined>(newestCandidate, undefined);
 
-  return version ?? { reason: `No version satisfies range "${requirement.specifier}"`, resolvedVia };
+  return (
+    version ?? { reason: `No version satisfies range "${requirement.specifier}"`, resolvedVia }
+  );
 }
 
 export function resolveRootRequirementFromMetadata(

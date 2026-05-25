@@ -1,7 +1,12 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import { createGitSourceFromUrl } from './git-sources.js';
-import type { GitSource, LatestPolicy, RangeResolutionPolicy, TagResolutionPolicy } from '../types.js';
+import type {
+  GitSource,
+  LatestPolicy,
+  RangeResolutionPolicy,
+  TagResolutionPolicy,
+} from '../types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';

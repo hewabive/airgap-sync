@@ -3,7 +3,12 @@ import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { captureBundleState, writeDownloadRunHistory } from '../src/index.js';
-import type { BundleManifest, BundlePruneReport, CollectReport, DistTagsManifest } from '../src/types.js';
+import type {
+  BundleManifest,
+  BundlePruneReport,
+  CollectReport,
+  DistTagsManifest,
+} from '../src/types.js';
 
 let bundleDir: string;
 
@@ -173,7 +178,9 @@ describe('run history', () => {
       removed: 1,
     };
     await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), afterManifest, { spaces: 2 });
-    await fs.writeJson(path.join(bundleDir, 'fetch-report.json'), collectReport.fetch, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'fetch-report.json'), collectReport.fetch, {
+      spaces: 2,
+    });
     await fs.writeJson(path.join(bundleDir, 'collect-report.json'), collectReport, { spaces: 2 });
     await fs.writeJson(path.join(bundleDir, 'prune-report.json'), pruneReport, { spaces: 2 });
 
@@ -192,7 +199,9 @@ describe('run history', () => {
     await expect(fs.pathExists(path.join(historyDir, 'seed-manifest.after.json'))).resolves.toBe(
       true
     );
-    await expect(fs.readJson(path.join(historyDir, 'resolution-changes.json'))).resolves.toMatchObject({
+    await expect(
+      fs.readJson(path.join(historyDir, 'resolution-changes.json'))
+    ).resolves.toMatchObject({
       changed: [
         {
           from: '1.0.0',

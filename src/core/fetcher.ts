@@ -256,9 +256,7 @@ export async function fetchSeedBundle(
   let drainResolved = false;
   let resolveDrain: (() => void) | undefined;
 
-  function rewriteStableRequirement(
-    requirement: RootPackageRequirement
-  ): RootPackageRequirement {
+  function rewriteStableRequirement(requirement: RootPackageRequirement): RootPackageRequirement {
     if (
       rangeResolutionPolicy === 'reuse-stable' &&
       requirement.type === 'range' &&

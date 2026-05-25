@@ -265,7 +265,8 @@ function errorSummary(error: unknown): string {
   );
   const firstNpmError = meaningfulLines.find((line) => /^npm (?:error|ERR!)/u.test(line));
   const summaryLines = [...new Set(firstNpmError ? [firstNpmError] : meaningfulLines)].slice(0, 8);
-  const summary = summaryLines.length > 0 ? summaryLines.join('\n') : (lines.at(-1) ?? 'Unknown error');
+  const summary =
+    summaryLines.length > 0 ? summaryLines.join('\n') : (lines.at(-1) ?? 'Unknown error');
 
   if (summary.includes('E413') || /payload too large/iu.test(summary)) {
     return `${summary} (target registry rejected the upload as too large; raise Verdaccio max_body_size and any reverse-proxy upload limit)`;

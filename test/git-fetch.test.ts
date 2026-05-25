@@ -83,11 +83,7 @@ describe('fetchGitSources', () => {
 
     expect(calls).toEqual([
       {
-        args: [
-          'init',
-          '--bare',
-          path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
-        ],
+        args: ['init', '--bare', path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git')],
       },
       {
         args: [
@@ -269,11 +265,7 @@ describe('fetchGitSources', () => {
 
     expect(calls).toEqual([
       {
-        args: [
-          'init',
-          '--bare',
-          path.join(mirrorsDir, 'github.com/owner/repo.git'),
-        ],
+        args: ['init', '--bare', path.join(mirrorsDir, 'github.com/owner/repo.git')],
       },
       {
         args: [

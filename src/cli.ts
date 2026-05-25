@@ -1336,7 +1336,10 @@ async function diagnosticsMenu(workspaceDir: string, rl: ReadlineInterface): Pro
       }
       case '4': {
         const dryRun = await askYesNo(rl, 'Dry run only?', true);
-        await runSelfCommand(compactArgs(['bundle', 'prune', bundle, dryRun ? '--dry-run' : undefined]), workspaceDir);
+        await runSelfCommand(
+          compactArgs(['bundle', 'prune', bundle, dryRun ? '--dry-run' : undefined]),
+          workspaceDir
+        );
         break;
       }
       default:
@@ -1850,22 +1853,13 @@ program
     'Range dependency policy: reuse-stable or refresh',
     parseRangeResolutionPolicy
   )
-  .option(
-    '--concurrency <count>',
-    'Parallel npm resolve/download workers',
-    parsePositiveInteger,
-    8
-  )
+  .option('--concurrency <count>', 'Parallel npm resolve/download workers', parsePositiveInteger, 8)
   .option(
     '--registry-timeout-ms <ms>',
     'Timeout for npm registry metadata requests',
     parsePositiveInteger
   )
-  .option(
-    '--tarball-timeout-ms <ms>',
-    'Timeout for npm tarball downloads',
-    parsePositiveInteger
-  )
+  .option('--tarball-timeout-ms <ms>', 'Timeout for npm tarball downloads', parsePositiveInteger)
   .option(
     '--retry-delays-ms <list>',
     'Comma-separated retry delays for transient network errors',
@@ -1938,9 +1932,7 @@ program
         }
 
         const pruneReport =
-          prune && options.dryRun !== true
-            ? await pruneAfterSuccessfulDownload(report)
-            : undefined;
+          prune && options.dryRun !== true ? await pruneAfterSuccessfulDownload(report) : undefined;
         if (beforeState) {
           await writeDownloadRunHistory({
             before: beforeState,
@@ -1986,8 +1978,7 @@ program
           ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         })
       );
-      const beforeState =
-        options.dryRun === true ? undefined : await captureBundleState(outputDir);
+      const beforeState = options.dryRun === true ? undefined : await captureBundleState(outputDir);
       const report = await collectBundle({
         dryRun: options.dryRun === true,
         concurrency: options.concurrency,
@@ -2066,22 +2057,13 @@ program
     parseRangeResolutionPolicy,
     'reuse-stable'
   )
-  .option(
-    '--concurrency <count>',
-    'Parallel npm resolve/download workers',
-    parsePositiveInteger,
-    8
-  )
+  .option('--concurrency <count>', 'Parallel npm resolve/download workers', parsePositiveInteger, 8)
   .option(
     '--registry-timeout-ms <ms>',
     'Timeout for npm registry metadata requests',
     parsePositiveInteger
   )
-  .option(
-    '--tarball-timeout-ms <ms>',
-    'Timeout for npm tarball downloads',
-    parsePositiveInteger
-  )
+  .option('--tarball-timeout-ms <ms>', 'Timeout for npm tarball downloads', parsePositiveInteger)
   .option(
     '--retry-delays-ms <list>',
     'Comma-separated retry delays for transient network errors',
@@ -2634,7 +2616,9 @@ addNpmPublishOptions(
       });
 
       console.log(
-        options.json === true ? JSON.stringify(report, null, 2) : formatPublishSummary(report, bundle)
+        options.json === true
+          ? JSON.stringify(report, null, 2)
+          : formatPublishSummary(report, bundle)
       );
 
       if (!report.succeeded) {
