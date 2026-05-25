@@ -130,6 +130,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     bundleDir,
     dryRun,
     generatedAt,
+    ...(options.gitAuth ? { gitAuth: options.gitAuth } : {}),
     giteaBaseUrl: options.giteaBaseUrl,
     manifest: gitSources,
     ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyBundle, type GiteaClient } from '../src/index.js';
 import * as fs from '../src/core/fs.js';
 import type { BundleManifest, DistTagsManifest, GitSourcesManifest } from '../src/types.js';
+import type { GitCommandInvocation } from '../src/core/git-fetch.js';
 
 let bundleDir: string;
 
@@ -162,5 +163,65 @@ describe('applyBundle', () => {
       },
     ]);
     expect(await fs.pathExists(path.join(bundleDir, 'git-config-report.json'))).toBe(true);
+  });
+
+  it('passes Gitea token auth to mirror push', async () => {
+    const emptyManifest: BundleManifest = {
+      ...manifest,
+      packages: [],
+    };
+    const emptyDistTags: DistTagsManifest = {
+      ...distTags,
+      requirements: [],
+      tags: {},
+    };
+    const mirrorPath = path.join(bundleDir, 'git-mirrors/github.com/acme/app.git');
+    const gitCalls: GitCommandInvocation[] = [];
+    const authHeader = `Authorization: Basic ${Buffer.from('maxim:secret').toString('base64')}`;
+    await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), emptyManifest, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), emptyDistTags, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
+    await fs.ensureDir(mirrorPath);
+
+    const report = await applyBundle({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      gitAuth: {
+        password: 'secret',
+        username: 'maxim',
+      },
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+      runGitCommand(invocation) {
+        gitCalls.push(invocation);
+        return Promise.resolve(undefined);
+      },
+    });
+
+    expect(report.gitApply).toMatchObject({
+      pushed: 1,
+      totalRepositories: 1,
+    });
+    expect(gitCalls).toHaveLength(1);
+    expect(gitCalls[0]).toMatchObject({
+      args: [
+        '-c',
+        `safe.directory=${mirrorPath}`,
+        '-c',
+        'credential.helper=',
+        '-c',
+        `http.extraHeader=${authHeader}`,
+        '-C',
+        mirrorPath,
+        'push',
+        '--mirror',
+        'http://gitea.local/acme/app.git',
+      ],
+      env: {
+        GCM_INTERACTIVE: 'never',
+        GIT_TERMINAL_PROMPT: '0',
+      },
+    });
   });
 });
