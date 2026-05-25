@@ -183,6 +183,78 @@ describe('readGitSourceManifestRequirements', () => {
     ]);
   });
 
+  it('reads lockfile package versions from a bare mirror revision', async () => {
+    const result = await readGitSourceManifestRequirements({
+      mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+      source,
+      runner(invocation): Promise<GitOutputCommandResult> {
+        if (invocation.args.join(' ') === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+
+        if (invocation.args.join(' ') === 'ls-tree -r --name-only main') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: [
+              'tools/ui/package.json',
+              'tools/ui/package-lock.json',
+              'tools/ui/node_modules/ignored/package-lock.json',
+            ].join('\n'),
+          });
+        }
+
+        if (invocation.args.join(' ') === 'show main:tools/ui/package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'ui',
+              version: '1.0.0',
+              dependencies: {
+                '@ungap/structured-clone': '^1.0.0',
+              },
+            }),
+          });
+        }
+
+        if (invocation.args.join(' ') === 'show main:tools/ui/package-lock.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              lockfileVersion: 3,
+              packages: {
+                'node_modules/@ungap/structured-clone': {
+                  resolved:
+                    'https://registry.npmjs.org/@ungap/structured-clone/-/structured-clone-1.3.0.tgz',
+                  version: '1.3.0',
+                },
+              },
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(result.lockfilePaths).toEqual(['tools/ui/package-lock.json']);
+    expect(result.requirements).toEqual([
+      {
+        name: '@ungap/structured-clone',
+        raw: '@ungap/structured-clone@^1.0.0',
+        requiredBy: 'ui@1.0.0',
+        specifier: '^1.0.0',
+        type: 'range',
+      },
+      {
+        name: '@ungap/structured-clone',
+        raw: '@ungap/structured-clone@1.3.0',
+        requiredBy: 'lockfile:tools/ui/package-lock.json',
+        specifier: '1.3.0',
+        type: 'version',
+      },
+    ]);
+  });
+
   it('reports a clear error when the requested revision is missing', async () => {
     await expect(
       readGitSourceManifestRequirements({

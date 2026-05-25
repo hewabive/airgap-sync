@@ -93,6 +93,10 @@ describe('parseNpmLockRequirementsFromContent', () => {
             version: '19.0.0',
           },
           'node_modules/plain': { version: '2.0.0' },
+          'node_modules/string-width-cjs': {
+            resolved: 'https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz',
+            version: '4.2.3',
+          },
           'node_modules/local': { link: true, version: '1.0.0' },
           'node_modules/git-dep': {
             resolved: 'git+https://github.com/acme/git-dep.git',
@@ -116,6 +120,13 @@ describe('parseNpmLockRequirementsFromContent', () => {
         raw: 'plain@2.0.0',
         requiredBy: 'lockfile:package-lock.json',
         specifier: '2.0.0',
+        type: 'version',
+      },
+      {
+        name: 'string-width',
+        raw: 'string-width@4.2.3',
+        requiredBy: 'lockfile:package-lock.json',
+        specifier: '4.2.3',
         type: 'version',
       },
     ]);

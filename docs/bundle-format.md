@@ -130,7 +130,8 @@ each local mirror was cloned, updated, planned in dry-run mode, or failed. With
 online orchestration result: npm fetch, Git source metadata, and Git mirror fetch. In
 lower-level directory collection it can also record repository refresh results. It
 also records fixed-point iterations, including how many Git sources were scanned and
-how many new npm/Git requirements were added by mirrored package manifests. The
+how many new npm/Git requirements were added by mirrored package manifests and
+supported lockfiles. The
 top-level `timings` object breaks collection time down by repository refresh, root
 manifest scan, lockfile scan, npm fetch iterations, Git mirror fetch, Git manifest
 scan, bundle document writes, and report writes.

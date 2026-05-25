@@ -5,7 +5,15 @@ import {
   type ProjectManifestEntry,
   type ReadManifestRequirementsOptions,
 } from './manifests.js';
+import { parseLockfileRequirementsFromContent } from './lockfiles.js';
 import { runGitOutputCommand, type GitOutputCommandRunner } from './repos.js';
+
+const supportedLockfileNames = new Set([
+  'npm-shrinkwrap.json',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+]);
 
 const ignoredPathParts = new Set([
   '.git',
@@ -27,6 +35,7 @@ export interface ReadGitSourceManifestRequirementsOptions extends ReadManifestRe
 }
 
 export interface GitSourceManifestRequirementsResult extends ParseRootSpecsResult {
+  lockfilePaths: string[];
   manifestPaths: string[];
   mirrorPath: string;
   revision: string;
@@ -41,15 +50,19 @@ function normalizeGitSubdir(source: GitSource): string {
   return source.gitSubdir?.replace(/^\/+|\/+$/g, '') ?? '';
 }
 
-function isIgnoredPackageJsonPath(filePath: string): boolean {
-  if (!filePath.endsWith('package.json')) {
-    return true;
-  }
-
+function isIgnoredRepositoryPath(filePath: string): boolean {
   return filePath
     .split('/')
     .slice(0, -1)
     .some((part) => ignoredPathParts.has(part));
+}
+
+function isPackageJsonPath(filePath: string): boolean {
+  return filePath.endsWith('package.json') && !isIgnoredRepositoryPath(filePath);
+}
+
+function isLockfilePath(filePath: string): boolean {
+  return supportedLockfileNames.has(path.basename(filePath)) && !isIgnoredRepositoryPath(filePath);
 }
 
 function isInsideSubdir(filePath: string, subdir: string): boolean {
@@ -79,7 +92,7 @@ async function assertRevisionExists(options: {
   }
 }
 
-async function listPackageJsonPaths(options: {
+async function listRepositoryFilePaths(options: {
   mirrorPath: string;
   revision: string;
   runner: GitOutputCommandRunner;
@@ -95,8 +108,21 @@ async function listPackageJsonPaths(options: {
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .filter((filePath) => isInsideSubdir(filePath, options.subdir))
-    .filter((filePath) => !isIgnoredPackageJsonPath(filePath))
     .sort();
+}
+
+async function readFileFromGit(options: {
+  filePath: string;
+  mirrorPath: string;
+  revision: string;
+  runner: GitOutputCommandRunner;
+}): Promise<string> {
+  const result = await options.runner({
+    args: ['show', `${options.revision}:${options.filePath}`],
+    cwd: options.mirrorPath,
+  });
+
+  return result.stdout;
 }
 
 async function readPackageJsonFromGit(options: {
@@ -105,13 +131,10 @@ async function readPackageJsonFromGit(options: {
   revision: string;
   runner: GitOutputCommandRunner;
 }): Promise<ProjectPackageManifest> {
-  const result = await options.runner({
-    args: ['show', `${options.revision}:${options.filePath}`],
-    cwd: options.mirrorPath,
-  });
+  const content = await readFileFromGit(options);
 
   try {
-    return JSON.parse(result.stdout) as ProjectPackageManifest;
+    return JSON.parse(content) as ProjectPackageManifest;
   } catch (error) {
     throw new Error(
       `Invalid package.json at ${options.filePath} in ${options.mirrorPath}: ${(error as Error).message}`
@@ -132,12 +155,14 @@ export async function readGitSourceManifestRequirements(
     runner,
     source: options.source,
   });
-  const manifestPaths = await listPackageJsonPaths({
+  const repositoryPaths = await listRepositoryFilePaths({
     mirrorPath,
     revision,
     runner,
     subdir,
   });
+  const manifestPaths = repositoryPaths.filter(isPackageJsonPath);
+  const lockfilePaths = repositoryPaths.filter(isLockfilePath);
   const entries: ProjectManifestEntry[] = [];
 
   for (const manifestPath of manifestPaths) {
@@ -151,12 +176,40 @@ export async function readGitSourceManifestRequirements(
       path: manifestPath,
     });
   }
+  const parsedManifests = parseManifestRequirementsFromEntries(entries, subdir, {
+    includeDev: options.includeDev === true,
+    includePeer: options.includePeer === true,
+  });
+  const parsedLockfiles: ParseRootSpecsResult[] = [];
+  for (const lockfilePath of lockfilePaths) {
+    parsedLockfiles.push(
+      parseLockfileRequirementsFromContent(
+        path.basename(lockfilePath),
+        await readFileFromGit({
+          filePath: lockfilePath,
+          mirrorPath,
+          revision,
+          runner,
+        }),
+        `lockfile:${lockfilePath}`
+      )
+    );
+  }
 
   return {
-    ...parseManifestRequirementsFromEntries(entries, subdir, {
-      includeDev: options.includeDev === true,
-      includePeer: options.includePeer === true,
-    }),
+    gitRequirements: [
+      ...parsedManifests.gitRequirements,
+      ...parsedLockfiles.flatMap((result) => result.gitRequirements),
+    ],
+    requirements: [
+      ...parsedManifests.requirements,
+      ...parsedLockfiles.flatMap((result) => result.requirements),
+    ],
+    unsupported: [
+      ...parsedManifests.unsupported,
+      ...parsedLockfiles.flatMap((result) => result.unsupported),
+    ],
+    lockfilePaths,
     manifestPaths,
     mirrorPath,
     revision,

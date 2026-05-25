@@ -278,6 +278,7 @@ export function parseNpmLockRequirementsFromContent(
     }
 
     const name = packageNameFromNodeModulesPath(lockPath);
+    const registryName = packageNameFromResolvedTarball(entry.resolved) ?? name;
     addGitRequirement(
       gitRequirements,
       seenGit,
@@ -290,8 +291,12 @@ export function parseNpmLockRequirementsFromContent(
       continue;
     }
 
-    if (name && entry.version && !(entry.peer === true && entry.optional === true)) {
-      addRequirement(requirements, seen, registryRequirement(name, entry.version, requiredBy));
+    if (registryName && entry.version && !(entry.peer === true && entry.optional === true)) {
+      addRequirement(
+        requirements,
+        seen,
+        registryRequirement(registryName, entry.version, requiredBy)
+      );
     }
   }
 

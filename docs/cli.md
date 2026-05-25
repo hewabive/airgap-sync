@@ -106,11 +106,12 @@ airgap-sync download ./repos \
 
 Without a root argument, reads `airgap-sync.json` from the current directory, fetches
 configured Git targets as bare mirrors, scans package manifests from those mirrors,
-includes configured npm targets as root package specs, resolves npm registry packages,
-writes portable Git source metadata, clones or updates Git dependency mirrors, scans
-package manifests from those mirrors, and repeats until no new npm or Git inputs are
-found. It also writes `workspace-snapshot.json` with the configured targets and their
-bundle-local mirror paths for later verification.
+scans supported lockfiles from those mirrors, includes configured npm targets as root
+package specs, resolves npm registry packages, writes portable Git source metadata,
+clones or updates Git dependency mirrors, scans package manifests and lockfiles from
+those mirrors, and repeats until no new npm or Git inputs are found. It also writes
+`workspace-snapshot.json` with the configured targets and their bundle-local mirror
+paths for later verification.
 
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
