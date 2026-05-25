@@ -3,7 +3,7 @@ import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
-import type { PublishProgressEvent } from '../src/core/publisher.js';
+import type { NpmRunner, PublishProgressEvent } from '../src/core/publisher.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -340,6 +340,86 @@ describe('publishBundle', () => {
         tag: 'latest',
         total: 1,
       });
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('treats a failed publish as skipped when the version appears in the registry afterwards', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const npmCalls: string[][] = [];
+    const runNpm: NpmRunner = (args) => {
+      npmCalls.push(args);
+      if (args[0] === 'publish') {
+        const error = new Error('Command failed: npm publish') as Error & {
+          stderr?: string;
+        };
+        error.stderr = '';
+        return Promise.reject(error);
+      }
+      return Promise.resolve({ stdout: '' });
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            'dist-tags': {},
+            name: 'demo',
+            versions: {},
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            'dist-tags': {
+              latest: '1.0.0',
+            },
+            name: 'demo',
+            versions: {
+              '1.0.0': {
+                dist: {
+                  tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
+                },
+                name: 'demo',
+                version: '1.0.0',
+              },
+            },
+          }),
+          { status: 200 }
+        )
+      );
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+
+      const report = await publishBundle(manifest, distTags, {
+        bundleDir,
+        registryUrl: 'http://localhost:4873',
+        runNpm,
+      });
+
+      expect(report).toMatchObject({
+        errors: [],
+        published: 0,
+        skipped: 1,
+      });
+      expect(npmCalls).toEqual([
+        [
+          'publish',
+          path.join(bundleDir, 'packages/demo-1.0.0.tgz'),
+          '--registry',
+          'http://localhost:4873',
+          '--tag',
+          'airgap-sync-temp',
+          '--provenance',
+          'false',
+        ],
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       await fs.remove(bundleDir);
     }

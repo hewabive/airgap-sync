@@ -26,6 +26,11 @@ interface NpmRunOptions {
   timeout: number;
 }
 
+export type NpmRunner = (
+  args: string[],
+  options: NpmRunOptions
+) => Promise<{ stdout: string; stderr?: string }>;
+
 export interface PublishBundleOptions {
   bundleDir: string;
   distTagConcurrency?: number;
@@ -33,6 +38,7 @@ export interface PublishBundleOptions {
   onProgress?: (event: PublishProgressEvent) => void;
   publishConcurrency?: number;
   registryUrl: string;
+  runNpm?: NpmRunner;
   skipExisting?: boolean;
 }
 
@@ -184,11 +190,12 @@ function errorSummary(error: unknown): string {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  const summary =
-    lines.find((line) => /^npm (?:error|ERR!)/u.test(line)) ??
-    lines.find((line) => !line.startsWith('npm notice')) ??
-    lines.at(-1) ??
-    'Unknown error';
+  const meaningfulLines = lines.filter(
+    (line) => !line.startsWith('npm notice') && !line.startsWith('Command failed:')
+  );
+  const firstNpmError = meaningfulLines.find((line) => /^npm (?:error|ERR!)/u.test(line));
+  const summaryLines = [...new Set(firstNpmError ? [firstNpmError] : meaningfulLines)].slice(0, 8);
+  const summary = summaryLines.length > 0 ? summaryLines.join('\n') : (lines.at(-1) ?? 'Unknown error');
 
   if (summary.includes('E413') || /payload too large/iu.test(summary)) {
     return `${summary} (target registry rejected the upload as too large; raise Verdaccio max_body_size and any reverse-proxy upload limit)`;
@@ -226,6 +233,14 @@ async function runNpm(args: string[], options: NpmRunOptions): Promise<{ stdout:
   });
 }
 
+async function runNpmCommand(
+  args: string[],
+  options: NpmRunOptions,
+  runner?: NpmRunner
+): Promise<{ stdout: string; stderr?: string }> {
+  return runner ? await runner(args, options) : await runNpm(args, options);
+}
+
 function bundledLatestRequirements(
   manifest: BundleManifest,
   distTags: DistTagsManifest
@@ -258,8 +273,12 @@ function bundledLatestRequirements(
     }));
 }
 
-async function npmPublish(tarballPath: string, registryUrl: string): Promise<void> {
-  await runNpm(
+async function npmPublish(
+  tarballPath: string,
+  registryUrl: string,
+  runner?: NpmRunner
+): Promise<void> {
+  await runNpmCommand(
     [
       'publish',
       tarballPath,
@@ -270,12 +289,17 @@ async function npmPublish(tarballPath: string, registryUrl: string): Promise<voi
       '--provenance',
       'false',
     ],
-    { maxBuffer: 10 * 1024 * 1024, timeout: 120_000 }
+    { maxBuffer: 10 * 1024 * 1024, timeout: 120_000 },
+    runner
   );
 }
 
-async function npmDistTagAdd(requirement: TagRequirement, registryUrl: string): Promise<void> {
-  await runNpm(
+async function npmDistTagAdd(
+  requirement: TagRequirement,
+  registryUrl: string,
+  runner?: NpmRunner
+): Promise<void> {
+  await runNpmCommand(
     [
       'dist-tag',
       'add',
@@ -284,19 +308,25 @@ async function npmDistTagAdd(requirement: TagRequirement, registryUrl: string): 
       '--registry',
       registryUrl,
     ],
-    { maxBuffer: 10 * 1024 * 1024, timeout: 60_000 }
+    { maxBuffer: 10 * 1024 * 1024, timeout: 60_000 },
+    runner
   );
 }
 
 async function npmDistTagRemove(
   packageName: string,
   tag: string,
-  registryUrl: string
+  registryUrl: string,
+  runner?: NpmRunner
 ): Promise<void> {
-  await runNpm(['dist-tag', 'rm', packageName, tag, '--registry', registryUrl], {
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: 60_000,
-  });
+  await runNpmCommand(
+    ['dist-tag', 'rm', packageName, tag, '--registry', registryUrl],
+    {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 60_000,
+    },
+    runner
+  );
 }
 
 async function mapWithConcurrency<T, R>(
@@ -389,12 +419,14 @@ async function fetchPackageSnapshot(
 
 async function npmPackageSnapshotFromCli(
   packageName: string,
-  registryUrl: string
+  registryUrl: string,
+  runner?: NpmRunner
 ): Promise<PackageRegistrySnapshot> {
   try {
-    const { stdout } = await runNpm(
+    const { stdout } = await runNpmCommand(
       ['view', packageName, 'versions', 'dist-tags', '--json', '--registry', registryUrl],
-      { maxBuffer: 10 * 1024 * 1024, timeout: 30_000 }
+      { maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
+      runner
     );
     return parseNpmViewPackageSnapshot(stdout);
   } catch {
@@ -404,12 +436,13 @@ async function npmPackageSnapshotFromCli(
 
 async function npmPackageSnapshot(
   packageName: string,
-  registryUrl: string
+  registryUrl: string,
+  runner?: NpmRunner
 ): Promise<PackageRegistrySnapshot> {
   try {
     return await fetchPackageSnapshot(packageName, registryUrl);
   } catch {
-    return npmPackageSnapshotFromCli(packageName, registryUrl);
+    return npmPackageSnapshotFromCli(packageName, registryUrl, runner);
   }
 }
 
@@ -417,6 +450,7 @@ async function lookupPackageSnapshots(
   manifest: BundleManifest,
   distTags: DistTagsManifest,
   registryUrl: string,
+  runner?: NpmRunner,
   onProgress?: PublishBundleOptions['onProgress']
 ): Promise<Map<string, PackageRegistrySnapshot>> {
   const packageNames = [
@@ -436,7 +470,7 @@ async function lookupPackageSnapshots(
     packageNames,
     registryLookupConcurrency,
     async (name) => {
-      const result = [name, await npmPackageSnapshot(name, registryUrl)] as const;
+      const result = [name, await npmPackageSnapshot(name, registryUrl, runner)] as const;
       completed++;
       onProgress?.({
         current: completed,
@@ -536,7 +570,13 @@ export async function publishBundle(
   const packageSnapshots =
     options.skipExisting === false
       ? new Map<string, PackageRegistrySnapshot>()
-      : await lookupPackageSnapshots(manifest, distTags, options.registryUrl, options.onProgress);
+      : await lookupPackageSnapshots(
+          manifest,
+          distTags,
+          options.registryUrl,
+          options.runNpm,
+          options.onProgress
+        );
   const existingVersionsByPackage = new Map(
     [...packageSnapshots].map(([name, snapshot]) => [name, snapshot.versions] as const)
   );
@@ -579,7 +619,7 @@ export async function publishBundle(
     }
 
     try {
-      await npmPublish(path.join(options.bundleDir, pkg.file), options.registryUrl);
+      await npmPublish(path.join(options.bundleDir, pkg.file), options.registryUrl, options.runNpm);
       publishProgress++;
       options.onProgress?.({
         current: publishProgress,
@@ -608,6 +648,31 @@ export async function publishBundle(
           packageName: pkg.name,
           status: 'skipped',
         };
+      }
+
+      if (options.skipExisting !== false) {
+        try {
+          const snapshot = await npmPackageSnapshot(pkg.name, options.registryUrl, options.runNpm);
+          if (snapshot.versions.has(pkg.version)) {
+            existingVersionsByPackage.set(pkg.name, snapshot.versions);
+            currentDistTags.set(pkg.name, snapshot.distTags);
+            publishProgress++;
+            options.onProgress?.({
+              current: publishProgress,
+              package: id,
+              phase: 'publish',
+              status: 'skipped',
+              total: manifest.packages.length,
+            });
+            return {
+              package: id,
+              packageName: pkg.name,
+              status: 'skipped',
+            };
+          }
+        } catch {
+          // Keep the original npm publish failure; the follow-up lookup is only a recovery path.
+        }
       }
 
       publishProgress++;
@@ -698,7 +763,7 @@ export async function publishBundle(
     }
 
     try {
-      await npmDistTagAdd(requirement, options.registryUrl);
+      await npmDistTagAdd(requirement, options.registryUrl, options.runNpm);
       const packageTags = currentDistTags.get(requirement.name) ?? {};
       packageTags[requirement.tag] = requirement.version;
       currentDistTags.set(requirement.name, packageTags);
@@ -778,7 +843,7 @@ export async function publishBundle(
   });
   await mapWithConcurrency([...publishedPackageNames], distTagConcurrency, async (packageName) => {
     try {
-      await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl);
+      await npmDistTagRemove(packageName, tempPublishTag, options.registryUrl, options.runNpm);
     } catch {
       // The temp tag may already be absent if the package existed before this run.
     }
