@@ -211,6 +211,19 @@ the closed network, disable pnpm's release-age quarantine instead:
 pnpm config set --global minimumReleaseAge 0
 ```
 
+Native packages may also run install scripts that fetch assets outside the npm
+registry. For example, packages using `prebuild-install || node-gyp rebuild` can try
+GitHub releases first and `nodejs.org` headers next. In closed networks, either mirror
+those native assets or force source builds with local Node headers:
+
+```bash
+export npm_config_build_from_source=true
+export npm_config_nodedir=/opt/nodejs
+pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
+```
+
+See [Workflows](./docs/workflows.md) for more detail.
+
 ## Development
 
 ```bash

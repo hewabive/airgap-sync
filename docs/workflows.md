@@ -298,6 +298,36 @@ different policy, for example `minimumReleaseAge: 0` in pnpm configuration.
 pnpm config set --global minimumReleaseAge 0
 ```
 
+Native packages can still run install scripts that download non-npm artifacts. For
+example, `better-sqlite3` runs `prebuild-install || node-gyp rebuild`: the first step
+may fetch a prebuilt binary from GitHub releases, and the fallback build may fetch Node
+headers from `nodejs.org`. These URLs are outside Verdaccio, so publishing npm tarballs
+is not enough for this class of dependency.
+
+If the closed-network machine has a compiler toolchain, prefer an explicit source build
+and point `node-gyp` at local Node headers. For a Node installation rooted at
+`/opt/nodejs`, run:
+
+```bash
+export npm_config_build_from_source=true
+export npm_config_nodedir=/opt/nodejs
+pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
+```
+
+The equivalent persistent pnpm configuration is:
+
+```bash
+pnpm config set --global build-from-source true
+pnpm config set --global nodedir /opt/nodejs
+```
+
+Use a `nodedir` that matches the Node version used for the install; otherwise native
+addons may compile against the wrong ABI. If local headers are not available, bring the
+matching Node headers into the closed network or provide an internal mirror through
+`disturl`. If you prefer prebuilt binaries instead of source builds, mirror the package
+release assets and configure the package-specific `prebuild-install` mirror or
+`local_prebuilds` setting.
+
 If install still tries to reach the public internet, inspect:
 
 - Git errors: check Git source metadata, Gitea apply reports, and consumer rewrite

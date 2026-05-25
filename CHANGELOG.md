@@ -21,4 +21,6 @@
 - Added `verify install --ignore-scripts` and documented the tool security model.
 - Changed pnpm install verification to trust loaded lockfiles so Verdaccio import time
   does not trip pnpm v11 `minimumReleaseAge`.
+- Documented closed-network handling for native install scripts that fetch prebuilds or
+  Node headers outside the npm registry.
 - Switched the project development and portable CLI install workflow from pnpm to npm.
