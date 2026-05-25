@@ -147,6 +147,11 @@ not referenced by the new `git-sources.json`. It is skipped when the download is
 incomplete. This only cleans the transfer bundle; it does not delete packages from
 Verdaccio or repositories from Gitea.
 
+After a successful non-dry-run download, the latest root reports are copied into
+`airgap-bundle/runs/download/<run-id>/`. That run directory also includes
+`resolution-changes.json`, a compact summary of npm mappings that were added, changed,
+or pruned during the update.
+
 The online bundle should store Git source identities and local mirrors, not
 Gitea-specific target URLs.
 
@@ -403,3 +408,7 @@ Git target paths preserve source owner/repository names by default. For example,
 consumer machines can use one broad `insteadOf` rule for the source host. `publish`
 writes those rewrite rules into `git-apply-report.json`; it only mutates global Git
 config when `--configure-git-global` is passed.
+
+After a non-dry-run publish, the generated publish/apply reports are copied into
+`airgap-bundle/runs/publish/<run-id>/` so the previous offline import diagnostics are
+not lost on the next run.

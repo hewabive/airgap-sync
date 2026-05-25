@@ -10,6 +10,7 @@ import {
   applyBundle,
   applyGitSources,
   CachedRegistryClient,
+  captureBundleState,
   clearWorkspaceGiteaToken,
   collectBundle,
   configureGitRewrites,
@@ -55,6 +56,8 @@ import {
   writePruneReport,
   writeWorkspaceSnapshot,
   writeWorkspaceConfig,
+  writeDownloadRunHistory,
+  writePublishRunHistory,
   workspaceSecretsFileName,
   workspaceConfigFileName,
   provisionGiteaRepositories,
@@ -1823,6 +1826,8 @@ program
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
         const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
+        const beforeState =
+          options.dryRun === true ? undefined : await captureBundleState(outputDir);
         const report = await collectBundle({
           dryRun: options.dryRun === true,
           concurrency: options.concurrency,
@@ -1856,6 +1861,17 @@ program
           prune && options.dryRun !== true
             ? await pruneAfterSuccessfulDownload(report)
             : undefined;
+        if (beforeState) {
+          await writeDownloadRunHistory({
+            before: beforeState,
+            bundleDir: outputDir,
+            rangeResolutionPolicy,
+            report,
+            ...(pruneReport ? { pruneReport } : {}),
+            tagResolutionPolicy,
+            workspaceSnapshot,
+          });
+        }
 
         if (options.json === true) {
           console.log(
@@ -1885,6 +1901,8 @@ program
       const registryUrl = options.registry ?? defaultWorkspaceSourceRegistry;
       const outputDir = options.output ?? './airgap-bundle';
       const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
+      const beforeState =
+        options.dryRun === true ? undefined : await captureBundleState(outputDir);
       const report = await collectBundle({
         dryRun: options.dryRun === true,
         concurrency: options.concurrency,
@@ -1903,6 +1921,16 @@ program
         options.prune === true && options.dryRun !== true
           ? await pruneAfterSuccessfulDownload(report)
           : undefined;
+      if (beforeState) {
+        await writeDownloadRunHistory({
+          before: beforeState,
+          bundleDir: outputDir,
+          rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
+          report,
+          ...(pruneReport ? { pruneReport } : {}),
+          tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
+        });
+      }
 
       if (options.json === true) {
         console.log(
@@ -2460,6 +2488,10 @@ addNpmPublishOptions(
         publishConcurrency: options.publishConcurrency,
         registryUrl: options.registry,
         skipExisting: options.skipExisting !== false,
+      });
+      await writePublishRunHistory({
+        bundleDir: path.resolve(bundle),
+        report,
       });
 
       console.log(

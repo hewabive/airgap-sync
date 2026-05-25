@@ -31,6 +31,11 @@ export { HttpGiteaClient, provisionGiteaRepositories } from './core/gitea.js';
 export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export { readStableTagResolutionIndex } from './core/tag-resolution.js';
 export {
+  captureBundleState,
+  writeDownloadRunHistory,
+  writePublishRunHistory,
+} from './core/run-history.js';
+export {
   createGitSourcesManifest,
   createGitSourceFromUrl,
   readGitSourcesManifest,
