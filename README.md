@@ -1,195 +1,206 @@
 # airgap-sync
 
-Build a publishable npm registry seed from package manifests, then publish it into
-Verdaccio or another npm-compatible registry.
+[![CI](https://github.com/hewabive/airgap-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/hewabive/airgap-sync/actions/workflows/ci.yml)
 
-The goal is to make a normal package-manager install work against an offline registry:
+Synchronize Git repositories and npm packages across an air gap using removable media.
+
+The intended workflow is simple for the operator:
+
+1. On an online machine, run **Download updates** to refresh configured Git repositories,
+   discover their Node dependency graph, and download the required npm packages and Git
+   dependency mirrors into `airgap-bundle/`.
+2. Move the removable media into the closed network.
+3. Run **Publish updates** to populate the closed-network npm registry and Git host
+   using normal `npm publish`, `npm dist-tag`, and `git push` operations.
+4. Consumer machines install normally from the closed-network services:
 
 ```bash
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
 
-This project is intentionally not a lockfile copier. It resolves dependencies through
-npm registry metadata, downloads the required tarballs, records the `dist-tags` needed
-for safe registry behavior, and later restores those tags after publishing.
-
-The broader target is an airgap sync workflow for portable media:
-
-- download or update configured Git repositories into a portable bundle;
-- discover Node dependency graphs across those repositories;
-- download npm registry packages for Verdaccio;
-- download target repositories and Git dependencies as portable source mirrors;
-- publish both sides in the closed network and verify installs do not reach outside.
+`airgap-sync` is not a live proxy and not a full npm registry mirror. It builds the
+publishable closure needed by configured projects and package targets, including
+dist-tags that package manifests may reference.
 
 ## Status
 
-This repository is an early but usable implementation. The core workflow is in place:
-workspace targets, recursive npm dependency collection, lockfile and nested
-package.json scanning, Git target/dependency mirroring, npm-compatible registry
-publish, dist-tag restoration, Gitea repository creation, mirror push, static bundle
-validation, and install verification. Verdaccio and Gitea are the tested closed-network
-services; other npm-compatible registries should work when they support `npm publish`
-and `npm dist-tag`.
+This is an early but usable implementation. The main workflow is implemented and has
+been tested with Verdaccio and Gitea:
 
-It still needs real-environment hardening around large repositories, authentication
-variants, performance tuning, and operator ergonomics.
+- workspace targets stored on removable media;
+- interactive menu as the default entry point;
+- Git target mirroring with preserved owner/repository paths;
+- recursive package discovery from nested `package.json` files and supported lockfiles;
+- npm dependency resolution, tarball download, checksum validation, retries, and pruning;
+- Git dependency discovery and mirroring;
+- npm publish with temporary tags, dist-tag restoration, and bundled `latest` handling;
+- Gitea repository creation or publishing to already-created Git repositories;
+- static bundle validation and install verification for configured Git targets;
+- append-only download and publish run reports under `airgap-bundle/runs/`.
 
-Current limitations:
+Expect more hardening around large real-world repositories, authentication variants,
+performance on slow removable media, and operator ergonomics.
 
-- Source registry and upstream Git host authentication is still explicit; there is no
-  automatic credential discovery yet. Closed-network Gitea authentication uses the
-  provided token for repository creation and, by default, mirror push. Non-Gitea Git
-  hosts are supported only when target repositories already exist and standard Git push
-  authentication is enough.
-- Verification proves package-manager installs for configured Git targets, but it does
-  not yet enforce a network-deny sandbox around the process. Use
-  `verify install --ignore-scripts` when install scripts should not execute during
-  verification.
-- Git mirrors are pushed with broad mirror semantics; protected branch policies in a
-  target Gitea instance may need manual handling.
+## Requirements
 
-## Target Workflow
+- Node.js 22 or newer
+- npm 11 or newer
+- Git
+- Online side: access to the source npm registry and upstream Git hosts
+- Closed side: an npm-compatible registry and a Git host
 
-Install it in the workspace on removable media:
+Verdaccio and Gitea are the tested closed-network path. Other npm-compatible registries
+should work when they support `npm publish` and `npm dist-tag`. Generic Git hosts can
+be used when target repositories already exist and normal Git push authentication is
+enough.
+
+## Quick Start
+
+Create a workspace on removable media and install `airgap-sync` locally:
 
 ```bash
 mkdir -p /media/USB/airgap-sync
 cd /media/USB/airgap-sync
 npm init -y
 npm install airgap-sync --omit=dev
-npm exec -- airgap-sync init
-```
-
-After a global install, the same commands can be run as `airgap-sync ...`.
-The examples below omit the `npm exec --` prefix for readability.
-
-For guided operation, start the interactive menu. With no command, `airgap-sync`
-opens the menu by default; `airgap-sync -h` still prints the command reference.
-
-```bash
 npm exec -- airgap-sync
 ```
 
+Running `airgap-sync` without a subcommand opens the interactive menu. Use
+`airgap-sync -h` for command help.
+
+The menu covers the normal workflow:
+
+- **Targets**: add or remove Git repositories and npm package targets.
+- **Download updates**: run the online collection phase.
+- **Publish updates**: publish the bundle into the closed-network registry and Git host.
+- **Verify installs**: run package-manager installs for configured Git targets.
+- **Diagnostics**: inspect, validate, and summarize the bundle.
+- **Settings**: configure endpoints, defaults, and saved credentials.
+
+The same workflow can be scripted:
+
 ```bash
 # First setup on the portable drive.
-airgap-sync init
-airgap-sync target add git https://github.com/acme/app.git --branch main
-airgap-sync target add npm eslint@latest
+npm exec -- airgap-sync init
+npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
+npm exec -- airgap-sync target add npm eslint@latest
 
-# Online machine: update bundle-local mirrors and download npm/Git closure.
-airgap-sync download
-airgap-sync verify ./airgap-bundle
+# Online machine.
+npm exec -- airgap-sync download --prune
+npm exec -- airgap-sync verify ./airgap-bundle
 
-# Closed network: populate Verdaccio and the closed-network Git host from the transfer bundle.
-airgap-sync publish ./airgap-bundle \
+# Closed-network machine.
+npm exec -- airgap-sync publish ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --gitea-token "$GITEA_TOKEN"
-airgap-sync verify ./airgap-bundle
-airgap-sync verify install ./airgap-bundle \
+
+npm exec -- airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
   --ignore-scripts
 ```
 
-The intended Git mirror layout preserves upstream owner/repository paths. For example,
-`https://github.com/antvis/G2.git` should be mirrored as
-`http://gitea.local/antvis/G2.git`. That lets consumer machines use one broad Git
-rewrite rule instead of many repository-specific rules:
+After a global install, omit the `npm exec --` prefix.
+
+## Git Mirrors
+
+Git mirror paths preserve the upstream host and owner/repository path. For example,
+`https://github.com/antvis/G2.git` is stored in the bundle as a mirror of
+`github.com/antvis/G2` and can be published as:
+
+```text
+http://gitea.local/antvis/G2.git
+```
+
+That lets consumer machines use one broad rewrite rule instead of many
+repository-specific rules:
 
 ```bash
 git config --global url."http://gitea.local/".insteadOf "https://github.com/"
 ```
 
-After publishing the bundle, normal installs should use the closed-network services:
+When repositories are created outside `airgap-sync`, skip Gitea API provisioning and
+push to existing repositories:
 
 ```bash
-npm ci --registry http://verdaccio.local:4873
-pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
-```
-
-Current lower-level commands are documented in the [CLI Reference](./docs/cli.md).
-
-## Compatibility
-
-- npm registry: any npm-compatible registry that supports `npm publish` and
-  `npm dist-tag`; tested with Verdaccio.
-- Git hosting: Gitea provisioning is implemented and tested. Forgejo-like APIs are
-  expected to be close but are not yet tested.
-- Generic Git host: supported when repositories already exist and can receive normal
-  Git pushes. Use `--skip-git-provision`; for HTTP auth use `--git-username` and
-  `--git-password`.
-
-For a Git host where repositories are created outside `airgap-sync`, skip the Gitea API
-provisioning step and push to existing target repositories:
-
-```bash
-airgap-sync publish ./airgap-bundle \
+npm exec -- airgap-sync publish ./airgap-bundle \
   --registry http://registry.local:4873 \
   --gitea http://git.local \
-  --skip-git-provision
+  --skip-git-provision \
+  --git-username git \
+  --git-password "$GIT_TOKEN"
 ```
 
-The configured workspace lives on removable media:
+## npm Tags
+
+The bundle records real dist-tag requirements such as `node-fetch@cjs` when they appear
+in package manifests. During publish, those tags are restored in the closed-network
+registry after tarballs are published.
+
+`latest` is handled separately:
+
+- `latestPolicy: "bundled"` is the default. Publish assigns `latest` to the newest
+  bundled version for each package name and does not downgrade an existing registry
+  `latest` that already points to a newer semver version.
+- `latestPolicy: "source"` also downloads the source registry's current `latest`
+  version for each included package name. This is useful when storage is less important
+  than keeping the offline registry close to the public registry.
+
+Repeated downloads default to stable reuse for transitive tags and semver ranges. This
+keeps old parent packages from pulling newer deep dependencies just because a public
+registry tag or range moved. Use the `refresh` policies when the bundle is not the only
+source of updates for the target registry.
+
+## Workspace Files
+
+The configured workspace lives next to the transfer bundle on removable media:
 
 ```text
-airgap-sync.json          Target list and defaults
-airgap-sync.secrets.json  Optional local secrets, ignored by Git
-airgap-bundle/            Transfer bundle for the npm registry and Git host
-airgap-bundle/git-mirrors/ Git mirrors for target repositories and Git dependencies
-airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
+airgap-sync.json          Target list, endpoints, bundle path, and menu defaults
+airgap-sync.secrets.json  Optional saved secrets, ignored by Git
+airgap-bundle/            Transfer bundle for npm packages and Git mirrors
 ```
 
-`airgap-sync.json` belongs next to `airgap-bundle/` on the removable media. It is the
-workspace configuration for repeated syncs, not part of a single transfer bundle. It
-stores endpoints, target lists, bundle output, and menu defaults such as whether to
-include dev dependencies, whether to traverse peer dependencies, whether to prune stale
-bundle objects after a successful download, and how to handle the `latest` dist-tag and
-reusable tag/range dependencies. Menu defaults are grouped by workflow step:
-`defaults.download`, `defaults.publish`, and `defaults.verifyInstall`. The interactive
-menu asks for these defaults while initializing a new workspace.
-If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.
+`airgap-sync.json` is long-lived workspace state. It stores configured targets and
+defaults for download, publish, and install verification. It is meant to move with the
+bundle between machines.
 
-The lower-level commands remain available for debugging and one-off use:
+`airgap-sync.secrets.json` is optional. If you save a Gitea token from the menu, it is
+stored there in plaintext on the removable media.
 
-```bash
-# Online machine: refresh project repositories, then download npm and Git closure.
-airgap-sync repos update ./repos
-airgap-sync download ./repos -o ./airgap-bundle
-airgap-sync bundle prune ./airgap-bundle --dry-run
+The bundle contains the current transferable state plus audit reports:
 
-# Closed network: publish npm packages and push Git mirrors.
-airgap-sync publish ./airgap-bundle \
-  --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local
+```text
+airgap-bundle/packages/                 npm tarballs
+airgap-bundle/git-mirrors/              bare Git mirrors
+airgap-bundle/seed-manifest.json        bundled npm package versions
+airgap-bundle/dist-tags.json            real dist-tag requirements
+airgap-bundle/git-sources.json          Git source metadata
+airgap-bundle/workspace-snapshot.json   targets for later verification
+airgap-bundle/runs/                     append-only download/publish diagnostics
 ```
 
-## Design Principles
+See [Bundle Format](./docs/bundle-format.md) for the full layout.
 
-- Publish into the target registry with standard npm operations.
-- Resolve `version`, `range`, `tag`, and `alias` specs using npm registry metadata.
-- Download only the dependency graph needed by the input manifests, not the entire npm registry.
-- Restore required tags and assign `latest` according to the configured latest policy.
-- Reuse stable tag resolutions across repeated downloads when the declaring parent did
-  not change.
-- Keep generated reports explicit enough to audit what was fetched and why.
-- Support both package specs (`react@latest`) and project manifests (`package.json`).
-- Treat Git dependencies as first-class external dependencies, not as registry packages.
+## Verification
+
+`airgap-sync verify ./airgap-bundle` checks bundle consistency: manifests, referenced
+tarballs, tarball readability, checksums where available, reports, and Git metadata.
+
+`airgap-sync verify install ./airgap-bundle` runs real package-manager installs for
+configured Git targets against the closed-network npm registry and Git host. It is the
+closest automated check to the final consumer workflow, but it does not yet enforce a
+network-deny sandbox. Use `--ignore-scripts` when install scripts should not run during
+verification.
 
 ## Development
-
-Requirements:
-
-- Node.js 22 or newer
-- npm 11 or newer
-
-Setup:
 
 ```bash
 npm ci
 npm run build
-npm run cli
 npm run check
 ```
 
@@ -201,7 +212,7 @@ npm run cli         # Run the built CLI from this source checkout
 npm test            # Run tests
 npm run lint        # Run ESLint
 npm run format      # Format source and docs
-npm run check       # Lint, type-check, and test
+npm run check       # Lint, type-check, tests, and knip
 npm run e2e:local   # Run the local Gitea/Verdaccio integration test
 ```
 
