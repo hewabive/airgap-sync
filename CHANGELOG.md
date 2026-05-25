@@ -23,5 +23,5 @@
   does not trip pnpm v11 `minimumReleaseAge`.
 - Documented closed-network handling for native install scripts that fetch prebuilds or
   Node headers outside the npm registry, including pnpm-compatible `.npmrc`
-  configuration.
+  configuration and `approve-builds` environment requirements.
 - Switched the project development and portable CLI install workflow from pnpm to npm.

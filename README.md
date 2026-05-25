@@ -219,11 +219,16 @@ those native assets or force source builds with local Node headers:
 ```bash
 export npm_config_build_from_source=true
 export npm_config_nodedir=/opt/nodejs
+export NPM_CONFIG_BUILD_FROM_SOURCE=true
+export NPM_CONFIG_NODEDIR=/opt/nodejs
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
+pnpm approve-builds
 ```
 
 For a persistent setting, put `build-from-source=true` and `nodedir=/opt/nodejs` in the
 project `.npmrc`; recent pnpm versions reject those keys in global `config.yaml`.
+Keep the same environment active when running `pnpm approve-builds`, because approve
+can run deferred native build scripts.
 
 See [Workflows](./docs/workflows.md) for more detail.
 
