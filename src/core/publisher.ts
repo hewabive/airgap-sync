@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
@@ -13,6 +14,7 @@ import type {
   TagRequirement,
 } from '../types.js';
 import { encodePackageName, isBlockedPublishRegistry } from './registry.js';
+import * as fs from './fs.js';
 import { throwIfInvalidBundle, validateBundle } from './validation.js';
 
 const execFileAsync = promisify(execFile);
@@ -346,21 +348,29 @@ async function npmPublish(
   registryUrl: string,
   runner?: NpmRunner
 ): Promise<void> {
-  await runNpmCommand(
-    [
-      'publish',
-      tarballPath,
-      '--registry',
-      registryUrl,
-      '--tag',
-      tempPublishTag,
-      '--provenance',
-      'false',
-      '--json',
-    ],
-    { maxBuffer: 10 * 1024 * 1024, timeout: 300_000 },
-    runner
-  );
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+  const stagedTarballPath = path.join(tempDir, path.basename(tarballPath));
+
+  try {
+    await fs.copyFile(tarballPath, stagedTarballPath);
+    await runNpmCommand(
+      [
+        'publish',
+        stagedTarballPath,
+        '--registry',
+        registryUrl,
+        '--tag',
+        tempPublishTag,
+        '--provenance',
+        'false',
+        '--json',
+      ],
+      { maxBuffer: 10 * 1024 * 1024, timeout: 300_000 },
+      runner
+    );
+  } finally {
+    await fs.remove(tempDir);
+  }
 }
 
 async function npmDistTagAdd(

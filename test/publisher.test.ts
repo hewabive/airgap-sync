@@ -407,10 +407,13 @@ describe('publishBundle', () => {
         published: 0,
         skipped: 1,
       });
+      const publishTarballPath = npmCalls[0]?.[1];
+      expect(path.basename(publishTarballPath ?? '')).toBe('demo-1.0.0.tgz');
+      expect(path.dirname(publishTarballPath ?? '')).not.toBe(path.join(bundleDir, 'packages'));
       expect(npmCalls).toEqual([
         [
           'publish',
-          path.join(bundleDir, 'packages/demo-1.0.0.tgz'),
+          publishTarballPath,
           '--registry',
           'http://localhost:4873',
           '--tag',
