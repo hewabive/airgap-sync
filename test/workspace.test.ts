@@ -35,6 +35,7 @@ describe('workspace config', () => {
           includeDev: 'ask',
           includePeer: false,
           latestPolicy: 'bundled',
+          prune: false,
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
@@ -120,6 +121,7 @@ describe('workspace config', () => {
           includeDev: 'ask',
           includePeer: false,
           latestPolicy: 'bundled',
+          prune: false,
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
@@ -145,6 +147,7 @@ describe('workspace config', () => {
             includeDev: false,
             includePeer: true,
             latestPolicy: 'source',
+            prune: 'ask',
             tagResolutionPolicy: 'refresh',
           },
           publish: {
@@ -168,6 +171,7 @@ describe('workspace config', () => {
         includeDev: false,
         includePeer: true,
         latestPolicy: 'source',
+        prune: 'ask',
         tagResolutionPolicy: 'refresh',
       },
       publish: {

@@ -66,8 +66,9 @@ set to `true`, `false`, or `ask` under `defaults.download`, `defaults.publish`, 
 `defaults.verifyInstall`. `defaults.download.latestPolicy` controls whether artificial
 `latest` tags are assigned to bundled versions or resolved from the source registry.
 `defaults.download.tagResolutionPolicy` controls whether stable tag dependencies can
-reuse previous bundle mappings. When the interactive menu initializes a workspace, it
-asks for these defaults during setup.
+reuse previous bundle mappings. `defaults.download.prune` controls whether stale local
+bundle tarballs and Git mirrors are removed after a successful download. When the
+interactive menu initializes a workspace, it asks for these defaults during setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
@@ -147,6 +148,19 @@ paths or by independently generated bundles on different removable drives: reuse
 dependencies are restored strictly and can move a shared tag such as `latest` backward.
 For mixed update sources, prefer `--tag-resolution-policy refresh` and avoid importing
 older bundles after newer ones.
+
+To keep removable media from growing indefinitely, prune stale local bundle objects
+after a successful download:
+
+```bash
+airgap-sync download --prune
+airgap-sync bundle prune ./airgap-bundle --dry-run
+airgap-sync bundle prune ./airgap-bundle
+```
+
+Pruning removes tarballs and Git mirrors that are no longer referenced by the latest
+successful bundle documents. It refuses to run after an incomplete download and does
+not delete anything from Verdaccio or Gitea.
 
 Before transfer, inspect the bundle:
 

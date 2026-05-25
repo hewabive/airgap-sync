@@ -427,6 +427,35 @@ export interface ApplyBundleReport {
   succeeded: boolean;
 }
 
+export type BundlePruneObjectType = 'git-mirror' | 'npm-package';
+export type BundlePruneActionStatus = 'planned' | 'removed' | 'error';
+
+export interface BundlePruneActionResult {
+  error?: string;
+  path: string;
+  status: BundlePruneActionStatus;
+  type: BundlePruneObjectType;
+}
+
+export interface BundlePruneObjectSummary {
+  kept: number;
+  removed: number;
+  stale: number;
+  total: number;
+}
+
+export interface BundlePruneReport {
+  actions: BundlePruneActionResult[];
+  bundleDir: string;
+  dryRun: boolean;
+  errors: BundlePruneActionResult[];
+  generatedAt: string;
+  gitMirrors: BundlePruneObjectSummary;
+  npmPackages: BundlePruneObjectSummary;
+  planned: number;
+  removed: number;
+}
+
 export type VerifyCheckStatus = 'ok' | 'warning' | 'error';
 
 export interface VerifyCheck {

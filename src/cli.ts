@@ -29,6 +29,7 @@ import {
   packageVersion,
   parseRootSpecs,
   publishBundle,
+  pruneBundle,
   readBundleInfo,
   readFetchReport,
   readGitSourcesManifest,
@@ -51,6 +52,7 @@ import {
   writeGitFetchReport,
   writeGitSourcesManifest,
   writePublishReport,
+  writePruneReport,
   writeWorkspaceSnapshot,
   writeWorkspaceConfig,
   workspaceSecretsFileName,
@@ -62,6 +64,7 @@ import type {
   ApplyProgressEvent,
   ApplyProgressPhase,
   BundleInfo,
+  BundlePruneReport,
   CollectReport,
   CollectProgressEvent,
   FetchSeedBundleResult,
@@ -133,8 +136,14 @@ interface CollectOptions {
   json?: boolean;
   latestPolicy?: LatestPolicy;
   output?: string;
+  prune?: boolean;
   registry?: string;
   tagResolutionPolicy?: TagResolutionPolicy;
+}
+
+interface BundlePruneOptions {
+  dryRun?: boolean;
+  json?: boolean;
 }
 
 interface InitOptions {
@@ -308,6 +317,46 @@ function formatDownloadSummary(report: CollectReport): string {
   return lines.join('\n');
 }
 
+function formatPruneSummary(report: BundlePruneReport): string {
+  const failed = report.errors.length > 0;
+  const verb = report.dryRun ? 'planned' : 'removed';
+  const status = failed
+    ? red(
+        `FAILED Bundle prune incomplete: ${String(report.errors.length)} errors, ${String(
+          report.planned
+        )} stale objects found.`
+      )
+    : green(
+        `OK Bundle prune ${report.dryRun ? 'planned' : 'completed'}: ${String(
+          report.planned
+        )} stale objects ${verb}.`
+      );
+
+  return [
+    status,
+    `NPM tarballs: ${String(report.npmPackages.total)} total, ${String(
+      report.npmPackages.stale
+    )} stale, ${String(report.npmPackages.removed)} removed.`,
+    `Git mirrors: ${String(report.gitMirrors.total)} total, ${String(
+      report.gitMirrors.stale
+    )} stale, ${String(report.gitMirrors.removed)} removed.`,
+    `Report: ${report.dryRun ? 'prune-dry-run-report.json' : 'prune-report.json'}.`,
+  ].join('\n');
+}
+
+async function pruneAfterSuccessfulDownload(
+  report: CollectReport
+): Promise<BundlePruneReport | undefined> {
+  if (report.dryRun || !report.wroteBundle || !report.fixedPoint || collectShouldFail(report)) {
+    console.error('[prune] skipped: download did not complete successfully');
+    return undefined;
+  }
+
+  const pruneReport = await pruneBundle({ bundleDir: report.outputDir });
+  await writePruneReport(report.outputDir, pruneReport);
+  return pruneReport;
+}
+
 function formatTargetList(targets: WorkspaceConfig['targets']): string {
   if (targets.length === 0) {
     return 'No targets configured.';
@@ -342,6 +391,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
     `Tag resolution policy: ${config.defaults.download.tagResolutionPolicy}`,
+    `Prune stale bundle objects: ${promptBooleanToString(config.defaults.download.prune)}`,
     `Publish public repositories: ${promptBooleanToString(config.defaults.publish.publicRepositories)}`,
     `Configure global Git rewrites: ${promptBooleanToString(config.defaults.publish.configureGitGlobal)}`,
     `Verify install ignore scripts: ${promptBooleanToString(config.defaults.verifyInstall.ignoreScripts)}`,
@@ -899,6 +949,11 @@ async function configureDownloadDefaults(
     rl,
     config.defaults.download.tagResolutionPolicy
   );
+  const prune = await askPromptBoolean(
+    rl,
+    'Prune stale bundle objects after successful download',
+    config.defaults.download.prune
+  );
   const nextConfig: WorkspaceConfig = {
     ...config,
     defaults: {
@@ -907,6 +962,7 @@ async function configureDownloadDefaults(
         includeDev,
         includePeer,
         latestPolicy,
+        prune,
         tagResolutionPolicy,
       },
     },
@@ -1126,6 +1182,7 @@ async function diagnosticsMenu(workspaceDir: string, rl: ReadlineInterface): Pro
     console.log('1. Verify bundle');
     console.log('2. Show bundle info');
     console.log('3. Check Gitea token');
+    console.log('4. Prune stale bundle objects');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -1143,6 +1200,11 @@ async function diagnosticsMenu(workspaceDir: string, rl: ReadlineInterface): Pro
         const token = await giteaTokenFromMenu(workspaceDir, rl);
         const login = await checkGiteaToken(giteaUrl, token);
         console.log(`Gitea token is valid for user: ${login}`);
+        break;
+      }
+      case '4': {
+        const dryRun = await askYesNo(rl, 'Dry run only?', true);
+        await runSelfCommand(compactArgs(['bundle', 'prune', bundle, dryRun ? '--dry-run' : undefined]), workspaceDir);
         break;
       }
       default:
@@ -1259,11 +1321,18 @@ async function runMenuAction(
         config.defaults.download.includePeer,
         false
       );
+      const prune = await resolvePromptBoolean(
+        rl,
+        'Prune stale bundle objects after successful download?',
+        config.defaults.download.prune,
+        false
+      );
       await runSelfCommand(
         compactArgs([
           'download',
           includeDev ? '--include-dev' : undefined,
           includePeer ? '--include-peer' : undefined,
+          prune ? '--prune' : undefined,
         ]),
         workspaceDir
       );
@@ -1636,6 +1705,7 @@ program
     16
   )
   .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
+  .option('--prune', 'Remove stale tarballs and Git mirrors after a successful download')
   .option('--json', 'Print the full JSON report instead of the concise summary')
   .action(async (root: string | undefined, options: CollectOptions) => {
     try {
@@ -1655,6 +1725,7 @@ program
         const latestPolicy = options.latestPolicy ?? config.defaults.download.latestPolicy;
         const tagResolutionPolicy =
           options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
+        const prune = options.prune === true || config.defaults.download.prune === true;
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -1687,11 +1758,17 @@ program
           await writeWorkspaceSnapshot(outputDir, workspaceSnapshot);
         }
 
+        const pruneReport =
+          prune && options.dryRun !== true
+            ? await pruneAfterSuccessfulDownload(report)
+            : undefined;
+
         if (options.json === true) {
           console.log(
             JSON.stringify(
               {
                 workspaceSnapshot,
+                ...(pruneReport ? { prune: pruneReport } : {}),
                 ...report,
               },
               null,
@@ -1700,6 +1777,9 @@ program
           );
         } else {
           console.log(formatDownloadSummary(report));
+          if (pruneReport) {
+            console.log(formatPruneSummary(pruneReport));
+          }
         }
 
         if (collectShouldFail(report)) {
@@ -1724,10 +1804,21 @@ program
         registryUrl,
         root,
       });
+      const pruneReport =
+        options.prune === true && options.dryRun !== true
+          ? await pruneAfterSuccessfulDownload(report)
+          : undefined;
 
-      console.log(
-        options.json === true ? JSON.stringify(report, null, 2) : formatDownloadSummary(report)
-      );
+      if (options.json === true) {
+        console.log(
+          JSON.stringify({ ...(pruneReport ? { prune: pruneReport } : {}), ...report }, null, 2)
+        );
+      } else {
+        console.log(formatDownloadSummary(report));
+        if (pruneReport) {
+          console.log(formatPruneSummary(pruneReport));
+        }
+      }
 
       if (collectShouldFail(report)) {
         process.exitCode = 1;
@@ -1920,6 +2011,34 @@ program
     try {
       const info = await readBundleInfo(bundle);
       console.log(formatBundleInfo(info));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const bundleCommand = program.command('bundle').description('Operate on an airgap bundle');
+
+bundleCommand
+  .command('prune')
+  .description('Remove stale tarballs and Git mirrors not referenced by the latest download')
+  .argument('<bundle>', 'Path to airgap bundle directory')
+  .option('--dry-run', 'Print stale objects without removing them')
+  .option('--json', 'Print the full JSON prune report')
+  .action(async (bundle: string, options: BundlePruneOptions) => {
+    try {
+      const report = await pruneBundle({
+        bundleDir: bundle,
+        dryRun: options.dryRun === true,
+      });
+      await writePruneReport(bundle, report);
+      console.log(
+        options.json === true ? JSON.stringify(report, null, 2) : formatPruneSummary(report)
+      );
+
+      if (report.errors.length > 0) {
+        process.exitCode = 1;
+      }
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

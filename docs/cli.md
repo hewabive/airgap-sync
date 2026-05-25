@@ -57,7 +57,8 @@ Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
 `source`; `defaults.download.tagResolutionPolicy` is either `reuse-stable` or
-`refresh`.
+`refresh`. `defaults.download.prune` controls whether a successful download removes
+stale tarballs and Git mirrors from the local bundle.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## secrets
@@ -97,6 +98,7 @@ airgap-sync download ./repos \
   --latest-policy bundled \
   --tag-resolution-policy reuse-stable \
   --concurrency 16 \
+  --prune \
   --output ./airgap-bundle
 ```
 
@@ -130,8 +132,26 @@ can move shared registry tags backward.
 
 `--concurrency` controls parallel npm resolve/download workers. The default is `16`.
 
+`--prune` removes stale local bundle objects after a successful fixed-point download.
+It deletes npm tarballs not referenced by the new `seed-manifest.json` and Git mirrors
+not referenced by the new `git-sources.json`. It is skipped when the download is
+incomplete. This only cleans the transfer bundle; it does not delete packages from
+Verdaccio or repositories from Gitea.
+
 The online bundle should store Git source identities and local mirrors, not
 Gitea-specific target URLs.
+
+## bundle prune
+
+```bash
+airgap-sync bundle prune ./airgap-bundle --dry-run
+airgap-sync bundle prune ./airgap-bundle
+```
+
+Removes stale objects from the local transfer bundle: unreferenced `packages/*.tgz`
+files and unreferenced `git-mirrors/**/*.git` mirrors. The command refuses to run unless
+the latest `collect-report.json` records a successful non-dry-run fixed-point download.
+Dry runs write `prune-dry-run-report.json`; real runs write `prune-report.json`.
 
 ## fetch
 

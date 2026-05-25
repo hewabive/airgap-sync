@@ -45,6 +45,7 @@ export {
   isBlockedPublishRegistry,
 } from './core/registry.js';
 export { createPublishPlan, publishBundle } from './core/publisher.js';
+export { pruneBundle, writePruneReport } from './core/prune.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
 export { throwIfInvalidBundle, validateBundle } from './core/validation.js';
@@ -134,6 +135,7 @@ export type {
   PublishProgressPhase,
   PublishProgressStatus,
 } from './core/publisher.js';
+export type { PruneBundleOptions } from './core/prune.js';
 export type {
   GitOutputCommandInvocation,
   GitOutputCommandResult,
@@ -174,6 +176,11 @@ export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.
 export type {
   ApplyBundleReport,
   BundleManifest,
+  BundlePruneActionResult,
+  BundlePruneActionStatus,
+  BundlePruneObjectSummary,
+  BundlePruneObjectType,
+  BundlePruneReport,
   CollectTimings,
   CollectReport,
   DistTagsManifest,

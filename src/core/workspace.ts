@@ -27,6 +27,7 @@ export interface WorkspaceDefaults {
     includeDev: WorkspacePromptBoolean;
     includePeer: WorkspacePromptBoolean;
     latestPolicy: LatestPolicy;
+    prune: WorkspacePromptBoolean;
     tagResolutionPolicy: TagResolutionPolicy;
   };
   publish: {
@@ -97,6 +98,7 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
         includeDev: 'ask',
         includePeer: false,
         latestPolicy: 'bundled',
+        prune: false,
         tagResolutionPolicy: 'reuse-stable',
       },
       publish: {
@@ -199,6 +201,7 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
       includeDev: normalizePromptBoolean(download.includeDev, defaults.download.includeDev),
       includePeer: normalizePromptBoolean(download.includePeer, defaults.download.includePeer),
       latestPolicy: normalizeLatestPolicy(download.latestPolicy, defaults.download.latestPolicy),
+      prune: normalizePromptBoolean(download.prune, defaults.download.prune),
       tagResolutionPolicy: normalizeTagResolutionPolicy(
         download.tagResolutionPolicy,
         defaults.download.tagResolutionPolicy

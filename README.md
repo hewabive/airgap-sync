@@ -120,10 +120,11 @@ airgap-bundle/workspace-snapshot.json  Portable target snapshot for verification
 `airgap-sync.json` belongs next to `airgap-bundle/` on the removable media. It is the
 workspace configuration for repeated syncs, not part of a single transfer bundle. It
 stores endpoints, target lists, bundle output, and menu defaults such as whether to
-include dev dependencies, whether to traverse peer dependencies, and how to handle the
-`latest` dist-tag and reusable tag dependencies. Menu defaults are grouped by workflow
-step: `defaults.download`, `defaults.publish`, and `defaults.verifyInstall`. The
-interactive menu asks for these defaults while initializing a new workspace.
+include dev dependencies, whether to traverse peer dependencies, whether to prune stale
+bundle objects after a successful download, and how to handle the `latest` dist-tag and
+reusable tag dependencies. Menu defaults are grouped by workflow step:
+`defaults.download`, `defaults.publish`, and `defaults.verifyInstall`. The interactive
+menu asks for these defaults while initializing a new workspace.
 If you choose to save a Gitea token, it is written to `airgap-sync.secrets.json`.
 
 The lower-level commands remain available for debugging and one-off use:
@@ -132,6 +133,7 @@ The lower-level commands remain available for debugging and one-off use:
 # Online machine: refresh project repositories, then download npm and Git closure.
 airgap-sync repos update ./repos
 airgap-sync download ./repos -o ./airgap-bundle
+airgap-sync bundle prune ./airgap-bundle --dry-run
 
 # Closed network: publish npm packages and push Git mirrors.
 airgap-sync publish ./airgap-bundle \
