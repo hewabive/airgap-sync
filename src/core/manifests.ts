@@ -22,9 +22,17 @@ const ignoredDirectoryNames = new Set([
   'node_modules',
 ]);
 
+const supportedLockfileNames = new Set([
+  'npm-shrinkwrap.json',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+]);
+
 export interface ReadManifestRequirementsOptions {
   includeDev?: boolean;
   includePeer?: boolean;
+  skipManifestsCoveredByLockfiles?: boolean;
 }
 
 export interface ProjectManifestEntry {
@@ -95,8 +103,12 @@ function isLocalDependency(
   );
 }
 
-async function findPackageJsonFiles(rootDir: string): Promise<string[]> {
-  const found: string[] = [];
+async function findProjectFiles(rootDir: string): Promise<{
+  lockfileDirs: string[];
+  packageJsonFiles: string[];
+}> {
+  const lockfileDirs = new Set<string>();
+  const packageJsonFiles: string[] = [];
 
   async function walk(dir: string): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -112,32 +124,55 @@ async function findPackageJsonFiles(rootDir: string): Promise<string[]> {
       }
 
       if (entry.isFile() && entry.name === 'package.json') {
-        found.push(entryPath);
+        packageJsonFiles.push(entryPath);
+        continue;
+      }
+
+      if (entry.isFile() && supportedLockfileNames.has(entry.name)) {
+        lockfileDirs.add(dir);
       }
     }
   }
 
   await walk(rootDir);
-  return found.sort();
+  return { lockfileDirs: [...lockfileDirs].sort(), packageJsonFiles: packageJsonFiles.sort() };
+}
+
+function isCoveredByLockfile(file: string, lockfileDirs: string[]): boolean {
+  const dir = path.dirname(file);
+  return lockfileDirs.includes(dir);
 }
 
 async function manifestInputToFiles(
-  manifestPath: string
+  manifestPath: string,
+  options: ReadManifestRequirementsOptions
 ): Promise<{ files: string[]; rootDir: string }> {
   const absolutePath = path.resolve(manifestPath);
   const stat = await fs.stat(absolutePath);
 
   if (stat.isDirectory()) {
+    const projectFiles = await findProjectFiles(absolutePath);
     return {
-      files: await findPackageJsonFiles(absolutePath),
+      files:
+        options.skipManifestsCoveredByLockfiles === true
+          ? projectFiles.packageJsonFiles.filter(
+              (file) => !isCoveredByLockfile(file, projectFiles.lockfileDirs)
+            )
+          : projectFiles.packageJsonFiles,
       rootDir: absolutePath,
     };
   }
 
   const rootDir = path.dirname(absolutePath);
-  const nestedFiles = await findPackageJsonFiles(rootDir);
+  const projectFiles = await findProjectFiles(rootDir);
   return {
-    files: [...new Set([absolutePath, ...nestedFiles])].sort(),
+    files: [...new Set([absolutePath, ...projectFiles.packageJsonFiles])]
+      .filter(
+        (file) =>
+          options.skipManifestsCoveredByLockfiles !== true ||
+          !isCoveredByLockfile(file, projectFiles.lockfileDirs)
+      )
+      .sort(),
     rootDir,
   };
 }
@@ -146,7 +181,7 @@ export async function readManifestRequirements(
   manifestPath: string,
   options: ReadManifestRequirementsOptions = {}
 ): Promise<ParseRootSpecsResult> {
-  const { files, rootDir } = await manifestInputToFiles(manifestPath);
+  const { files, rootDir } = await manifestInputToFiles(manifestPath, options);
   const entries: ProjectManifestEntry[] = [];
 
   for (const file of files) {

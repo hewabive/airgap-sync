@@ -293,6 +293,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     ? await readManifestRequirements(root, {
         includeDev,
         includePeer,
+        skipManifestsCoveredByLockfiles: true,
       })
     : { gitRequirements: [], requirements: [], unsupported: [] };
   options.onProgress?.({

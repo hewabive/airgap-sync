@@ -94,6 +94,32 @@ describe('readManifestRequirements', () => {
     ]);
   });
 
+  it('can skip manifests covered by lockfiles', async () => {
+    await fs.writeFile(path.join(tempDir, 'package-lock.json'), '{}');
+    await fs.writeFile(path.join(tempDir, 'packages/lib/package-lock.json'), '{}');
+    await writePackageJson('examples/standalone/package.json', {
+      name: 'standalone',
+      version: '1.0.0',
+      dependencies: {
+        lodash: '^4.17.21',
+      },
+    });
+
+    const result = await readManifestRequirements(tempDir, {
+      skipManifestsCoveredByLockfiles: true,
+    });
+
+    expect(result.requirements).toEqual([
+      {
+        name: 'lodash',
+        raw: 'lodash@^4.17.21',
+        requiredBy: 'standalone@1.0.0',
+        specifier: '^4.17.21',
+        type: 'range',
+      },
+    ]);
+  });
+
   it('skips component package manifests that are not npm packages', async () => {
     await writePackageJson('components/sha256/package.json', {
       name: 'sha256',

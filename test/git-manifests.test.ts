@@ -203,19 +203,6 @@ describe('readGitSourceManifestRequirements', () => {
           });
         }
 
-        if (invocation.args.join(' ') === 'show main:tools/ui/package.json') {
-          return Promise.resolve({
-            stderr: '',
-            stdout: JSON.stringify({
-              name: 'ui',
-              version: '1.0.0',
-              dependencies: {
-                '@ungap/structured-clone': '^1.0.0',
-              },
-            }),
-          });
-        }
-
         if (invocation.args.join(' ') === 'show main:tools/ui/package-lock.json') {
           return Promise.resolve({
             stderr: '',
@@ -237,14 +224,8 @@ describe('readGitSourceManifestRequirements', () => {
     });
 
     expect(result.lockfilePaths).toEqual(['tools/ui/package-lock.json']);
+    expect(result.manifestPaths).toEqual([]);
     expect(result.requirements).toEqual([
-      {
-        name: '@ungap/structured-clone',
-        raw: '@ungap/structured-clone@^1.0.0',
-        requiredBy: 'ui@1.0.0',
-        specifier: '^1.0.0',
-        type: 'range',
-      },
       {
         name: '@ungap/structured-clone',
         raw: '@ungap/structured-clone@1.3.0',

@@ -65,6 +65,16 @@ function isLockfilePath(filePath: string): boolean {
   return supportedLockfileNames.has(path.basename(filePath)) && !isIgnoredRepositoryPath(filePath);
 }
 
+function directoryName(filePath: string): string {
+  const directory = path.posix.dirname(filePath);
+  return directory === '.' ? '' : directory;
+}
+
+function isCoveredByLockfile(filePath: string, lockfilePaths: string[]): boolean {
+  const directory = directoryName(filePath);
+  return lockfilePaths.some((lockfilePath) => directory === directoryName(lockfilePath));
+}
+
 function isInsideSubdir(filePath: string, subdir: string): boolean {
   return (
     subdir.length === 0 ||
@@ -163,9 +173,12 @@ export async function readGitSourceManifestRequirements(
   });
   const manifestPaths = repositoryPaths.filter(isPackageJsonPath);
   const lockfilePaths = repositoryPaths.filter(isLockfilePath);
+  const unlockedManifestPaths = manifestPaths.filter(
+    (manifestPath) => !isCoveredByLockfile(manifestPath, lockfilePaths)
+  );
   const entries: ProjectManifestEntry[] = [];
 
-  for (const manifestPath of manifestPaths) {
+  for (const manifestPath of unlockedManifestPaths) {
     entries.push({
       manifest: await readPackageJsonFromGit({
         filePath: manifestPath,
@@ -210,7 +223,7 @@ export async function readGitSourceManifestRequirements(
       ...parsedLockfiles.flatMap((result) => result.unsupported),
     ],
     lockfilePaths,
-    manifestPaths,
+    manifestPaths: unlockedManifestPaths,
     mirrorPath,
     revision,
     sourceId: options.source.id,

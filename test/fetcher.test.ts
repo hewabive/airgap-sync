@@ -285,6 +285,53 @@ describe('fetchSeedBundle', () => {
     expect(tarballMocks.readPackageManifest).not.toHaveBeenCalled();
   });
 
+  it('does not traverse dependencies of packages required by lockfiles', async () => {
+    const requestedNames: string[] = [];
+    const registryWithLockedParent: RegistryClient = {
+      getPackageMetadata(name) {
+        requestedNames.push(name);
+        if (name === 'parent') {
+          return Promise.resolve({
+            name: 'parent',
+            'dist-tags': {
+              latest: '1.0.0',
+            },
+            versions: {
+              '1.0.0': {
+                name: 'parent',
+                version: '1.0.0',
+                dependencies: {
+                  child: '^1.0.0',
+                },
+                dist: { tarball: 'https://registry.example/parent/-/parent-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        throw new Error(`Unexpected registry lookup for ${name}`);
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithLockedParent,
+      requirements: [
+        {
+          name: 'parent',
+          raw: 'parent@1.0.0',
+          requiredBy: 'lockfile:package-lock.json',
+          specifier: '1.0.0',
+          type: 'version',
+        },
+      ],
+    });
+
+    expect(requestedNames).toEqual(['parent']);
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['parent@1.0.0']);
+  });
+
   it('records non-latest dependency tag requirements', async () => {
     const registryWithTaggedDependency: RegistryClient = {
       getPackageMetadata(name) {

@@ -74,6 +74,10 @@ function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
 }
 
+function isLockfileRequiredPackage(pkg: { requiredBy: string }): boolean {
+  return pkg.requiredBy.startsWith('lockfile:');
+}
+
 function fetchPackageAction(
   pkg: ResolvedRootPackage,
   file = path.posix.join('packages', packageFileName(pkg.name, pkg.version))
@@ -371,26 +375,26 @@ export async function fetchSeedBundle(
     }
 
     const id = packageId(resolved);
-    if (resolvedById.has(id)) {
-      return;
-    }
+    const alreadyResolved = resolvedById.has(id);
 
-    resolvedById.set(id, resolved);
-    result.resolved.push(resolved);
-    options.onProgress?.({
-      current: result.resolved.length,
-      package: id,
-      phase: 'resolve',
-      queue: queue.length,
-      status: 'progress',
-    });
+    if (!alreadyResolved) {
+      resolvedById.set(id, resolved);
+      result.resolved.push(resolved);
+      options.onProgress?.({
+        current: result.resolved.length,
+        package: id,
+        phase: 'resolve',
+        queue: queue.length,
+        status: 'progress',
+      });
+    }
 
     let manifest: PackageManifest;
 
     try {
       manifest = manifestFromResolvedPackage(resolved);
 
-      if (shouldDownload) {
+      if (!alreadyResolved && shouldDownload) {
         const fetched = await retry(
           async (): Promise<DownloadedTarball> => {
             const downloadStart = performance.now();
@@ -416,9 +420,13 @@ export async function fetchSeedBundle(
           queue: queue.length,
           status: 'progress',
         });
-      } else {
+      } else if (!alreadyResolved) {
         result.wouldDownload++;
         result.wouldDownloadPackages.push(fetchPackageAction(resolved));
+      }
+
+      if (isLockfileRequiredPackage(resolved)) {
+        return;
       }
 
       if (scannedPackages.has(id)) {

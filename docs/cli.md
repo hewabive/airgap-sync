@@ -148,6 +148,13 @@ not referenced by the new `git-sources.json`. It is skipped when the download is
 incomplete. This only cleans the transfer bundle; it does not delete packages from
 Verdaccio or repositories from Gitea.
 
+When a package manifest is in the same directory as a supported lockfile, `download`
+uses the lockfile as the stronger source and does not also resolve that manifest's
+range dependencies. Packages pulled only from lockfiles also do not expand their own
+registry metadata dependencies; their transitive closure is expected to come from the
+same lockfile. This keeps lockfile-based installs from accumulating newer transitive
+versions that the install will not use.
+
 After a successful non-dry-run download, the latest root reports are copied into
 `airgap-bundle/runs/download/<run-id>/`. That run directory also includes
 `resolution-changes.json`, a compact summary of npm mappings that were added, changed,
