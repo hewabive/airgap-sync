@@ -44,6 +44,10 @@ interface FetchEntry {
   targetPath: string;
 }
 
+const mirrorBranchRefspec = '+refs/heads/*:refs/heads/*';
+const mirrorTagRefspec = '+refs/tags/*:refs/tags/*';
+const mirroredRefNamespaces = ['refs/heads', 'refs/tags'];
+
 function redactGitArg(arg: string): string {
   return arg.startsWith('http.extraHeader=') ? 'http.extraHeader=<redacted>' : arg;
 }
@@ -99,10 +103,28 @@ async function refsFingerprint(
   runner: GitCommandRunner
 ): Promise<string | undefined> {
   const result = await runner({
-    args: ['-C', targetPath, 'for-each-ref', '--format=%(refname) %(objectname)'],
+    args: [
+      '-C',
+      targetPath,
+      'for-each-ref',
+      '--format=%(refname) %(objectname)',
+      ...mirroredRefNamespaces,
+    ],
   });
 
   return result ? normalizeRefs(result.stdout) : undefined;
+}
+
+async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Promise<void> {
+  await runner({
+    args: ['-C', targetPath, 'config', '--replace-all', 'remote.origin.fetch', mirrorBranchRefspec],
+  });
+  await runner({
+    args: ['-C', targetPath, 'config', '--add', 'remote.origin.fetch', mirrorTagRefspec],
+  });
+  await runner({
+    args: ['-C', targetPath, 'fetch', '--prune', 'origin'],
+  });
 }
 
 async function fetchEntry(
@@ -115,9 +137,7 @@ async function fetchEntry(
       await runner({
         args: ['-C', entry.targetPath, 'remote', 'set-url', 'origin', entry.sourceUrl],
       });
-      await runner({
-        args: ['-C', entry.targetPath, 'remote', 'update', '--prune'],
-      });
+      await fetchMirrorRefs(entry.targetPath, runner);
       const after = await refsFingerprint(entry.targetPath, runner);
       return {
         ...(before !== undefined && after !== undefined ? { changed: before !== after } : {}),
@@ -130,8 +150,12 @@ async function fetchEntry(
 
     await fs.ensureDir(path.dirname(entry.targetPath));
     await runner({
-      args: ['clone', '--mirror', entry.sourceUrl, entry.targetPath],
+      args: ['init', '--bare', entry.targetPath],
     });
+    await runner({
+      args: ['-C', entry.targetPath, 'remote', 'add', 'origin', entry.sourceUrl],
+    });
+    await fetchMirrorRefs(entry.targetPath, runner);
     return {
       changed: true,
       repository: entry.id,

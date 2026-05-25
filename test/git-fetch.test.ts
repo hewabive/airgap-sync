@@ -84,10 +84,48 @@ describe('fetchGitSources', () => {
     expect(calls).toEqual([
       {
         args: [
-          'clone',
-          '--mirror',
-          'https://github.com/owner/repo.git',
+          'init',
+          '--bare',
           path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
+          'remote',
+          'add',
+          'origin',
+          'https://github.com/owner/repo.git',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
+          'config',
+          '--replace-all',
+          'remote.origin.fetch',
+          '+refs/heads/*:refs/heads/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git'),
+          'fetch',
+          '--prune',
+          'origin',
         ],
       },
     ]);
@@ -124,7 +162,14 @@ describe('fetchGitSources', () => {
 
     expect(calls).toEqual([
       {
-        args: ['-C', targetPath, 'for-each-ref', '--format=%(refname) %(objectname)'],
+        args: [
+          '-C',
+          targetPath,
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/heads',
+          'refs/tags',
+        ],
       },
       {
         args: [
@@ -137,10 +182,37 @@ describe('fetchGitSources', () => {
         ],
       },
       {
-        args: ['-C', targetPath, 'remote', 'update', '--prune'],
+        args: [
+          '-C',
+          targetPath,
+          'config',
+          '--replace-all',
+          'remote.origin.fetch',
+          '+refs/heads/*:refs/heads/*',
+        ],
       },
       {
-        args: ['-C', targetPath, 'for-each-ref', '--format=%(refname) %(objectname)'],
+        args: [
+          '-C',
+          targetPath,
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*',
+        ],
+      },
+      {
+        args: ['-C', targetPath, 'fetch', '--prune', 'origin'],
+      },
+      {
+        args: [
+          '-C',
+          targetPath,
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/heads',
+          'refs/tags',
+        ],
       },
     ]);
     expect(report).toMatchObject({
@@ -198,10 +270,48 @@ describe('fetchGitSources', () => {
     expect(calls).toEqual([
       {
         args: [
-          'clone',
-          '--mirror',
-          'https://github.com/owner/repo.git',
+          'init',
+          '--bare',
           path.join(mirrorsDir, 'github.com/owner/repo.git'),
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(mirrorsDir, 'github.com/owner/repo.git'),
+          'remote',
+          'add',
+          'origin',
+          'https://github.com/owner/repo.git',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(mirrorsDir, 'github.com/owner/repo.git'),
+          'config',
+          '--replace-all',
+          'remote.origin.fetch',
+          '+refs/heads/*:refs/heads/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(mirrorsDir, 'github.com/owner/repo.git'),
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(mirrorsDir, 'github.com/owner/repo.git'),
+          'fetch',
+          '--prune',
+          'origin',
         ],
       },
     ]);

@@ -305,8 +305,11 @@ airgap-sync git fetch ./airgap-bundle --mirrors-dir ./git-mirrors
 
 Reads `git-sources.json` and stores local bare mirror repositories using preserved
 source paths such as `git-mirrors/github.com/antvis/G2.git`. Missing mirrors are
-created with `git clone --mirror`; existing mirrors run `git remote set-url origin` and
-`git remote update --prune`. The command writes `git-fetch-report.json`.
+created as bare repositories and fetched through explicit branch/tag refspecs.
+Existing mirrors run `git remote set-url origin` and `git fetch --prune origin` for
+`refs/heads/*` and `refs/tags/*`. Provider-specific refs such as GitHub pull-request
+refs are intentionally not downloaded into new mirrors. The command writes
+`git-fetch-report.json`.
 
 This is the online-side download step only. It does not push to Gitea; that belongs
 to a later offline publish command.

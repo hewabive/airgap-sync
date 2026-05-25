@@ -74,7 +74,7 @@ closed network
 
 The Git side should use standard Git primitives where possible:
 
-- `git clone --mirror` / `git fetch --all` for local mirrors;
+- bare local mirrors fetched through explicit branch/tag refspecs;
 - branch/tag refspec pushes into Gitea;
 - `git bundle` for auditable file-based transfer when a Git server is not available.
 

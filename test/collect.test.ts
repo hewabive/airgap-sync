@@ -268,7 +268,7 @@ describe('collectBundle', () => {
       root: tempDir,
       async runGitCommand(invocation): Promise<undefined> {
         gitCalls.push(invocation);
-        if (invocation.args[0] === 'clone') {
+        if (invocation.args[0] === 'init') {
           await fs.ensureDir(invocation.args.at(-1) ?? '');
         }
         return undefined;
@@ -311,10 +311,48 @@ describe('collectBundle', () => {
     expect(gitCalls).toEqual([
       {
         args: [
-          'clone',
-          '--mirror',
-          'https://github.com/owner/repo.git',
+          'init',
+          '--bare',
           path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'remote',
+          'add',
+          'origin',
+          'https://github.com/owner/repo.git',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'config',
+          '--replace-all',
+          'remote.origin.fetch',
+          '+refs/heads/*:refs/heads/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'fetch',
+          '--prune',
+          'origin',
         ],
       },
       {
@@ -323,6 +361,8 @@ describe('collectBundle', () => {
           path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
           'for-each-ref',
           '--format=%(refname) %(objectname)',
+          'refs/heads',
+          'refs/tags',
         ],
       },
       {
@@ -339,9 +379,29 @@ describe('collectBundle', () => {
         args: [
           '-C',
           path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
-          'remote',
-          'update',
+          'config',
+          '--replace-all',
+          'remote.origin.fetch',
+          '+refs/heads/*:refs/heads/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*',
+        ],
+      },
+      {
+        args: [
+          '-C',
+          path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
+          'fetch',
           '--prune',
+          'origin',
         ],
       },
       {
@@ -350,6 +410,8 @@ describe('collectBundle', () => {
           path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/owner/repo.git'),
           'for-each-ref',
           '--format=%(refname) %(objectname)',
+          'refs/heads',
+          'refs/tags',
         ],
       },
     ]);
@@ -425,7 +487,7 @@ describe('collectBundle', () => {
       registryUrl: 'https://registry.example',
       async runGitCommand(invocation): Promise<undefined> {
         gitCalls.push(invocation);
-        if (invocation.args[0] === 'clone') {
+        if (invocation.args[0] === 'init') {
           await fs.ensureDir(invocation.args.at(-1) ?? '');
           return undefined;
         }
@@ -486,9 +548,8 @@ describe('collectBundle', () => {
     });
     expect(gitCalls[0]).toEqual({
       args: [
-        'clone',
-        '--mirror',
-        'https://github.com/acme/app.git',
+        'init',
+        '--bare',
         path.join(tempDir, 'airgap-bundle/git-mirrors/github.com/acme/app.git'),
       ],
     });
@@ -621,14 +682,18 @@ describe('collectBundle', () => {
       },
     });
     expect(gitCalls.map((call) => call.args.join(' '))).toEqual([
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
       `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
-      `-C ${mirrorPath} remote update --prune`,
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
+      `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
+      `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
+      `-C ${mirrorPath} fetch --prune origin`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
       `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
-      `-C ${mirrorPath} remote update --prune`,
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname)`,
+      `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
+      `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
+      `-C ${mirrorPath} fetch --prune origin`,
+      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
     ]);
   });
 
