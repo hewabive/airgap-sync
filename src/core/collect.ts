@@ -54,10 +54,12 @@ export interface CollectBundleOptions {
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   registryUrl: string;
+  retryDelaysMs?: number[];
   root?: string;
   runGitCommand?: GitCommandRunner;
   runGitOutputCommand?: GitOutputCommandRunner;
   tagResolutionPolicy?: TagResolutionPolicy;
+  tarballTimeoutMs?: number;
 }
 
 export type CollectProgressPhase =
@@ -407,6 +409,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       includePeer,
       latestPolicy: options.latestPolicy ?? 'bundled',
       rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
+      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       onProgress: (event: FetchProgressEvent) => {
         const detail = [event.phase, event.package].filter(Boolean).join(' ');
         options.onProgress?.({
@@ -423,6 +426,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       stableRequiredBy,
       stableTagResolutions,
       tagResolutionPolicy,
+      ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
       gitRequirements: state.gitRequirements,
       requirements: state.requirements,
       unsupported: state.unsupported,

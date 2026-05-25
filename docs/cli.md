@@ -99,7 +99,9 @@ airgap-sync download ./repos \
   --latest-policy bundled \
   --tag-resolution-policy reuse-stable \
   --range-resolution-policy reuse-stable \
-  --concurrency 16 \
+  --concurrency 8 \
+  --registry-timeout-ms 120000 \
+  --tarball-timeout-ms 300000 \
   --prune \
   --output ./airgap-bundle
 ```
@@ -140,7 +142,13 @@ Verdaccio updates. If the same registry is updated through other paths or indepe
 generated bundles, prefer `refresh` policies; reused dependency tags are restored
 strictly and can move shared registry tags backward.
 
-`--concurrency` controls parallel npm resolve/download workers. The default is `16`.
+`--concurrency` controls parallel npm resolve/download workers. The default is `8`.
+Use a lower value such as `4` on slow removable media or unstable network links.
+
+`--registry-timeout-ms` controls npm metadata request timeout. The default is 60000.
+`--tarball-timeout-ms` controls tarball download timeout. The default is 180000.
+`--retry-delays-ms` can override transient network retry delays, for example
+`--retry-delays-ms 1000,5000,15000,60000`.
 
 `--prune` removes stale local bundle objects after a successful fixed-point download.
 It deletes npm tarballs not referenced by the new `seed-manifest.json` and Git mirrors
@@ -206,6 +214,11 @@ Supported options:
 --range-resolution-policy <policy>
                           Range dependency policy: reuse-stable or refresh
 --concurrency <number>    Concurrent registry and download operations
+--registry-timeout-ms <ms>
+                          Timeout for npm registry metadata requests
+--tarball-timeout-ms <ms>
+                          Timeout for npm tarball downloads
+--retry-delays-ms <list>  Comma-separated retry delays for transient network errors
 --dry-run                 Resolve and report without downloading
 ```
 
@@ -216,7 +229,7 @@ transitive dependencies and publish-time `latest` targets required by the select
 latest policy, but reads package manifests from registry metadata without downloading
 tarballs.
 
-`--concurrency` controls parallel npm resolve/download workers. The default is `16`.
+`--concurrency` controls parallel npm resolve/download workers. The default is `8`.
 
 When `--manifest` points at a package.json, the containing directory is treated as the
 scan root. When it points at a directory, that directory is the scan root. Nested

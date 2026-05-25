@@ -17,7 +17,6 @@ import type {
 import type { RegistryClient } from './registry.js';
 import { resolveRootRequirements } from './resolver.js';
 import * as fs from './fs.js';
-import { isRetryableFetchError, retry } from './retry.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import {
   type DownloadedTarball,
@@ -40,9 +39,11 @@ export interface FetchSeedBundleOptions {
   outputDir: string;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
+  retryDelaysMs?: number[];
   stableRequiredBy?: Set<string>;
   stableTagResolutions?: StableTagResolutionIndex;
   tagResolutionPolicy?: TagResolutionPolicy;
+  tarballTimeoutMs?: number;
   gitRequirements?: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported?: UnsupportedRootPackageRequirement[];
@@ -224,7 +225,7 @@ export async function fetchSeedBundle(
   const latestPolicy = options.latestPolicy ?? 'bundled';
   const rangeResolutionPolicy = options.rangeResolutionPolicy ?? 'reuse-stable';
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
-  const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
+  const concurrency = Math.max(1, Math.floor(options.concurrency ?? 8));
   const stableTagRequirements = new Map<string, TagRequirement>();
   const stablePackageIds = options.stableTagResolutions?.packageIds ?? new Set<string>();
   const stableRequiredBy = new Set([...(options.stableRequiredBy ?? []), ...stablePackageIds]);
@@ -395,17 +396,17 @@ export async function fetchSeedBundle(
       manifest = manifestFromResolvedPackage(resolved);
 
       if (!alreadyResolved && shouldDownload) {
-        const fetched = await retry(
-          async (): Promise<DownloadedTarball> => {
-            const downloadStart = performance.now();
-            const downloadedTarball = await downloadResolvedPackage(resolved, options.outputDir, {
-              existingPackageFiles,
-            });
-            timings.downloadMs += elapsedMs(downloadStart);
-            return downloadedTarball;
-          },
-          { isRetryable: isRetryableFetchError }
+        const downloadStart = performance.now();
+        const fetched: DownloadedTarball = await downloadResolvedPackage(
+          resolved,
+          options.outputDir,
+          {
+            existingPackageFiles,
+            ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+            ...(options.tarballTimeoutMs ? { timeoutMs: options.tarballTimeoutMs } : {}),
+          }
         );
+        timings.downloadMs += elapsedMs(downloadStart);
 
         if (fetched.skipped) {
           result.skipped++;

@@ -97,7 +97,10 @@ interface FetchOptions {
   output: string;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: string;
+  registryTimeoutMs?: number;
+  retryDelaysMs?: number[];
   tagResolutionPolicy?: TagResolutionPolicy;
+  tarballTimeoutMs?: number;
 }
 
 interface PublishOptions {
@@ -146,7 +149,10 @@ interface CollectOptions {
   prune?: boolean;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry?: string;
+  registryTimeoutMs?: number;
+  retryDelaysMs?: number[];
   tagResolutionPolicy?: TagResolutionPolicy;
+  tarballTimeoutMs?: number;
 }
 
 interface BundlePruneOptions {
@@ -176,6 +182,20 @@ function parsePositiveInteger(value: string): number {
     throw new Error(`Expected a positive integer, got: ${value}`);
   }
   return parsed;
+}
+
+function parseRetryDelaysMs(value: string): number[] {
+  const delays = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map(parsePositiveInteger);
+
+  if (delays.length === 0) {
+    throw new Error(`Expected at least one retry delay, got: ${value}`);
+  }
+
+  return delays;
 }
 
 function parseLatestPolicy(value: string): LatestPolicy {
@@ -1796,7 +1816,22 @@ program
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
-    16
+    8
+  )
+  .option(
+    '--registry-timeout-ms <ms>',
+    'Timeout for npm registry metadata requests',
+    parsePositiveInteger
+  )
+  .option(
+    '--tarball-timeout-ms <ms>',
+    'Timeout for npm tarball downloads',
+    parsePositiveInteger
+  )
+  .option(
+    '--retry-delays-ms <list>',
+    'Comma-separated retry delays for transient network errors',
+    parseRetryDelaysMs
   )
   .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
   .option('--prune', 'Remove stale tarballs and Git mirrors after a successful download')
@@ -1825,7 +1860,12 @@ program
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
-        const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
+        const registry = new CachedRegistryClient(
+          new HttpRegistryClient(registryUrl, {
+            ...(options.registryTimeoutMs ? { timeoutMs: options.registryTimeoutMs } : {}),
+            ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+          })
+        );
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
         const report = await collectBundle({
@@ -1839,7 +1879,9 @@ program
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
           rangeResolutionPolicy,
+          ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
           tagResolutionPolicy,
+          ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
           onProgress: createCollectProgressLogger(),
           outputDir,
           registry,
@@ -1900,7 +1942,12 @@ program
 
       const registryUrl = options.registry ?? defaultWorkspaceSourceRegistry;
       const outputDir = options.output ?? './airgap-bundle';
-      const registry = new CachedRegistryClient(new HttpRegistryClient(registryUrl));
+      const registry = new CachedRegistryClient(
+        new HttpRegistryClient(registryUrl, {
+          ...(options.registryTimeoutMs ? { timeoutMs: options.registryTimeoutMs } : {}),
+          ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+        })
+      );
       const beforeState =
         options.dryRun === true ? undefined : await captureBundleState(outputDir);
       const report = await collectBundle({
@@ -1910,7 +1957,9 @@ program
         includePeer: options.includePeer === true,
         latestPolicy: options.latestPolicy ?? 'bundled',
         rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
+        ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
+        ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
         onProgress: createCollectProgressLogger(),
         outputDir,
         registry,
@@ -1983,7 +2032,22 @@ program
     '--concurrency <count>',
     'Parallel npm resolve/download workers',
     parsePositiveInteger,
-    16
+    8
+  )
+  .option(
+    '--registry-timeout-ms <ms>',
+    'Timeout for npm registry metadata requests',
+    parsePositiveInteger
+  )
+  .option(
+    '--tarball-timeout-ms <ms>',
+    'Timeout for npm tarball downloads',
+    parsePositiveInteger
+  )
+  .option(
+    '--retry-delays-ms <list>',
+    'Comma-separated retry delays for transient network errors',
+    parseRetryDelaysMs
   )
   .option('--dry-run', 'Resolve and report without downloading')
   .action(async (specs: string[], options: FetchOptions) => {
@@ -2014,7 +2078,12 @@ program
       return;
     }
 
-    const registry = new CachedRegistryClient(new HttpRegistryClient(options.registry));
+    const registry = new CachedRegistryClient(
+      new HttpRegistryClient(options.registry, {
+        ...(options.registryTimeoutMs ? { timeoutMs: options.registryTimeoutMs } : {}),
+        ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+      })
+    );
     const stableTagResolutions = await readStableTagResolutionIndex(options.output);
 
     if (options.dryRun) {
@@ -2026,8 +2095,10 @@ program
         outputDir: options.output,
         rangeResolutionPolicy,
         registry,
+        ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         stableTagResolutions,
         tagResolutionPolicy,
+        ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
         gitRequirements,
         requirements,
         unsupported,
@@ -2046,8 +2117,10 @@ program
       outputDir: options.output,
       rangeResolutionPolicy,
       registry,
+      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       stableTagResolutions,
       tagResolutionPolicy,
+      ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
       gitRequirements,
       requirements,
       unsupported,

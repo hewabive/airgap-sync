@@ -11,7 +11,7 @@ interface RetryEvent {
   nextAttempt: number;
 }
 
-const defaultRetryDelaysMs = [1_000, 2_000, 5_000];
+const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 function isErrorWithName(error: unknown, name: string): boolean {
   return error instanceof Error && error.name === name;

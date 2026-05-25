@@ -18,6 +18,8 @@ export interface DownloadedTarball {
 
 export interface DownloadResolvedPackageOptions {
   existingPackageFiles?: Set<string>;
+  retryDelaysMs?: number[];
+  timeoutMs?: number;
 }
 
 export async function downloadResolvedPackage(
@@ -28,6 +30,7 @@ export async function downloadResolvedPackage(
   const file = packageFileName(pkg.name, pkg.version);
   const packageDir = path.join(outputDir, 'packages');
   const outputPath = path.join(packageDir, file);
+  const timeoutMs = options.timeoutMs ?? 180_000;
 
   const knownPackageFiles = options.existingPackageFiles;
   const alreadyExists = knownPackageFiles
@@ -52,7 +55,7 @@ export async function downloadResolvedPackage(
     await retry(
       async () => {
         const tarballResponse = await fetch(pkg.dist.tarball, {
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(timeoutMs),
         });
 
         if (tarballResponse.status !== 200) {
@@ -75,7 +78,10 @@ export async function downloadResolvedPackage(
           throw error;
         }
       },
-      { isRetryable: isRetryableFetchError }
+      {
+        ...(options.retryDelaysMs ? { delaysMs: options.retryDelaysMs } : {}),
+        isRetryable: isRetryableFetchError,
+      }
     );
   } finally {
     await fs.remove(tempDir);

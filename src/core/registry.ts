@@ -14,6 +14,7 @@ export interface RegistryClient {
 
 export interface HttpRegistryClientOptions {
   authToken?: string;
+  retryDelaysMs?: number[];
   timeoutMs?: number;
 }
 
@@ -56,12 +57,14 @@ export function isBlockedPublishRegistry(registryUrl: string): boolean {
 export class HttpRegistryClient implements RegistryClient {
   readonly #registryUrl: string;
   readonly #authToken: string | undefined;
+  readonly #retryDelaysMs: number[] | undefined;
   readonly #timeoutMs: number;
 
   constructor(registryUrl: string, options: HttpRegistryClientOptions = {}) {
     this.#registryUrl = registryUrl.replace(/\/$/, '');
     this.#authToken = options.authToken;
-    this.#timeoutMs = options.timeoutMs ?? 30_000;
+    this.#retryDelaysMs = options.retryDelaysMs;
+    this.#timeoutMs = options.timeoutMs ?? 60_000;
   }
 
   async getPackageMetadata(name: string): Promise<PackageMetadata> {
@@ -89,7 +92,10 @@ export class HttpRegistryClient implements RegistryClient {
 
         return metadataResponse;
       },
-      { isRetryable: isRetryableFetchError }
+      {
+        ...(this.#retryDelaysMs ? { delaysMs: this.#retryDelaysMs } : {}),
+        isRetryable: isRetryableFetchError,
+      }
     );
 
     return (await response.json()) as PackageMetadata;
