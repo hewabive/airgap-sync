@@ -427,6 +427,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     timings.fetchIterationsMs += fetchMs;
     fetch = createFetchReport({
       downloaded: resolution.downloaded,
+      downloadedPackages: resolution.downloadedPackages,
       errors: resolution.errors,
       generatedAt,
       gitRequirements: resolution.gitRequirements,
@@ -434,6 +435,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       skipped: resolution.skipped,
       timings: resolution.timings,
       unsupported: resolution.unsupported,
+      wouldDownloadPackages: resolution.wouldDownloadPackages,
     });
     gitSources = createGitSourcesManifest(resolution.gitRequirements, {
       createdAt: generatedAt,

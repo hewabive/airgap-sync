@@ -331,8 +331,18 @@ export interface FetchTimings {
   totalMs: number;
 }
 
+export interface FetchPackageAction extends PackageIdentity {
+  file: string;
+  raw: string;
+  requiredBy: string;
+  resolvedVia: Exclude<SupportedSpecType, 'alias'>;
+  specifier: string;
+  type: SupportedSpecType;
+}
+
 export interface FetchReport {
   downloaded: number;
+  downloadedPackages: FetchPackageAction[];
   errors: ResolutionError[];
   generatedAt: string;
   gitRequirements: GitRequirement[];
@@ -340,6 +350,7 @@ export interface FetchReport {
   skipped: number;
   timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
+  wouldDownloadPackages: FetchPackageAction[];
 }
 
 export interface PackageManifest {

@@ -163,6 +163,7 @@ describe('createFetchReport', () => {
       })
     ).toEqual({
       downloaded: 1,
+      downloadedPackages: [],
       errors: [],
       generatedAt: '2026-05-20T00:00:00.000Z',
       gitRequirements: [],
@@ -176,6 +177,7 @@ describe('createFetchReport', () => {
         totalMs: 0,
       },
       unsupported: [],
+      wouldDownloadPackages: [],
     });
   });
 });

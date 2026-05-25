@@ -59,6 +59,7 @@ const distTags: DistTagsManifest = {
 
 const fetchReport: FetchReport = {
   downloaded: 1,
+  downloadedPackages: [],
   errors: [],
   generatedAt: '2026-05-21T00:01:00.000Z',
   gitRequirements: [],
@@ -72,6 +73,7 @@ const fetchReport: FetchReport = {
     totalMs: 0,
   },
   unsupported: [],
+  wouldDownloadPackages: [],
 };
 
 const workspaceSnapshot: WorkspaceSnapshot = {

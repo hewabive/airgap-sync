@@ -262,6 +262,11 @@ describe('fetchSeedBundle', () => {
     expect(result.downloaded).toBe(0);
     expect(result.skipped).toBe(0);
     expect(result.wouldDownload).toBe(3);
+    expect(result.wouldDownloadPackages.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'demo@2.0.0',
+      'dep@1.0.0',
+    ]);
     expect(result.tagRequirements).toEqual([
       {
         name: 'demo',

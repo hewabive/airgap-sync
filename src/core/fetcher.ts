@@ -5,6 +5,7 @@ import type {
   GitRequirement,
   LatestPolicy,
   PackageManifest,
+  FetchPackageAction,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
   RootPackageRequirement,
@@ -22,6 +23,7 @@ import {
   dependencySpecsFromManifest,
   downloadResolvedPackage,
 } from './tarball.js';
+import { packageFileName } from './files.js';
 import { stableTagRequirement, type StableTagResolutionIndex } from './tag-resolution.js';
 
 export interface FetchSeedBundleOptions {
@@ -53,15 +55,33 @@ export interface FetchProgressEvent {
 
 export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
   downloaded: number;
+  downloadedPackages: FetchPackageAction[];
   gitRequirements: GitRequirement[];
   skipped: number;
   timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
   wouldDownload: number;
+  wouldDownloadPackages: FetchPackageAction[];
 }
 
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
+}
+
+function fetchPackageAction(
+  pkg: ResolvedRootPackage,
+  file = path.posix.join('packages', packageFileName(pkg.name, pkg.version))
+): FetchPackageAction {
+  return {
+    file,
+    name: pkg.name,
+    raw: pkg.raw,
+    requiredBy: pkg.requiredBy,
+    resolvedVia: pkg.resolvedVia,
+    specifier: pkg.specifier,
+    type: pkg.type,
+    version: pkg.version,
+  };
 }
 
 function comparePackageIdentity(
@@ -209,6 +229,7 @@ export async function fetchSeedBundle(
     : new Set<string>();
   const result: FetchSeedBundleResult = {
     downloaded: 0,
+    downloadedPackages: [],
     skipped: 0,
     resolved: [],
     errors: [],
@@ -217,6 +238,7 @@ export async function fetchSeedBundle(
     timings,
     unsupported: [...(options.unsupported ?? [])],
     wouldDownload: 0,
+    wouldDownloadPackages: [],
   };
   let activeWorkers = 0;
   let drainResolved = false;
@@ -359,6 +381,7 @@ export async function fetchSeedBundle(
           result.skipped++;
         } else {
           result.downloaded++;
+          result.downloadedPackages.push(fetchPackageAction(resolved, fetched.file));
         }
         options.onProgress?.({
           current: result.downloaded + result.skipped,
@@ -369,6 +392,7 @@ export async function fetchSeedBundle(
         });
       } else {
         result.wouldDownload++;
+        result.wouldDownloadPackages.push(fetchPackageAction(resolved));
       }
 
       if (scannedPackages.has(id)) {
@@ -475,6 +499,8 @@ export async function fetchSeedBundle(
   });
 
   result.resolved.sort(comparePackageIdentity);
+  result.downloadedPackages.sort(comparePackageIdentity);
+  result.wouldDownloadPackages.sort(comparePackageIdentity);
   result.tagRequirements.sort(compareTagRequirement);
   result.gitRequirements.sort(compareGitRequirement);
   result.unsupported.sort(compareUnsupportedRequirement);

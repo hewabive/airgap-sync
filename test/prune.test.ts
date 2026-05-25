@@ -47,6 +47,7 @@ function collectReport(overrides: Partial<CollectReport> = {}): CollectReport {
     dryRun: false,
     fetch: {
       downloaded: 1,
+      downloadedPackages: [],
       errors: [],
       generatedAt,
       gitRequirements: [],
@@ -60,6 +61,7 @@ function collectReport(overrides: Partial<CollectReport> = {}): CollectReport {
         totalMs: 0,
       },
       unsupported: [],
+      wouldDownloadPackages: [],
     },
     fixedPoint: true,
     generatedAt,

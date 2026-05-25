@@ -6,6 +6,7 @@ import type {
   CollectReport,
   DistTagsManifest,
   FetchReport,
+  FetchPackageAction,
   FetchTimings,
   GiteaRepositoryProvisionReport,
   GitApplyReport,
@@ -41,6 +42,7 @@ export interface BundleDocuments {
 
 export interface FetchReportOptions {
   downloaded: number;
+  downloadedPackages?: FetchPackageAction[];
   errors: ResolutionError[];
   generatedAt?: string;
   gitRequirements: GitRequirement[];
@@ -48,6 +50,7 @@ export interface FetchReportOptions {
   skipped: number;
   timings?: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
+  wouldDownloadPackages?: FetchPackageAction[];
 }
 
 function isArtificialSourceLatestRequirement(requirement: TagRequirement): boolean {
@@ -112,6 +115,7 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
 export function createFetchReport(options: FetchReportOptions): FetchReport {
   return {
     downloaded: options.downloaded,
+    downloadedPackages: options.downloadedPackages ?? [],
     errors: options.errors,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     gitRequirements: options.gitRequirements,
@@ -125,6 +129,7 @@ export function createFetchReport(options: FetchReportOptions): FetchReport {
       totalMs: 0,
     },
     unsupported: options.unsupported,
+    wouldDownloadPackages: options.wouldDownloadPackages ?? [],
   };
 }
 

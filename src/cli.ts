@@ -1935,12 +1935,14 @@ program
         options.output,
         createFetchReport({
           downloaded: resolution.downloaded,
+          downloadedPackages: resolution.downloadedPackages,
           errors: resolution.errors,
           gitRequirements: resolution.gitRequirements,
           resolved: resolution.resolved.length,
           skipped: resolution.skipped,
           timings: resolution.timings,
           unsupported: resolution.unsupported,
+          wouldDownloadPackages: resolution.wouldDownloadPackages,
         })
       );
 
