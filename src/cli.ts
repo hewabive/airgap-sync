@@ -42,6 +42,7 @@ import {
   readWorkspaceSecrets,
   removeWorkspaceTarget,
   saveWorkspaceGiteaToken,
+  selectWorkspaceTargets,
   updateRepositories,
   verifyBundle,
   verifyInstall,
@@ -155,6 +156,7 @@ interface CollectOptions {
   registryTimeoutMs?: number;
   retryDelaysMs?: number[];
   tagResolutionPolicy?: TagResolutionPolicy;
+  target?: number[];
   tarballTimeoutMs?: number;
 }
 
@@ -199,6 +201,10 @@ function parseRetryDelaysMs(value: string): number[] {
   }
 
   return delays;
+}
+
+function collectNumbers(value: string, previous: number[]): number[] {
+  return [...previous, parsePositiveInteger(value)];
 }
 
 function parseLatestPolicy(value: string): LatestPolicy {
@@ -1215,6 +1221,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('2. Add Git target');
     console.log('3. Add npm target');
     console.log('4. Remove target');
+    console.log('5. Download selected target');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -1255,6 +1262,14 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         const index = await ask(rl, 'Target index to remove');
         if (index) {
           await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
+        }
+        break;
+      }
+      case '5': {
+        await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+        const index = await ask(rl, 'Target index to download');
+        if (index) {
+          await runSelfCommand(['download', '--target', index], workspaceDir);
         }
         break;
       }
@@ -1870,6 +1885,12 @@ program
   )
   .option('--tarball-timeout-ms <ms>', 'Timeout for npm tarball downloads', parsePositiveInteger)
   .option(
+    '--target <index>',
+    'Only download the selected workspace target by one-based target list index; repeatable',
+    collectNumbers,
+    []
+  )
+  .option(
     '--retry-delays-ms <list>',
     'Comma-separated retry delays for transient network errors',
     parseRetryDelaysMs
@@ -1882,10 +1903,27 @@ program
       if (!root) {
         const workspaceDir = process.cwd();
         const config = await readWorkspaceConfig(workspaceDir);
+        const targetSelection =
+          options.target && options.target.length > 0
+            ? selectWorkspaceTargets(config, options.target)
+            : undefined;
+        const activeConfig = targetSelection?.config ?? config;
+        if (targetSelection) {
+          console.error(
+            `[download] selected targets: ${targetSelection.selectedIndexes.join(', ')}`
+          );
+          if (options.prune === true || config.defaults.download.prune === true) {
+            console.error(
+              '[download] prune skipped: --target downloads do not prune shared bundles'
+            );
+          }
+        }
         const parsedTargets = parseRootSpecs(
-          config.targets.filter((target) => target.type === 'npm').map((target) => target.spec)
+          activeConfig.targets
+            .filter((target) => target.type === 'npm')
+            .map((target) => target.spec)
         );
-        const gitTargets = createWorkspaceGitSources(config);
+        const gitTargets = createWorkspaceGitSources(activeConfig);
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
@@ -1897,7 +1935,8 @@ program
           options.rangeResolutionPolicy ?? config.defaults.download.rangeResolutionPolicy;
         const tagResolutionPolicy =
           options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
-        const prune = options.prune === true || config.defaults.download.prune === true;
+        const prune =
+          !targetSelection && (options.prune === true || config.defaults.download.prune === true);
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -1930,7 +1969,7 @@ program
         });
         const workspaceSnapshot = createWorkspaceSnapshot({
           config: {
-            ...config,
+            ...activeConfig,
             output: snapshotOutput,
             sourceRegistry: registryUrl,
           },

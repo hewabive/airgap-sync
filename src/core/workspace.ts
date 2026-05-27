@@ -93,6 +93,12 @@ export interface CreateWorkspaceSnapshotOptions {
   createdAt?: string;
 }
 
+export interface SelectWorkspaceTargetsResult {
+  config: WorkspaceConfig;
+  selectedIndexes: number[];
+  selectedTargets: WorkspaceTarget[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -393,6 +399,39 @@ export async function removeWorkspaceTarget(
   }
   await writeWorkspaceConfig(workspaceDir, config);
   return { config, removed };
+}
+
+export function selectWorkspaceTargets(
+  config: WorkspaceConfig,
+  indexes: number[]
+): SelectWorkspaceTargetsResult {
+  const selectedIndexes: number[] = [];
+  const selectedTargets: WorkspaceTarget[] = [];
+  const seen = new Set<number>();
+
+  for (const index of indexes) {
+    if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
+      throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+    }
+    if (seen.has(index)) {
+      continue;
+    }
+    seen.add(index);
+    selectedIndexes.push(index);
+    const target = config.targets[index - 1];
+    if (target) {
+      selectedTargets.push(target);
+    }
+  }
+
+  return {
+    config: {
+      ...config,
+      targets: selectedTargets,
+    },
+    selectedIndexes,
+    selectedTargets,
+  };
 }
 
 export function createWorkspaceGitSources(config: WorkspaceConfig): GitSource[] {

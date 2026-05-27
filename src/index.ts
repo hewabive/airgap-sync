@@ -72,6 +72,7 @@ export {
   readWorkspaceSecrets,
   removeWorkspaceTarget,
   saveWorkspaceGiteaToken,
+  selectWorkspaceTargets,
   workspaceConfigFileName,
   workspaceConfigPath,
   workspaceSecretsFileName,
@@ -177,6 +178,7 @@ export type {
   WorkspaceSnapshot,
   WorkspaceTarget,
   WorkspaceTargetSnapshot,
+  SelectWorkspaceTargetsResult,
 } from './core/workspace.js';
 
 export type { DownloadedTarball } from './core/tarball.js';

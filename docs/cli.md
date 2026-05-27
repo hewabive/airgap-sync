@@ -92,6 +92,9 @@ authentication failures are reported without automatic repair.
 ```bash
 airgap-sync download
 
+airgap-sync download --target 2
+airgap-sync download --target 2 --target 5
+
 # Lower-level mode without airgap-sync.json:
 airgap-sync download ./repos \
   --registry https://registry.npmjs.org \
@@ -114,6 +117,11 @@ clones or updates Git dependency mirrors, scans package manifests and lockfiles 
 those mirrors, and repeats until no new npm or Git inputs are found. It also writes
 `workspace-snapshot.json` with the configured targets and their bundle-local mirror
 paths for later verification.
+
+Use `--target <index>` in workspace mode to download only selected targets from
+`airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
+extend the same bundle, but pruning is skipped even when `--prune` or a prune default
+is enabled, because other targets may still depend on existing bundle objects.
 
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.

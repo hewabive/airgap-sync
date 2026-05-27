@@ -72,7 +72,7 @@ Running `airgap-sync` without a subcommand opens the interactive menu. Use
 
 The menu covers the normal workflow:
 
-- **Targets**: add or remove Git repositories and npm package targets.
+- **Targets**: add, remove, or download one Git/npm target.
 - **Download updates**: run the online collection phase.
 - **Publish updates**: publish the bundle into the closed-network registry and Git host.
 - **Verify installs**: run package-manager installs for configured Git targets.
@@ -89,6 +89,7 @@ npm exec -- airgap-sync target add npm eslint@latest
 
 # Online machine.
 npm exec -- airgap-sync download --prune
+npm exec -- airgap-sync download --target 2
 npm exec -- airgap-sync verify ./airgap-bundle
 
 # Closed-network machine.

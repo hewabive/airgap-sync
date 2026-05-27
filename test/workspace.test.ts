@@ -12,6 +12,7 @@ import {
   readWorkspaceSecrets,
   removeWorkspaceTarget,
   saveWorkspaceGiteaToken,
+  selectWorkspaceTargets,
   workspaceSecretsFileName,
 } from '../src/core/workspace.js';
 
@@ -232,6 +233,66 @@ describe('workspace config', () => {
         target: true,
       },
     ]);
+  });
+
+  it('selects configured targets by one-based indexes', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.targets.push(
+      {
+        branch: 'main',
+        type: 'git',
+        url: 'https://github.com/acme/app.git',
+      },
+      {
+        spec: 'eslint@latest',
+        type: 'npm',
+      },
+      {
+        spec: 'typescript@latest',
+        type: 'npm',
+      }
+    );
+
+    expect(selectWorkspaceTargets(config, [2, 1, 2])).toEqual({
+      config: {
+        ...config,
+        targets: [
+          {
+            spec: 'eslint@latest',
+            type: 'npm',
+          },
+          {
+            branch: 'main',
+            type: 'git',
+            url: 'https://github.com/acme/app.git',
+          },
+        ],
+      },
+      selectedIndexes: [2, 1],
+      selectedTargets: [
+        {
+          spec: 'eslint@latest',
+          type: 'npm',
+        },
+        {
+          branch: 'main',
+          type: 'git',
+          url: 'https://github.com/acme/app.git',
+        },
+      ],
+    });
+  });
+
+  it('rejects target selections outside the configured range', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.targets.push({
+      spec: 'eslint@latest',
+      type: 'npm',
+    });
+
+    expect(() => selectWorkspaceTargets(config, [2])).toThrow(
+      'Target index must be between 1 and 1'
+    );
   });
 
   it('creates a portable workspace snapshot for later verification', async () => {

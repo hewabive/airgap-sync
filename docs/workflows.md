@@ -84,6 +84,17 @@ Refresh configured targets and download npm/Git dependency closure:
 airgap-sync download
 ```
 
+When only one configured application needs an urgent refresh, select its one-based
+target index from `airgap-sync target list`:
+
+```bash
+airgap-sync target list
+airgap-sync download --target 2
+```
+
+Partial target downloads update the shared bundle but skip pruning, even if pruning is
+enabled in defaults, so dependencies for other configured targets are not removed.
+
 The download step fetches configured Git targets as bare mirrors under
 `airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
 configured npm targets as root package specs, and writes the transfer bundle under
