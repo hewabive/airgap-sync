@@ -9,13 +9,33 @@ const cli = path.join(root, 'dist', 'cli.cjs');
 const gitCommand = process.platform === 'win32' ? 'git.exe' : 'git';
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
+async function runShell(commandLine, options = {}) {
+  await new Promise((resolve, reject) => {
+    console.error(`[update] ${commandLine}`);
+    const child = spawn(commandLine, {
+      cwd: root,
+      env: process.env,
+      shell: true,
+      stdio: 'inherit',
+      ...options,
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${commandLine} exited with code ${String(code)}`));
+    });
+  });
+}
+
 async function run(command, args, options = {}) {
   await new Promise((resolve, reject) => {
     console.error(`[update] ${command} ${args.join(' ')}`);
     const child = spawn(command, args, {
       cwd: root,
       env: process.env,
-      shell: process.platform === 'win32',
       stdio: 'inherit',
       ...options,
     });
@@ -30,10 +50,15 @@ async function run(command, args, options = {}) {
   });
 }
 
-await run(gitCommand, ['pull', '--ff-only']);
-await run(npmCommand, ['install']);
-await run(npmCommand, ['run', 'build']);
+if (process.platform === 'win32') {
+  await runShell(`${gitCommand} pull --ff-only`);
+  await runShell(`${npmCommand} install`);
+  await runShell(`${npmCommand} run build`);
+} else {
+  await run(gitCommand, ['pull', '--ff-only']);
+  await run(npmCommand, ['install']);
+  await run(npmCommand, ['run', 'build']);
+}
 await run(process.execPath, [cli, ...process.argv.slice(2)], {
   cwd: process.cwd(),
-  shell: false,
 });
