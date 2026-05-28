@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchSeedBundle } from '../src/core/fetcher.js';
+import { RegistryMetadataCache } from '../src/core/metadata-cache.js';
 import { stableRangeResolutionKey, stableTagResolutionKey } from '../src/core/tag-resolution.js';
 import type {
   PackageManifest,
@@ -650,6 +651,55 @@ describe('fetchSeedBundle', () => {
       'demo@1.0.0',
       'dep@1.0.0',
     ]);
+  });
+
+  it('resolves stable exact package versions from metadata cache', async () => {
+    const requestedNames: string[] = [];
+    const metadataCache = new RegistryMetadataCache({
+      schemaVersion: 1,
+      createdAt: '2026-05-28T00:00:00.000Z',
+      sourceRegistry: 'https://registry.example',
+      packages: {
+        'demo@1.0.0': {
+          name: 'demo',
+          version: '1.0.0',
+          dependencies: {
+            dep: '1.0.0',
+          },
+          dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+        },
+        'dep@1.0.0': {
+          name: 'dep',
+          version: '1.0.0',
+          dist: { tarball: 'https://registry.example/dep/-/dep-1.0.0.tgz' },
+        },
+      },
+    });
+
+    const result = await fetchSeedBundle({
+      download: false,
+      metadataCache,
+      outputDir: '/virtual/seed',
+      registry: {
+        getPackageMetadata(name) {
+          requestedNames.push(name);
+          throw new Error(`Unexpected registry lookup for ${name}`);
+        },
+      },
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0', 'dep@1.0.0']),
+        rangeVersions: new Map(),
+        tagVersions: new Map(),
+      },
+    });
+
+    expect(requestedNames).toEqual([]);
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'dep@1.0.0',
+    ]);
+    expect(result.timings.metadataCacheHits).toBe(2);
   });
 
   it('refreshes range dependencies when range resolution policy is refresh', async () => {

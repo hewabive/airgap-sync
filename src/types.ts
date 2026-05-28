@@ -291,6 +291,13 @@ export interface PackageMetadata {
   versions: Record<string, PackageVersionMetadata>;
 }
 
+export interface RegistryMetadataCacheManifest {
+  schemaVersion: 1;
+  createdAt: string;
+  sourceRegistry: string;
+  packages: Record<string, PackageVersionMetadata>;
+}
+
 export interface ResolvedRootPackage extends PackageIdentity {
   alias?: string;
   dependencies?: Record<string, string>;
@@ -328,6 +335,8 @@ export interface ResolvedPackage extends PackageIdentity {
 export interface FetchTimings {
   dependencyScanMs: number;
   downloadMs: number;
+  metadataCacheHits?: number;
+  metadataCacheWrites?: number;
   manifestReadMs: number;
   resolveMs: number;
   totalMs: number;

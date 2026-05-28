@@ -32,6 +32,7 @@ import { createGitSourcesManifest, writeGitSourcesManifest } from './git-sources
 import { gitSourceMirrorPath } from './git-targets.js';
 import { readLockfileRequirements } from './lockfiles.js';
 import { readManifestRequirements } from './manifests.js';
+import { readRegistryMetadataCache, writeRegistryMetadataCache } from './metadata-cache.js';
 import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
 import type { RepositoryUpdateProgressEvent } from './repos.js';
@@ -253,6 +254,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const maxIterations = options.maxIterations ?? 10;
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
+  const metadataCache = await readRegistryMetadataCache(outputDir);
   const stableRequiredBy = new Set<string>();
 
   const repositoryUpdateStart = performance.now();
@@ -423,6 +425,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       },
       outputDir,
       registry: options.registry,
+      metadataCache,
       stableRequiredBy,
       stableTagResolutions,
       tagResolutionPolicy,
@@ -612,6 +615,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         tagRequirements: resolution.tagRequirements,
       });
       await writeBundleDocuments(outputDir, documents);
+      await writeRegistryMetadataCache(outputDir, metadataCache, {
+        createdAt: generatedAt,
+        sourceRegistry: options.registryUrl,
+      });
       timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
       options.onProgress?.({
         current: documents.manifest.packages.length,

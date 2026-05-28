@@ -4,6 +4,7 @@ import type {
   FetchTimings,
   GitRequirement,
   LatestPolicy,
+  PackageMetadata,
   PackageManifest,
   FetchPackageAction,
   RangeResolutionPolicy,
@@ -15,6 +16,7 @@ import type {
   UnsupportedRootPackageRequirement,
 } from '../types.js';
 import type { RegistryClient } from './registry.js';
+import type { RegistryMetadataCache } from './metadata-cache.js';
 import { resolveRootRequirements } from './resolver.js';
 import * as fs from './fs.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
@@ -39,6 +41,7 @@ export interface FetchSeedBundleOptions {
   outputDir: string;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
+  metadataCache?: RegistryMetadataCache;
   retryDelaysMs?: number[];
   stableRequiredBy?: Set<string>;
   stableTagResolutions?: StableTagResolutionIndex;
@@ -174,6 +177,8 @@ function createFetchTimings(): FetchTimings {
   return {
     dependencyScanMs: 0,
     downloadMs: 0,
+    metadataCacheHits: 0,
+    metadataCacheWrites: 0,
     manifestReadMs: 0,
     resolveMs: 0,
     totalMs: 0,
@@ -197,6 +202,20 @@ function manifestFromResolvedPackage(pkg: ResolvedRootPackage): PackageManifest 
     name: pkg.name,
     version: pkg.version,
     ...(pkg.dependencies ? { dependencies: pkg.dependencies } : {}),
+    ...(pkg.optionalDependencies ? { optionalDependencies: pkg.optionalDependencies } : {}),
+    ...(pkg.peerDependencies ? { peerDependencies: pkg.peerDependencies } : {}),
+    ...(pkg.peerDependenciesMeta ? { peerDependenciesMeta: pkg.peerDependenciesMeta } : {}),
+  };
+}
+
+function metadataFromResolvedPackage(
+  pkg: ResolvedRootPackage
+): PackageMetadata['versions'][string] {
+  return {
+    name: pkg.name,
+    version: pkg.version,
+    ...(pkg.dependencies ? { dependencies: pkg.dependencies } : {}),
+    dist: pkg.dist,
     ...(pkg.optionalDependencies ? { optionalDependencies: pkg.optionalDependencies } : {}),
     ...(pkg.peerDependencies ? { peerDependencies: pkg.peerDependencies } : {}),
     ...(pkg.peerDependenciesMeta ? { peerDependenciesMeta: pkg.peerDependenciesMeta } : {}),
@@ -321,6 +340,43 @@ export async function fetchSeedBundle(
   function enqueueRequirement(requirement: RootPackageRequirement): void {
     queue.push(rewriteStableRequirement(requirement));
     scheduleWorkers();
+  }
+
+  function cachedResolvedPackage(
+    requirement: RootPackageRequirement
+  ): ResolvedRootPackage | undefined {
+    if (
+      !options.metadataCache ||
+      requirement.type !== 'version' ||
+      !stablePackageIds.has(packageId({ name: requirement.name, version: requirement.specifier }))
+    ) {
+      return undefined;
+    }
+
+    const metadata = options.metadataCache.get(requirement.name, requirement.specifier);
+    if (!metadata) {
+      return undefined;
+    }
+
+    timings.metadataCacheHits = (timings.metadataCacheHits ?? 0) + 1;
+    return {
+      name: requirement.name,
+      version: requirement.specifier,
+      ...(metadata.dependencies ? { dependencies: metadata.dependencies } : {}),
+      dist: metadata.dist,
+      ...(metadata.optionalDependencies
+        ? { optionalDependencies: metadata.optionalDependencies }
+        : {}),
+      ...(metadata.peerDependencies ? { peerDependencies: metadata.peerDependencies } : {}),
+      ...(metadata.peerDependenciesMeta
+        ? { peerDependenciesMeta: metadata.peerDependenciesMeta }
+        : {}),
+      raw: requirement.raw,
+      requiredBy: requirement.requiredBy,
+      resolvedVia: 'version',
+      specifier: requirement.specifier,
+      type: requirement.type,
+    };
   }
 
   function dequeueUnprocessedRequirement(): RootPackageRequirement | undefined {
@@ -481,6 +537,17 @@ export async function fetchSeedBundle(
 
   async function processRequirement(requirement: RootPackageRequirement): Promise<void> {
     try {
+      const cached = cachedResolvedPackage(requirement);
+      if (cached) {
+        const stableTag = stableTagRequirements.get(requirementId(requirement));
+        if (stableTag?.name === cached.name && stableTag.version === cached.version) {
+          addTagRequirement(stableTag);
+        }
+
+        await processResolvedPackage(cached);
+        return;
+      }
+
       const resolveStart = performance.now();
       const resolution = await resolveRootRequirements([requirement], options.registry);
       timings.resolveMs += elapsedMs(resolveStart);
@@ -496,6 +563,11 @@ export async function fetchSeedBundle(
 
       for (const tagRequirement of resolution.tagRequirements) {
         addTagRequirement(tagRequirement);
+      }
+
+      for (const resolved of resolution.resolved) {
+        options.metadataCache?.set(metadataFromResolvedPackage(resolved));
+        timings.metadataCacheWrites = (timings.metadataCacheWrites ?? 0) + 1;
       }
 
       const stableTag = stableTagRequirements.get(requirementId(requirement));

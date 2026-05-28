@@ -47,6 +47,11 @@ export {
 } from './core/git-sources.js';
 export { readBundleInfo } from './core/info.js';
 export { readManifestRequirements } from './core/manifests.js';
+export {
+  readRegistryMetadataCache,
+  RegistryMetadataCache,
+  writeRegistryMetadataCache,
+} from './core/metadata-cache.js';
 export { findGitRepositories, runGitOutputCommand, updateRepositories } from './core/repos.js';
 export {
   CachedRegistryClient,
@@ -221,6 +226,7 @@ export type {
   TagResolutionPolicy,
   PackageMetadata,
   PackageManifest,
+  RegistryMetadataCacheManifest,
   PackageVersionMetadata,
   ParseRootSpecsResult,
   PackageIdentity,

@@ -37,6 +37,7 @@ import {
   readManifestRequirements,
   readBundleManifest,
   readDistTagsManifest,
+  readRegistryMetadataCache,
   readStableTagResolutionIndex,
   readWorkspaceConfig,
   readWorkspaceSecrets,
@@ -53,6 +54,7 @@ import {
   writeGitConfigReport,
   writeGitFetchReport,
   writeGitSourcesManifest,
+  writeRegistryMetadataCache,
   writePublishReport,
   writePruneReport,
   writeWorkspaceSnapshot,
@@ -2153,6 +2155,7 @@ program
       })
     );
     const stableTagResolutions = await readStableTagResolutionIndex(options.output);
+    const metadataCache = await readRegistryMetadataCache(options.output);
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
@@ -2163,6 +2166,7 @@ program
         outputDir: options.output,
         rangeResolutionPolicy,
         registry,
+        metadataCache,
         ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         stableTagResolutions,
         tagResolutionPolicy,
@@ -2185,6 +2189,7 @@ program
       outputDir: options.output,
       rangeResolutionPolicy,
       registry,
+      metadataCache,
       ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       stableTagResolutions,
       tagResolutionPolicy,
@@ -2218,6 +2223,10 @@ program
           wouldDownloadPackages: resolution.wouldDownloadPackages,
         })
       );
+      await writeRegistryMetadataCache(options.output, metadataCache, {
+        createdAt: new Date().toISOString(),
+        sourceRegistry: options.registry,
+      });
 
       console.log(
         JSON.stringify(

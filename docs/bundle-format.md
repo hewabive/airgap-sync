@@ -9,6 +9,7 @@ airgap-bundle/
     scope__bar-2.0.0.tgz
   seed-manifest.json
   dist-tags.json
+  registry-metadata-cache.json
   workspace-snapshot.json
   fetch-report.json
   publish-report.json
@@ -88,6 +89,15 @@ mapped tarball.
   ]
 }
 ```
+
+## registry-metadata-cache.json
+
+Caches the registry metadata needed to traverse dependencies for package versions that
+are already present in the bundle. It is an optimization for repeated downloads: exact
+`package@version` requirements whose tarballs still exist can be resolved from this
+file instead of issuing another source-registry metadata request. Root tags and ranges,
+and refreshed transitive tags/ranges, still resolve through the source registry so normal
+update discovery is preserved.
 
 ## Reports
 
