@@ -118,7 +118,7 @@ interface ApplyOptions {
   configureGitGlobal?: boolean;
   distTagConcurrency: number;
   dryRun?: boolean;
-  gitea: string;
+  gitea?: string;
   giteaToken?: string;
   gitPassword?: string;
   gitUsername?: string;
@@ -126,7 +126,7 @@ interface ApplyOptions {
   mirrorsDir?: string;
   publishConcurrency: number;
   public?: boolean;
-  registry: string;
+  registry?: string;
   skipExisting?: boolean;
   skipGitProvision?: boolean;
 }
@@ -994,6 +994,57 @@ function explicitGitAuth(options: {
   return {
     password: options.password,
     username: options.username,
+  };
+}
+
+async function resolvePublishWorkspaceDefaults(options: {
+  bundle: string | undefined;
+  gitea: string | undefined;
+  registry: string | undefined;
+}): Promise<{
+  bundle: string;
+  configureGitGlobal?: WorkspacePromptBoolean;
+  gitea: string;
+  publicRepositories?: WorkspacePromptBoolean;
+  registry: string;
+  workspaceDir: string;
+}> {
+  const workspaceDir = process.cwd();
+  const needsConfig = !options.bundle || !options.gitea || !options.registry;
+  let config: WorkspaceConfig | undefined;
+  if (needsConfig) {
+    try {
+      config = await readWorkspaceConfig(workspaceDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          `provide <bundle>, --registry, and --gitea, or run from a workspace with ${workspaceConfigFileName}`
+        );
+      }
+      throw error;
+    }
+  }
+  const bundle = options.bundle ?? config?.output;
+  const registry = options.registry ?? config?.targetRegistry;
+  const gitea = options.gitea ?? config?.giteaUrl;
+
+  if (!bundle) {
+    throw new Error('provide <bundle> or configure output in airgap-sync.json');
+  }
+  if (!registry) {
+    throw new Error('provide --registry <url> or configure targetRegistry in airgap-sync.json');
+  }
+  if (!gitea) {
+    throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
+  }
+
+  return {
+    bundle,
+    ...(config ? { configureGitGlobal: config.defaults.publish.configureGitGlobal } : {}),
+    gitea,
+    ...(config ? { publicRepositories: config.defaults.publish.publicRepositories } : {}),
+    registry,
+    workspaceDir,
   };
 }
 
@@ -2601,9 +2652,9 @@ addNpmPublishOptions(
   program
     .command('publish')
     .description('Publish an airgap bundle to an npm registry and Git host')
-    .argument('<bundle>', 'Path to airgap bundle directory')
-    .requiredOption('-r, --registry <url>', 'Target npm registry URL')
-    .requiredOption('--gitea <url>', 'Closed-network Git host base URL')
+    .argument('[bundle]', 'Path to airgap bundle directory; defaults to airgap-sync.json output')
+    .option('-r, --registry <url>', 'Target npm registry URL; defaults to targetRegistry')
+    .option('--gitea <url>', 'Closed-network Git host base URL; defaults to giteaUrl')
     .option(
       '--gitea-token <token>',
       `Gitea API token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
@@ -2620,30 +2671,39 @@ addNpmPublishOptions(
   .option('--configure-git-global', 'Write Git URL rewrite rules into global Git config')
   .option('--dry-run', 'Print planned publish operations without publishing or pushing')
   .option('--json', 'Print full publish report as JSON')
-  .action(async (bundle: string, options: ApplyOptions) => {
+  .action(async (bundle: string | undefined, options: ApplyOptions) => {
     try {
+      const resolved = await resolvePublishWorkspaceDefaults({
+        bundle,
+        gitea: options.gitea,
+        registry: options.registry,
+      });
       const providedGitAuth = explicitGitAuth({
         password: options.gitPassword,
         username: options.gitUsername,
       });
+      const publicRepositories =
+        options.public === true ? true : resolved.publicRepositories === true;
+      const configureGitGlobal =
+        options.configureGitGlobal === true || resolved.configureGitGlobal === true;
       const token =
         options.dryRun === true || providedGitAuth
           ? undefined
           : options.skipGitProvision === true
             ? await resolveGiteaToken({
                 cliToken: options.giteaToken,
-                workspaceDir: process.cwd(),
+                workspaceDir: resolved.workspaceDir,
               })
             : await requireGiteaToken({
                 cliToken: options.giteaToken,
                 optionName: '--gitea-token <token>',
-                workspaceDir: process.cwd(),
+                workspaceDir: resolved.workspaceDir,
               });
 
       const httpClient =
         options.dryRun === true || providedGitAuth || !token
           ? undefined
-          : new HttpGiteaClient(options.gitea, { authToken: token });
+          : new HttpGiteaClient(resolved.gitea, { authToken: token });
       const client = httpClient ?? noopGiteaClient;
       const gitAuth =
         providedGitAuth ??
@@ -2651,31 +2711,31 @@ addNpmPublishOptions(
           ? { password: token, username: await httpClient.currentUserLogin() }
           : undefined);
       const report = await applyBundle({
-        bundleDir: bundle,
-        configureGitGlobal: options.configureGitGlobal === true,
+        bundleDir: resolved.bundle,
+        configureGitGlobal,
         distTagConcurrency: options.distTagConcurrency,
         dryRun: options.dryRun === true,
         ...(gitAuth ? { gitAuth } : {}),
-        giteaBaseUrl: options.gitea,
+        giteaBaseUrl: resolved.gitea,
         giteaClient: client,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
         onPublishProgress: createPublishProgressLogger(),
         onProgress: createApplyProgressLogger(),
-        private: options.public !== true,
+        private: !publicRepositories,
         publishConcurrency: options.publishConcurrency,
-        registryUrl: options.registry,
+        registryUrl: resolved.registry,
         skipExisting: options.skipExisting !== false,
         skipGitProvision: options.skipGitProvision === true,
       });
       await writePublishRunHistory({
-        bundleDir: path.resolve(bundle),
+        bundleDir: path.resolve(resolved.bundle),
         report,
       });
 
       console.log(
         options.json === true
           ? JSON.stringify(report, null, 2)
-          : formatPublishSummary(report, bundle)
+          : formatPublishSummary(report, resolved.bundle)
       );
 
       if (!report.succeeded) {

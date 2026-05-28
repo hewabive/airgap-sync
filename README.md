@@ -93,10 +93,8 @@ npm exec -- airgap-sync download --target 2
 npm exec -- airgap-sync verify ./airgap-bundle
 
 # Closed-network machine.
-npm exec -- airgap-sync publish ./airgap-bundle \
-  --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local \
-  --gitea-token "$GITEA_TOKEN"
+# Uses targetRegistry/giteaUrl from airgap-sync.json and GITEA_TOKEN or a saved token.
+npm exec -- airgap-sync publish
 
 npm exec -- airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \

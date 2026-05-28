@@ -4,6 +4,8 @@
 
 - Added workspace targets for repeatable removable-media workflows.
 - Added partial workspace downloads for selected targets.
+- Made `publish` workspace-aware so it can use `airgap-sync.json` defaults when run
+  without bundle, registry, or Gitea arguments.
 - Added manifest-based download run change reports so fixed-point updates show which
   package versions and requirement mappings changed.
 - Added a registry metadata cache for repeated downloads so already-bundled exact

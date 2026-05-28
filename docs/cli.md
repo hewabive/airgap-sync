@@ -411,9 +411,7 @@ writes `git-config-report.json`.
 ## publish
 
 ```bash
-airgap-sync publish ./airgap-bundle \
-  --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local
+airgap-sync publish
 ```
 
 Publishes the whole bundle in the closed network: publish npm packages to an
@@ -421,11 +419,17 @@ npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, 
 missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
 import reports.
 
+When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
+`output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
+`--gitea`, and `defaults.publish` for public repositories and global Git rewrites.
+Passing `<bundle>`, `--registry`, `--gitea`, `--public`, or
+`--configure-git-global` overrides those defaults.
+
 Supported options:
 
 ```text
--r, --registry <url>      Target npm registry URL
---gitea <url>             Closed-network Git host base URL
+-r, --registry <url>      Target npm registry URL, defaults to targetRegistry
+--gitea <url>             Closed-network Git host base URL, defaults to giteaUrl
 --gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN or saved secrets
 --git-username <name>     Git HTTP username for non-Gitea push authentication
 --git-password <token>    Git HTTP password/token for non-Gitea push authentication
