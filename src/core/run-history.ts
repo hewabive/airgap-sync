@@ -60,6 +60,27 @@ interface ResolutionChangesReport {
   schemaVersion: 1;
 }
 
+interface PackageChange {
+  file: string;
+  id: string;
+  name: string;
+  resolvedFrom: BundleManifest['packages'][number]['resolvedFrom'];
+  version: string;
+}
+
+interface PackageChangesReport {
+  added: PackageChange[];
+  generatedAt: string;
+  removed: PackageChange[];
+  schemaVersion: 1;
+  summary: {
+    added: number;
+    after: number;
+    before: number;
+    removed: number;
+  };
+}
+
 function runId(generatedAt: string): string {
   return generatedAt.replace(/[-:.]/gu, '').replace(/[^0-9TZ]/gu, '');
 }
@@ -130,6 +151,50 @@ function previousPackageIds(manifest: BundleManifest | undefined): Set<string> {
   return new Set((manifest?.packages ?? []).map((pkg) => packageId(pkg.name, pkg.version)));
 }
 
+function packageIdentity(pkg: BundleManifest['packages'][number]): string {
+  return packageId(pkg.name, pkg.version);
+}
+
+function toPackageChange(pkg: BundleManifest['packages'][number]): PackageChange {
+  return {
+    file: pkg.file,
+    id: packageIdentity(pkg),
+    name: pkg.name,
+    resolvedFrom: pkg.resolvedFrom,
+    version: pkg.version,
+  };
+}
+
+function createPackageChanges(
+  before: BundleManifest | undefined,
+  after: BundleManifest | undefined,
+  generatedAt: string
+): PackageChangesReport {
+  const beforePackages = before?.packages ?? [];
+  const afterPackages = after?.packages ?? [];
+  const beforeIds = new Set(beforePackages.map(packageIdentity));
+  const afterIds = new Set(afterPackages.map(packageIdentity));
+  const added = afterPackages
+    .filter((pkg) => !beforeIds.has(packageIdentity(pkg)))
+    .map(toPackageChange);
+  const removed = beforePackages
+    .filter((pkg) => !afterIds.has(packageIdentity(pkg)))
+    .map(toPackageChange);
+
+  return {
+    added,
+    generatedAt,
+    removed,
+    schemaVersion: 1,
+    summary: {
+      added: added.length,
+      after: afterPackages.length,
+      before: beforePackages.length,
+      removed: removed.length,
+    },
+  };
+}
+
 function policyForRequirement(
   requirement: FetchPackageAction,
   options: Pick<WriteDownloadRunHistoryOptions, 'rangeResolutionPolicy' | 'tagResolutionPolicy'>
@@ -197,7 +262,8 @@ function toResolutionChange(
 
 function createResolutionChanges(
   before: BundleStateSnapshot,
-  report: CollectReport,
+  after: BundleManifest | undefined,
+  generatedAt: string,
   pruneReport: BundlePruneReport | undefined,
   options: Pick<WriteDownloadRunHistoryOptions, 'rangeResolutionPolicy' | 'tagResolutionPolicy'>
 ): ResolutionChangesReport {
@@ -205,27 +271,41 @@ function createResolutionChanges(
   const changed: ResolutionChange[] = [];
   const added: ResolutionChange[] = [];
 
-  for (const requirement of report.fetch.downloadedPackages) {
-    const previousResolution = previous.get(requirementKey(requirement));
-    const reason = changeReason(requirement, previousResolution, before, options);
-    const change = toResolutionChange(
-      requirement,
-      reason,
-      policyForRequirement(requirement, options),
-      previousResolution
-    );
+  for (const pkg of after?.packages ?? []) {
+    for (const requirement of pkg.resolvedFrom) {
+      const resolvedRequirement: FetchPackageAction = {
+        ...requirement,
+        file: pkg.file,
+        name: pkg.name,
+        resolvedVia: requirement.type === 'alias' ? 'version' : requirement.type,
+        version: pkg.version,
+      };
+      const previousResolution = previous.get(requirementKey(resolvedRequirement));
 
-    if (previousResolution && previousResolution.version !== requirement.version) {
-      changed.push(change);
-    } else if (!previousResolution) {
-      added.push(change);
+      if (previousResolution?.version === resolvedRequirement.version) {
+        continue;
+      }
+
+      const reason = changeReason(resolvedRequirement, previousResolution, before, options);
+      const change = toResolutionChange(
+        resolvedRequirement,
+        reason,
+        policyForRequirement(resolvedRequirement, options),
+        previousResolution
+      );
+
+      if (previousResolution) {
+        changed.push(change);
+      } else {
+        added.push(change);
+      }
     }
   }
 
   return {
     added,
     changed,
-    generatedAt: report.generatedAt,
+    generatedAt,
     removed: (pruneReport?.actions ?? [])
       .filter((action) => action.type === 'npm-package' && action.status === 'removed')
       .map((action) => ({
@@ -259,10 +339,24 @@ export async function writeDownloadRunHistory(
     'download',
     runId(options.report.generatedAt)
   );
-  const changes = createResolutionChanges(options.before, options.report, options.pruneReport, {
-    rangeResolutionPolicy: options.rangeResolutionPolicy,
-    tagResolutionPolicy: options.tagResolutionPolicy,
-  });
+  const afterManifest = await readOptionalJson<BundleManifest>(
+    path.join(options.bundleDir, 'seed-manifest.json')
+  );
+  const packageChanges = createPackageChanges(
+    options.before.manifest,
+    afterManifest,
+    options.report.generatedAt
+  );
+  const changes = createResolutionChanges(
+    options.before,
+    afterManifest,
+    options.report.generatedAt,
+    options.pruneReport,
+    {
+      rangeResolutionPolicy: options.rangeResolutionPolicy,
+      tagResolutionPolicy: options.tagResolutionPolicy,
+    }
+  );
 
   await fs.ensureDir(targetDir);
   if (options.before.manifest) {
@@ -307,6 +401,7 @@ export async function writeDownloadRunHistory(
       path.join(targetDir, 'prune-report.json')
     ),
   ]);
+  await fs.writeJson(path.join(targetDir, 'package-changes.json'), packageChanges, { spaces: 2 });
   await fs.writeJson(path.join(targetDir, 'resolution-changes.json'), changes, { spaces: 2 });
 
   return targetDir;

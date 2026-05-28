@@ -80,24 +80,13 @@ describe('run history', () => {
     const collectReport: CollectReport = {
       dryRun: false,
       fetch: {
-        downloaded: 1,
-        downloadedPackages: [
-          {
-            file: 'packages/demo-1.1.0.tgz',
-            name: 'demo',
-            raw: 'demo@^1.0.0',
-            requiredBy: 'parent@1.0.0',
-            resolvedVia: 'range',
-            specifier: '^1.0.0',
-            type: 'range',
-            version: '1.1.0',
-          },
-        ],
+        downloaded: 0,
+        downloadedPackages: [],
         errors: [],
         generatedAt: '2026-05-25T00:01:00.000Z',
         gitRequirements: [],
         resolved: 2,
-        skipped: 1,
+        skipped: 2,
         timings: {
           dependencyScanMs: 0,
           downloadMs: 0,
@@ -218,5 +207,31 @@ describe('run history', () => {
         },
       ],
     });
+    await expect(fs.readJson(path.join(historyDir, 'package-changes.json'))).resolves.toMatchObject(
+      {
+        added: [
+          {
+            file: 'packages/demo-1.1.0.tgz',
+            id: 'demo@1.1.0',
+            name: 'demo',
+            version: '1.1.0',
+          },
+        ],
+        removed: [
+          {
+            file: 'packages/demo-1.0.0.tgz',
+            id: 'demo@1.0.0',
+            name: 'demo',
+            version: '1.0.0',
+          },
+        ],
+        summary: {
+          added: 1,
+          after: 2,
+          before: 2,
+          removed: 1,
+        },
+      }
+    );
   });
 });

@@ -22,6 +22,7 @@ airgap-bundle/
         fetch-report.json
         collect-report.json
         prune-report.json
+        package-changes.json
         resolution-changes.json
     publish/
       20260520T010000000Z/
@@ -174,11 +175,15 @@ The root reports and manifests describe the latest bundle state. Successful non-
 directories under `runs/`.
 
 `runs/download/<run-id>/` contains before/after copies of `seed-manifest.json` and
-`dist-tags.json` when available, the operational reports from that download, and
-`resolution-changes.json`. `resolution-changes.json` summarizes npm requirements that
-were newly mapped, changed to another version, or pruned from the transfer bundle.
-It is intended for answering questions such as "what changed in this update?" without
-diffing large reports by hand.
+`dist-tags.json` when available, the operational reports from that download,
+`package-changes.json`, and `resolution-changes.json`. `package-changes.json` compares
+the before/after seed manifests and lists package versions added to or removed from the
+bundle, including their `resolvedFrom` parents. `resolution-changes.json` summarizes
+npm requirements that were newly mapped, changed to another version, or pruned from the
+transfer bundle. It is derived from the before/after seed manifests, so it reflects all
+fixed-point download iterations, not only the final `fetch-report.json`. These compact
+reports are intended for answering questions such as "what changed in this update?"
+without diffing large reports by hand.
 
 `runs/publish/<run-id>/` contains the publish/apply reports produced by the closed
 network import. These directories are safe to archive or delete when old diagnostics
