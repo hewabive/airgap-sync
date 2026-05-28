@@ -15,7 +15,7 @@ async function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: root,
       env: process.env,
-      shell: false,
+      shell: process.platform === 'win32',
       stdio: 'inherit',
       ...options,
     });
