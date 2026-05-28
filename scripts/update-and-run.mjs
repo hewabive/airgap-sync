@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cli = path.join(root, 'dist', 'cli.cjs');
+const gitCommand = process.platform === 'win32' ? 'git.exe' : 'git';
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 async function run(command, args, options = {}) {
   await new Promise((resolve, reject) => {
@@ -28,7 +30,7 @@ async function run(command, args, options = {}) {
   });
 }
 
-await run('git', ['pull', '--ff-only']);
-await run('npm', ['install']);
-await run('npm', ['run', 'build']);
+await run(gitCommand, ['pull', '--ff-only']);
+await run(npmCommand, ['install']);
+await run(npmCommand, ['run', 'build']);
 await run(process.execPath, [cli, ...process.argv.slice(2)], { cwd: process.cwd() });
