@@ -14,6 +14,8 @@
   are preserved in the final summary and `git-fetch-report.json`.
 - Fixed download npm reporting so packages downloaded in earlier fixed-point iterations
   are preserved in the final `fetch-report.json`.
+- Avoided repeated Git mirror fetches during download iterations when the Git source
+  set has not changed.
 - Added `npm run update:run` for Git checkout refresh, install, build, and CLI launch.
 - Added an interactive workspace menu for common operator actions and made it the
   default no-argument CLI entrypoint.

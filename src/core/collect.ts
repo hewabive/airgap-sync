@@ -155,6 +155,22 @@ function sourceIds(sources: GitSource[]): Set<string> {
   return new Set(sources.map((source) => source.id));
 }
 
+function gitSourcesFetchKey(sources: GitSource[]): string {
+  return JSON.stringify(
+    sources
+      .map((source) => ({
+        committish: source.committish ?? '',
+        fetchSpec: source.fetchSpec ?? '',
+        gitRange: source.gitRange ?? '',
+        gitSubdir: source.gitSubdir ?? '',
+        id: source.id,
+        localMirrorPath: source.localMirrorPath,
+        sourceUrl: source.sourceUrl,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id))
+  );
+}
+
 function emptyRepositoryUpdateReport(options: {
   dryRun: boolean;
   generatedAt: string;
@@ -400,6 +416,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   let maxIterationsReached = false;
   const fetchReports: FetchReport[] = [];
   const gitFetchReports: GitFetchReport[] = [];
+  let lastFetchedGitSourcesKey: string | undefined;
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const iterationStart = performance.now();
@@ -458,26 +475,33 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       createdAt: generatedAt,
       initialSources: options.initialGitSources ?? [],
     });
+    const gitSourcesKey = gitSourcesFetchKey(gitSources.sources);
     const gitFetchStart = performance.now();
-    gitFetch = await fetchGitSources({
-      bundleDir: outputDir,
-      dryRun,
-      generatedAt,
-      manifest: gitSources,
-      onProgress: (event: GitFetchProgressEvent) => {
-        options.onProgress?.({
-          current: event.current,
-          ...(event.repository ? { detail: event.repository } : {}),
-          iteration,
-          phase: 'git-fetch',
-          status: event.status,
-          total: event.total,
-        });
-      },
-      ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
-    });
+    const shouldFetchGitSources = gitSourcesKey !== lastFetchedGitSourcesKey;
+    if (shouldFetchGitSources) {
+      gitFetch = await fetchGitSources({
+        bundleDir: outputDir,
+        dryRun,
+        generatedAt,
+        manifest: gitSources,
+        onProgress: (event: GitFetchProgressEvent) => {
+          options.onProgress?.({
+            current: event.current,
+            ...(event.repository ? { detail: event.repository } : {}),
+            iteration,
+            phase: 'git-fetch',
+            status: event.status,
+            total: event.total,
+          });
+        },
+        ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
+      });
+      if (gitFetch.errors.length === 0) {
+        lastFetchedGitSourcesKey = gitSourcesKey;
+      }
+      gitFetchReports.push(gitFetch);
+    }
     const gitFetchMs = elapsedMs(gitFetchStart);
-    gitFetchReports.push(gitFetch);
     timings.gitFetchMs += gitFetchMs;
     addUnique(
       state.gitRequirements,
@@ -493,7 +517,12 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     let scannedGitSources = 0;
     let gitManifestScanMs = 0;
 
-    if (!dryRun && resolution.errors.length === 0 && gitFetch.errors.length === 0) {
+    if (
+      shouldFetchGitSources &&
+      !dryRun &&
+      resolution.errors.length === 0 &&
+      gitFetch.errors.length === 0
+    ) {
       const gitManifestScanStart = performance.now();
       options.onProgress?.({
         current: 0,

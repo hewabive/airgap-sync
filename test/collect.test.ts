@@ -323,12 +323,6 @@ describe('collectBundle', () => {
       `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
       `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
       `-C ${mirrorPath} fetch --prune origin`,
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
-      `-C ${mirrorPath} remote set-url origin https://github.com/owner/repo.git`,
-      `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
-      `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
-      `-C ${mirrorPath} fetch --prune origin`,
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
     ]);
     expect(report).toMatchObject({
       dryRun: false,
@@ -352,6 +346,7 @@ describe('collectBundle', () => {
           addedGitRequirements: 0,
           addedRequirements: 0,
           addedUnsupported: 0,
+          gitFetchMs: 0,
           gitSources: 1,
           iteration: 2,
           resolved: 2,
@@ -802,12 +797,6 @@ describe('collectBundle', () => {
       },
     });
     expect(gitCalls.map(gitCommand)).toEqual([
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
-      `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
-      `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
-      `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
-      `-C ${mirrorPath} fetch --prune origin`,
-      `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
       `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
       `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
       `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
