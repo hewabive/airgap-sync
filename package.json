@@ -36,7 +36,8 @@
     "registry:start": "verdaccio --config ./verdaccio/config.yaml",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "update:run": "node ./scripts/update-and-run.mjs"
   },
   "keywords": [
     "npm",

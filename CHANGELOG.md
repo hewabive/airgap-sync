@@ -4,6 +4,7 @@
 
 - Added workspace targets for repeatable removable-media workflows.
 - Added partial workspace downloads for selected targets.
+- Added `npm run update:run` for Git checkout refresh, install, build, and CLI launch.
 - Added an interactive workspace menu for common operator actions and made it the
   default no-argument CLI entrypoint.
 - Added recursive npm package collection from package specs, manifests, and lockfiles.

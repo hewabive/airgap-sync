@@ -241,11 +241,19 @@ npm run build
 npm run check
 ```
 
+For a source checkout that is copied through Git, this refreshes the checkout, installs
+dependencies, rebuilds, and opens the CLI/menu:
+
+```bash
+npm run update:run
+```
+
 Useful commands:
 
 ```bash
 npm run build       # Type-check and build dist/
 npm run cli         # Run the built CLI from this source checkout
+npm run update:run  # Pull, install, build, then run the CLI
 npm test            # Run tests
 npm run lint        # Run ESLint
 npm run format      # Format source and docs
