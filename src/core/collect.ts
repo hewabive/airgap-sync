@@ -6,6 +6,8 @@ import type {
   CollectIterationReport,
   CollectReport,
   CollectTimings,
+  GitFetchActionResult,
+  GitFetchReport,
   GitRequirement,
   GitSource,
   LatestPolicy,
@@ -124,6 +126,87 @@ function gitRequirementKey(requirement: GitRequirement): string {
 
 function unsupportedKey(requirement: UnsupportedRootPackageRequirement): string {
   return [requirement.requiredBy, requirement.raw, requirement.type, requirement.reason].join('\0');
+}
+
+function mergeGitFetchStatus(
+  previous: GitFetchActionResult['status'],
+  next: GitFetchActionResult['status']
+): GitFetchActionResult['status'] {
+  if (previous === 'error' || next === 'error') {
+    return 'error';
+  }
+  if (previous === 'cloned' || next === 'cloned') {
+    return 'cloned';
+  }
+  if (previous === 'updated' || next === 'updated') {
+    return 'updated';
+  }
+  return 'planned';
+}
+
+function mergeGitFetchChanged(
+  previous: GitFetchActionResult['changed'],
+  next: GitFetchActionResult['changed']
+): GitFetchActionResult['changed'] {
+  if (previous === true || next === true) {
+    return true;
+  }
+  if (previous === false && next === false) {
+    return false;
+  }
+  return next ?? previous;
+}
+
+function mergeGitFetchAction(
+  previous: GitFetchActionResult,
+  next: GitFetchActionResult
+): GitFetchActionResult {
+  const changed = mergeGitFetchChanged(previous.changed, next.changed);
+  return {
+    ...((next.error ?? previous.error) ? { error: next.error ?? previous.error } : {}),
+    repository: next.repository,
+    sourceUrl: next.sourceUrl,
+    status: mergeGitFetchStatus(previous.status, next.status),
+    targetPath: next.targetPath,
+    ...(changed === undefined ? {} : { changed }),
+  };
+}
+
+function aggregateGitFetchReports(reports: GitFetchReport[]): GitFetchReport | undefined {
+  const last = reports.at(-1);
+  if (!last) {
+    return undefined;
+  }
+
+  const actionsByRepository = new Map<string, GitFetchActionResult>();
+  for (const report of reports) {
+    for (const action of report.actions) {
+      const previous = actionsByRepository.get(action.repository);
+      actionsByRepository.set(
+        action.repository,
+        previous ? mergeGitFetchAction(previous, action) : action
+      );
+    }
+  }
+
+  const actions = [...actionsByRepository.values()].sort((left, right) =>
+    left.repository.localeCompare(right.repository)
+  );
+  const errors = actions.filter((action) => action.status === 'error');
+
+  return {
+    actions,
+    changed: actions.filter((action) => action.changed === true).length,
+    cloned: actions.filter((action) => action.status === 'cloned').length,
+    dryRun: reports.every((report) => report.dryRun),
+    errors,
+    generatedAt: last.generatedAt,
+    mirrorsDir: last.mirrorsDir,
+    planned: actions.filter((action) => action.status === 'planned').length,
+    totalRepositories: actions.length,
+    unchanged: actions.filter((action) => action.changed === false).length,
+    updated: actions.filter((action) => action.status === 'updated').length,
+  };
 }
 
 function addUnique<T>(
@@ -395,6 +478,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   });
   timings.gitFetchMs += elapsedMs(initialGitFetchStart);
   let maxIterationsReached = false;
+  const gitFetchReports: GitFetchReport[] = [];
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const iterationStart = performance.now();
@@ -471,6 +555,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
     });
     const gitFetchMs = elapsedMs(gitFetchStart);
+    gitFetchReports.push(gitFetch);
     timings.gitFetchMs += gitFetchMs;
     addUnique(
       state.gitRequirements,
@@ -574,10 +659,11 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     iterations.at(-1)?.addedRequirements === 0 &&
     iterations.at(-1)?.addedGitRequirements === 0 &&
     iterations.at(-1)?.addedUnsupported === 0;
+  const reportGitFetch = aggregateGitFetchReports(gitFetchReports) ?? gitFetch;
   const wroteBundle =
     !dryRun &&
     resolution?.errors.length === 0 &&
-    gitFetch.errors.length === 0 &&
+    reportGitFetch.errors.length === 0 &&
     scanErrors.length === 0 &&
     !maxIterationsReached;
 
@@ -587,7 +673,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     fetch,
     fixedPoint,
     generatedAt,
-    gitFetch,
+    gitFetch: reportGitFetch,
     gitManifestScanErrors: scanErrors,
     gitSources,
     iterations,
@@ -630,7 +716,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     const reportWriteStart = performance.now();
     await writeFetchReport(outputDir, fetch);
     await writeGitSourcesManifest(outputDir, gitSources);
-    await writeGitFetchReport(outputDir, gitFetch);
+    await writeGitFetchReport(outputDir, reportGitFetch);
     timings.reportWriteMs = elapsedMs(reportWriteStart);
     timings.totalMs = elapsedMs(totalStart);
     await writeCollectReport(outputDir, report);

@@ -479,6 +479,101 @@ describe('collectBundle', () => {
     ]);
   });
 
+  it('reports Git mirror changes from any fixed-point iteration', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');
+    await fs.ensureDir(mirrorPath);
+    const refFingerprints = [
+      'refs/heads/main old\n',
+      'refs/heads/main new\n',
+      'refs/heads/main new\n',
+      'refs/heads/main new\n',
+    ];
+
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      initialGitSources: [
+        {
+          committish: 'main',
+          host: 'github.com',
+          id: 'github.com/acme/app',
+          localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+          owner: 'acme',
+          repo: 'app',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/app.git',
+          target: true,
+        },
+      ],
+      maxIterations: 5,
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          expect(name).toBe('demo');
+          return Promise.resolve(metadata);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      runGitCommand(invocation) {
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({
+            stderr: '',
+            stdout: refFingerprints.shift() ?? 'refs/heads/main new\n',
+          });
+        }
+        return Promise.resolve(undefined);
+      },
+      runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
+        }
+        if (gitCommand(invocation) === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              dependencies: {
+                demo: 'latest',
+              },
+              name: 'app',
+              version: '1.0.0',
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(report.iterations).toMatchObject([
+      {
+        addedRequirements: 1,
+        iteration: 1,
+      },
+      {
+        addedRequirements: 0,
+        iteration: 2,
+      },
+    ]);
+    expect(report.gitFetch).toMatchObject({
+      changed: 1,
+      cloned: 0,
+      errors: [],
+      totalRepositories: 1,
+      unchanged: 0,
+      updated: 1,
+    });
+    expect(report.gitFetch.actions).toEqual([
+      expect.objectContaining({
+        changed: true,
+        repository: 'github.com/acme/app',
+        status: 'updated',
+      }),
+    ]);
+  });
+
   it('reuses previous tag resolutions from unchanged Git source manifests', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');
