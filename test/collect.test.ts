@@ -574,6 +574,116 @@ describe('collectBundle', () => {
     ]);
   });
 
+  it('reports npm downloads from all fixed-point iterations', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');
+    const downloaded = new Set<string>();
+    await fs.ensureDir(mirrorPath);
+    tarballMocks.downloadResolvedPackage.mockImplementation((pkg: ResolvedRootPackage) => {
+      const id = `${pkg.name}@${pkg.version}`;
+      const skipped = downloaded.has(id);
+      downloaded.add(id);
+      return {
+        file: `packages/${pkg.name}-${pkg.version}.tgz`,
+        name: pkg.name,
+        path: `/virtual/${pkg.name}-${pkg.version}.tgz`,
+        skipped,
+        version: pkg.version,
+      };
+    });
+
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      initialGitSources: [
+        {
+          committish: 'main',
+          host: 'github.com',
+          id: 'github.com/acme/app',
+          localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+          owner: 'acme',
+          repo: 'app',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/app.git',
+          target: true,
+        },
+      ],
+      initialRequirements: [
+        {
+          name: 'demo',
+          raw: 'demo@latest',
+          requiredBy: 'root',
+          specifier: 'latest',
+          type: 'tag',
+        },
+      ],
+      maxIterations: 5,
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          if (name === 'demo') {
+            return Promise.resolve(metadata);
+          }
+          expect(name).toBe('extra');
+          return Promise.resolve(extraMetadata);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      runGitCommand(invocation) {
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({ stderr: '', stdout: 'refs/heads/main abc123\n' });
+        }
+        return Promise.resolve(undefined);
+      },
+      runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({ stderr: '', stdout: 'package.json\n' });
+        }
+        if (gitCommand(invocation) === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              dependencies: {
+                extra: 'latest',
+              },
+              name: 'app',
+              version: '1.0.0',
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(report.iterations).toMatchObject([
+      {
+        downloaded: 1,
+        iteration: 1,
+      },
+      {
+        downloaded: 1,
+        iteration: 2,
+      },
+    ]);
+    expect(report.fetch).toMatchObject({
+      downloaded: 2,
+      errors: [],
+      resolved: 2,
+      skipped: 0,
+    });
+    expect(report.fetch.downloadedPackages.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'extra@1.0.0',
+    ]);
+    await expect(fs.readJson(path.join(outputDir, 'fetch-report.json'))).resolves.toMatchObject({
+      downloaded: 2,
+      resolved: 2,
+    });
+  });
+
   it('reuses previous tag resolutions from unchanged Git source manifests', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');

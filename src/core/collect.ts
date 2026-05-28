@@ -6,6 +6,9 @@ import type {
   CollectIterationReport,
   CollectReport,
   CollectTimings,
+  FetchPackageAction,
+  FetchReport,
+  FetchTimings,
   GitFetchActionResult,
   GitFetchReport,
   GitRequirement,
@@ -206,6 +209,81 @@ function aggregateGitFetchReports(reports: GitFetchReport[]): GitFetchReport | u
     totalRepositories: actions.length,
     unchanged: actions.filter((action) => action.changed === false).length,
     updated: actions.filter((action) => action.status === 'updated').length,
+  };
+}
+
+function fetchActionKey(action: FetchPackageAction): string {
+  return [
+    action.requiredBy,
+    action.name,
+    action.version,
+    action.specifier,
+    action.type,
+    action.raw,
+  ].join('\0');
+}
+
+function uniqueFetchActions(actions: FetchPackageAction[]): FetchPackageAction[] {
+  const byKey = new Map<string, FetchPackageAction>();
+  for (const action of actions) {
+    byKey.set(fetchActionKey(action), action);
+  }
+  return [...byKey.values()].sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) ||
+      left.version.localeCompare(right.version) ||
+      left.requiredBy.localeCompare(right.requiredBy) ||
+      left.raw.localeCompare(right.raw)
+  );
+}
+
+function sumFetchTimings(reports: FetchReport[]): FetchTimings {
+  return reports.reduce<FetchTimings>(
+    (total, report) => ({
+      dependencyScanMs: total.dependencyScanMs + report.timings.dependencyScanMs,
+      downloadMs: total.downloadMs + report.timings.downloadMs,
+      metadataCacheHits: (total.metadataCacheHits ?? 0) + (report.timings.metadataCacheHits ?? 0),
+      metadataCacheWrites:
+        (total.metadataCacheWrites ?? 0) + (report.timings.metadataCacheWrites ?? 0),
+      manifestReadMs: total.manifestReadMs + report.timings.manifestReadMs,
+      resolveMs: total.resolveMs + report.timings.resolveMs,
+      totalMs: total.totalMs + report.timings.totalMs,
+    }),
+    {
+      dependencyScanMs: 0,
+      downloadMs: 0,
+      metadataCacheHits: 0,
+      metadataCacheWrites: 0,
+      manifestReadMs: 0,
+      resolveMs: 0,
+      totalMs: 0,
+    }
+  );
+}
+
+function aggregateFetchReports(reports: FetchReport[]): FetchReport | undefined {
+  const last = reports.at(-1);
+  if (!last) {
+    return undefined;
+  }
+
+  const downloadedPackages = uniqueFetchActions(
+    reports.flatMap((report) => report.downloadedPackages)
+  );
+  const wouldDownloadPackages = uniqueFetchActions(
+    reports.flatMap((report) => report.wouldDownloadPackages)
+  );
+
+  return {
+    ...last,
+    downloaded: downloadedPackages.length,
+    downloadedPackages,
+    skipped:
+      wouldDownloadPackages.length > 0
+        ? last.skipped
+        : Math.max(0, last.resolved - downloadedPackages.length),
+    timings: sumFetchTimings(reports),
+    wouldDownloadPackages,
   };
 }
 
@@ -478,6 +556,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   });
   timings.gitFetchMs += elapsedMs(initialGitFetchStart);
   let maxIterationsReached = false;
+  const fetchReports: FetchReport[] = [];
   const gitFetchReports: GitFetchReport[] = [];
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -532,6 +611,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       unsupported: resolution.unsupported,
       wouldDownloadPackages: resolution.wouldDownloadPackages,
     });
+    fetchReports.push(fetch);
     gitSources = createGitSourcesManifest(resolution.gitRequirements, {
       createdAt: generatedAt,
       initialSources: options.initialGitSources ?? [],
@@ -660,9 +740,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     iterations.at(-1)?.addedGitRequirements === 0 &&
     iterations.at(-1)?.addedUnsupported === 0;
   const reportGitFetch = aggregateGitFetchReports(gitFetchReports) ?? gitFetch;
+  const reportFetch = aggregateFetchReports(fetchReports) ?? fetch;
   const wroteBundle =
     !dryRun &&
-    resolution?.errors.length === 0 &&
+    reportFetch.errors.length === 0 &&
     reportGitFetch.errors.length === 0 &&
     scanErrors.length === 0 &&
     !maxIterationsReached;
@@ -670,7 +751,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   timings.totalMs = elapsedMs(totalStart);
   const report: CollectReport = {
     dryRun,
-    fetch,
+    fetch: reportFetch,
     fixedPoint,
     generatedAt,
     gitFetch: reportGitFetch,
@@ -714,7 +795,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     }
 
     const reportWriteStart = performance.now();
-    await writeFetchReport(outputDir, fetch);
+    await writeFetchReport(outputDir, reportFetch);
     await writeGitSourcesManifest(outputDir, gitSources);
     await writeGitFetchReport(outputDir, reportGitFetch);
     timings.reportWriteMs = elapsedMs(reportWriteStart);
