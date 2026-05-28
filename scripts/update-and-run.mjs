@@ -33,4 +33,7 @@ async function run(command, args, options = {}) {
 await run(gitCommand, ['pull', '--ff-only']);
 await run(npmCommand, ['install']);
 await run(npmCommand, ['run', 'build']);
-await run(process.execPath, [cli, ...process.argv.slice(2)], { cwd: process.cwd() });
+await run(process.execPath, [cli, ...process.argv.slice(2)], {
+  cwd: process.cwd(),
+  shell: false,
+});
