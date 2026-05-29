@@ -378,13 +378,19 @@ function formatDownloadSummary(report: CollectReport): string {
 }
 
 function formatPublishSummary(report: ApplyBundleReport, bundle: string): string {
+  const npmAuthErrors = report.publish.errors.filter((error) => error.action === 'auth');
   const npmPublishErrors = report.publish.errors.filter((error) => error.action === 'publish');
   const npmTagErrors = report.publish.errors.filter((error) => error.action === 'dist-tag');
   const giteaErrors = report.gitea.errors.length + report.gitea.organizationErrors.length;
   const gitApplyErrors = report.gitApply.errors.length;
   const gitConfigErrors = report.gitConfig?.errors.length ?? 0;
   const totalErrors =
-    npmPublishErrors.length + npmTagErrors.length + giteaErrors + gitApplyErrors + gitConfigErrors;
+    npmAuthErrors.length +
+    npmPublishErrors.length +
+    npmTagErrors.length +
+    giteaErrors +
+    gitApplyErrors +
+    gitConfigErrors;
   const mode = report.dryRun ? 'dry run, ' : '';
   const status = report.succeeded
     ? green(
@@ -545,6 +551,7 @@ interface SecretsCheckOptions {
 }
 
 const publishPhaseLabels: Record<PublishProgressPhase, string> = {
+  auth: 'check npm auth',
   cleanup: 'cleanup temp tags',
   'dist-tags': 'restore dist-tags',
   'dry-run': 'plan publish',

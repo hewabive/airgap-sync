@@ -45,6 +45,7 @@ export interface PublishBundleOptions {
 }
 
 export type PublishProgressPhase =
+  | 'auth'
   | 'cleanup'
   | 'dist-tags'
   | 'dry-run'
@@ -374,6 +375,29 @@ async function npmPublish(
   }
 }
 
+async function npmWhoami(registryUrl: string, runner?: NpmRunner): Promise<void> {
+  await runNpmCommand(
+    ['whoami', '--registry', registryUrl],
+    { maxBuffer: 1024 * 1024, timeout: 30_000 },
+    runner
+  );
+}
+
+function npmAuthError(registryUrl: string, error: unknown): PublishActionResult {
+  return {
+    action: 'auth',
+    error: [
+      `npm is not logged in to ${registryUrl}.`,
+      `Run: npm adduser --registry ${registryUrl}`,
+      errorSummary(error),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    package: registryUrl,
+    status: 'error',
+  };
+}
+
 async function npmDistTagAdd(
   requirement: TagRequirement,
   registryUrl: string,
@@ -665,6 +689,38 @@ export async function publishBundle(
   );
   const publishedPackageNames = new Set<string>();
   timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
+
+  const needsAuth =
+    manifest.packages.some((pkg) => !existingVersionsByPackage.get(pkg.name)?.has(pkg.version)) ||
+    tagRequirements.some((requirement) => {
+      const currentVersion = currentDistTags.get(requirement.name)?.[requirement.tag];
+      return (
+        currentVersion !== requirement.version &&
+        !shouldKeepCurrentBundledLatest(requirement, currentVersion)
+      );
+    });
+
+  if (needsAuth) {
+    options.onProgress?.({ phase: 'auth', status: 'start' });
+    try {
+      await npmWhoami(options.registryUrl, options.runNpm);
+      options.onProgress?.({ phase: 'auth', status: 'done' });
+    } catch (error) {
+      options.onProgress?.({ phase: 'auth', status: 'error' });
+      timings.totalMs = elapsedMs(totalStart);
+      return {
+        dryRun: false,
+        errors: [npmAuthError(options.registryUrl, error)],
+        generatedAt: new Date().toISOString(),
+        published: 0,
+        registry: options.registryUrl,
+        restoredTags: 0,
+        skipped: 0,
+        timings,
+        totalPackages: manifest.packages.length,
+      };
+    }
+  }
 
   const publishStart = performance.now();
   const publishConcurrency = normalizeConcurrency(

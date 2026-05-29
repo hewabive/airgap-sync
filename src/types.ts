@@ -410,7 +410,7 @@ export interface DistTagsManifest {
 export type PublishActionStatus = 'planned' | 'published' | 'skipped' | 'tagged' | 'error';
 
 export interface PublishActionResult {
-  action: 'publish' | 'dist-tag';
+  action: 'auth' | 'publish' | 'dist-tag';
   package: string;
   status: PublishActionStatus;
   error?: string;

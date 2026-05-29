@@ -407,10 +407,11 @@ describe('publishBundle', () => {
         published: 0,
         skipped: 1,
       });
-      const publishTarballPath = npmCalls[0]?.[1];
+      const publishTarballPath = npmCalls[1]?.[1];
       expect(path.basename(publishTarballPath ?? '')).toBe('demo-1.0.0.tgz');
       expect(path.dirname(publishTarballPath ?? '')).not.toBe(path.join(bundleDir, 'packages'));
       expect(npmCalls).toEqual([
+        ['whoami', '--registry', 'http://localhost:4873'],
         [
           'publish',
           publishTarballPath,
@@ -424,6 +425,61 @@ describe('publishBundle', () => {
         ],
       ]);
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('fails once before publishing when npm is not logged in', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const npmCalls: string[][] = [];
+    const runNpm: NpmRunner = (args) => {
+      npmCalls.push(args);
+      if (args[0] === 'whoami') {
+        const error = new Error('Command failed: npm whoami') as Error & {
+          stderr?: string;
+        };
+        error.stderr = 'npm error code E401';
+        return Promise.reject(error);
+      }
+      return Promise.resolve({ stdout: '' });
+    };
+
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          'dist-tags': {},
+          name: 'demo',
+          versions: {},
+        }),
+        { status: 200 }
+      )
+    );
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+
+      const report = await publishBundle(manifest, distTags, {
+        bundleDir,
+        registryUrl: 'http://localhost:4873',
+        runNpm,
+      });
+
+      expect(report).toMatchObject({
+        errors: [
+          {
+            action: 'auth',
+            package: 'http://localhost:4873',
+            status: 'error',
+          },
+        ],
+        published: 0,
+        restoredTags: 0,
+        skipped: 0,
+      });
+      expect(report.errors[0]?.error).toContain('npm adduser --registry http://localhost:4873');
+      expect(npmCalls).toEqual([['whoami', '--registry', 'http://localhost:4873']]);
     } finally {
       await fs.remove(bundleDir);
     }
