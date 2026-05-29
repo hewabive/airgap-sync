@@ -190,6 +190,26 @@ function emptyRepositoryUpdateReport(options: {
   };
 }
 
+function emptyGitFetchReport(options: {
+  dryRun: boolean;
+  generatedAt: string;
+  mirrorsDir: string;
+}): GitFetchReport {
+  return {
+    actions: [],
+    changed: 0,
+    cloned: 0,
+    dryRun: options.dryRun,
+    errors: [],
+    generatedAt: options.generatedAt,
+    mirrorsDir: options.mirrorsDir,
+    planned: 0,
+    totalRepositories: 0,
+    unchanged: 0,
+    updated: 0,
+  };
+}
+
 async function scanGitSourceManifests(options: {
   bundleDir: string;
   includeDev: boolean;
@@ -394,25 +414,11 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     createdAt: generatedAt,
     initialSources: options.initialGitSources ?? [],
   });
-  const initialGitFetchStart = performance.now();
-  let gitFetch = await fetchGitSources({
-    bundleDir: outputDir,
-    dryRun: true,
+  let gitFetch = emptyGitFetchReport({
+    dryRun,
     generatedAt,
-    manifest: gitSources,
-    onProgress: (event: GitFetchProgressEvent) => {
-      options.onProgress?.({
-        current: event.current,
-        ...(event.repository ? { detail: event.repository } : {}),
-        iteration: 0,
-        phase: 'git-fetch',
-        status: event.status,
-        total: event.total,
-      });
-    },
-    ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
+    mirrorsDir: path.join(outputDir, 'git-mirrors'),
   });
-  timings.gitFetchMs += elapsedMs(initialGitFetchStart);
   let maxIterationsReached = false;
   const fetchReports: FetchReport[] = [];
   const gitFetchReports: GitFetchReport[] = [];

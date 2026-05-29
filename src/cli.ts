@@ -359,11 +359,13 @@ function formatDownloadSummary(report: CollectReport): string {
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
     : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
+  const reportsWritten = report.dryRun ? 'no' : 'yes';
+  const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
     status,
     npmLine,
     gitLine,
-    `Bundle: ${report.outputDir} (${mode}reports written: ${report.wroteBundle ? 'yes' : 'no'}).`,
+    `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
 
   if (unsupported > 0 || gitSkipped > 0 || report.maxIterationsReached) {
