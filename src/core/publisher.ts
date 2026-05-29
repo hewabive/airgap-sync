@@ -411,7 +411,8 @@ function npmAuthError(registryUrl: string, error: unknown): PublishActionResult 
     action: 'auth',
     error: [
       `npm is not logged in to ${registryUrl}.`,
-      `Run: npm adduser --registry ${registryUrl}`,
+      `Existing user: npm login --registry ${registryUrl}`,
+      `New user: npm adduser --registry ${registryUrl}`,
       errorSummary(error),
     ]
       .filter(Boolean)

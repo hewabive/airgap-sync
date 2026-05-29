@@ -478,6 +478,7 @@ describe('publishBundle', () => {
         restoredTags: 0,
         skipped: 0,
       });
+      expect(report.errors[0]?.error).toContain('npm login --registry http://localhost:4873');
       expect(report.errors[0]?.error).toContain('npm adduser --registry http://localhost:4873');
       expect(npmCalls).toEqual([['whoami', '--registry', 'http://localhost:4873']]);
     } finally {

@@ -408,7 +408,8 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     ...(npmAuthErrors.length > 0
       ? [
           red(`NPM auth: failed for ${report.registryUrl}.`),
-          `Run: npm adduser --registry ${report.registryUrl}`,
+          `Existing user: npm login --registry ${report.registryUrl}`,
+          `New user: npm adduser --registry ${report.registryUrl}`,
           'Package publishing and dist-tag restore were skipped because npm is not logged in.',
         ]
       : []),
