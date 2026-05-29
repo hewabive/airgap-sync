@@ -375,7 +375,7 @@ export async function writeDownloadRunHistory(
     });
   }
 
-  await Promise.all([
+  const reportCopies = [
     copyIfExists(
       path.join(options.bundleDir, 'seed-manifest.json'),
       path.join(targetDir, 'seed-manifest.after.json')
@@ -396,11 +396,18 @@ export async function writeDownloadRunHistory(
       path.join(options.bundleDir, 'git-fetch-report.json'),
       path.join(targetDir, 'git-fetch-report.json')
     ),
-    copyIfExists(
-      path.join(options.bundleDir, 'prune-report.json'),
-      path.join(targetDir, 'prune-report.json')
-    ),
-  ]);
+  ];
+
+  if (options.pruneReport) {
+    reportCopies.push(
+      copyIfExists(
+        path.join(options.bundleDir, 'prune-report.json'),
+        path.join(targetDir, 'prune-report.json')
+      )
+    );
+  }
+
+  await Promise.all(reportCopies);
   await fs.writeJson(path.join(targetDir, 'package-changes.json'), packageChanges, { spaces: 2 });
   await fs.writeJson(path.join(targetDir, 'resolution-changes.json'), changes, { spaces: 2 });
 
