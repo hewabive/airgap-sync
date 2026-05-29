@@ -104,6 +104,12 @@ npm exec -- airgap-sync verify install ./airgap-bundle \
 
 After a global install, omit the `npm exec --` prefix.
 
+For Windows operators who prefer a double-click workflow, optional launchers live in
+[`support/windows`](./support/windows). Copy them to the online and closed-network
+machines; they find the removable drive workspace automatically. The download launcher
+updates and rebuilds the source checkout before running `download`; the publish
+launcher only runs the already-built `publish` command.
+
 ## Git Mirrors
 
 Git mirror paths preserve the upstream host and owner/repository path. For example,
