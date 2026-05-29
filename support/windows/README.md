@@ -4,7 +4,8 @@ These batch files are optional operator launchers for removable-media workflows.
 They are meant to be copied to a Windows machine, for example to the Desktop.
 
 - `airgap-download.bat` is for the online machine. It finds the removable drive
-  workspace, runs `git pull --ff-only`, `npm install`, `npm run build`, and then
+  workspace, runs `git pull --ff-only`, refreshes dependencies and rebuilds only when
+  Git changed or local install/build output is missing, and then runs
   `airgap-sync download`.
 - `airgap-publish.bat` is for the closed-network machine. It finds the same
   removable drive workspace and runs the already-built `airgap-sync publish`.
