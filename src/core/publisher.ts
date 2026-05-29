@@ -276,18 +276,36 @@ function errorSummary(error: unknown): string {
   return summary;
 }
 
-function currentNpmCliPath(): string | undefined {
+async function findNpmCliPath(): Promise<string | undefined> {
   const execPath = process.env.npm_execpath;
 
-  if (!execPath || path.basename(execPath).toLowerCase() !== 'npm-cli.js') {
-    return undefined;
+  if (execPath && path.basename(execPath).toLowerCase() === 'npm-cli.js') {
+    return execPath;
   }
 
-  return execPath;
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(
+      path.dirname(path.dirname(process.execPath)),
+      'lib',
+      'node_modules',
+      'npm',
+      'bin',
+      'npm-cli.js'
+    ),
+  ];
+
+  for (const candidate of candidates) {
+    if (await fs.pathExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 async function runNpm(args: string[], options: NpmRunOptions): Promise<{ stdout: string }> {
-  const npmCliPath = currentNpmCliPath();
+  const npmCliPath = await findNpmCliPath();
 
   if (npmCliPath) {
     return await execFileAsync(process.execPath, [npmCliPath, ...args], {
@@ -297,9 +315,14 @@ async function runNpm(args: string[], options: NpmRunOptions): Promise<{ stdout:
     });
   }
 
+  if (process.platform === 'win32') {
+    throw new Error(
+      'Could not locate npm-cli.js next to the current Node.js executable. Install Node.js with npm, or run airgap-sync through npm/npx so npm_execpath is available.'
+    );
+  }
+
   return await execFileAsync('npm', args, {
     maxBuffer: options.maxBuffer,
-    shell: process.platform === 'win32',
     timeout: options.timeout,
     windowsHide: true,
   });

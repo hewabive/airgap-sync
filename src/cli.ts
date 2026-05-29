@@ -405,6 +405,13 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
   const gitAction = report.dryRun ? 'planned' : 'pushed';
   const lines = [
     status,
+    ...(npmAuthErrors.length > 0
+      ? [
+          red(`NPM auth: failed for ${report.registryUrl}.`),
+          `Run: npm adduser --registry ${report.registryUrl}`,
+          'Package publishing and dist-tag restore were skipped because npm is not logged in.',
+        ]
+      : []),
     `NPM packages: ${String(report.publish.totalPackages)} total, ${String(
       report.publish.published
     )} ${npmPackageAction}, ${String(report.publish.skipped)} already in registry, ${String(
