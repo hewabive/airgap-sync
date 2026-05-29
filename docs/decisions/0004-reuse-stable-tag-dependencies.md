@@ -33,6 +33,12 @@ change refs in the current run.
 Root tag targets, such as an operator adding `eslint@latest`, remain explicit refresh
 requests and always resolve through the source registry.
 
+The same stability model is used by `rangeResolutionPolicy: "reuse-stable"` for
+transitive semver ranges. Exact previous `name + range + requiredBy` mappings are reused
+first. If a stable parent has no exact previous mapping for a range, the resolver uses
+the highest already bundled version that satisfies the range before consulting the
+source registry.
+
 `reuse-stable` is intended for a single linear update stream where the generated bundle
 is the only source of changes to the closed-network npm registry. npm dist-tags are
 global per package name; they cannot represent different versions for different
@@ -45,6 +51,8 @@ independently generated bundles, use `refresh` and apply bundles in generation o
   change.
 - A previous tag mapping is reused only when it is tied to the same declaring parent;
   an unrelated package version in the bundle is not enough.
+- Stable transitive ranges can reuse an already bundled compatible version even when a
+  parent-specific range mapping is not available yet.
 - Reused dependency tags are restored strictly during publish, so `reuse-stable` is not
   suitable for registries that receive independent updates from multiple sources.
 - Git mirror fetch reports must distinguish "remote update command ran" from "refs

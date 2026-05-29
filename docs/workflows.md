@@ -159,10 +159,12 @@ against the source registry during this run.
 Download also defaults to `rangeResolutionPolicy: "reuse-stable"`. If a transitive
 dependency range such as `hono@^4.11.4` was previously resolved for the same declaring
 parent, and that parent did not change, the old resolved version is reused while its
-tarball remains in the bundle. Root range targets are still explicit operator requests
-and are resolved from the source registry. Use `--range-resolution-policy refresh` when
-transitive ranges should float to the newest currently satisfying versions during this
-run.
+tarball remains in the bundle. If that exact parent mapping is absent, but the parent is
+stable and the bundle already contains a version that satisfies the range, the highest
+matching bundled version is reused. Root range targets are still explicit operator
+requests and are resolved from the source registry. Use `--range-resolution-policy
+refresh` when transitive ranges should float to the newest currently satisfying versions
+during this run.
 
 Use `reuse-stable` when this workspace is the only source of Verdaccio updates and
 imports are applied in order. Avoid it when the same Verdaccio is updated through other

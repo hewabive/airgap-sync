@@ -211,14 +211,19 @@ resolved from the source registry. `tagResolutionPolicy: "refresh"` disables reu
 resolves all tag dependencies from source metadata.
 
 The default `rangeResolutionPolicy` is also `reuse-stable`. During repeated downloads,
-a transitive semver range can reuse the previous bundle's resolved version when all of
-these are true:
+a transitive semver range first tries to reuse the previous bundle's exact
+`name + range + requiredBy` mapping when all of these are true:
 
 - the previous `seed-manifest.json` contains the same `name + range + requiredBy`
   reason;
 - the resolved package version is still present in `seed-manifest.json`;
 - the mapped tarball still exists on disk;
 - the declaring parent is stable.
+
+If that exact mapping is absent but the declaring parent is stable, the resolver falls
+back to the highest already bundled version that satisfies the range. Only when no
+bundled version satisfies the range does it resolve the transitive range from the source
+registry.
 
 Root range targets are explicit operator requests and are always resolved from the
 source registry. `rangeResolutionPolicy: "refresh"` disables range reuse and lets

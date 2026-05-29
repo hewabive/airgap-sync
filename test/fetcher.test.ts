@@ -653,6 +653,71 @@ describe('fetchSeedBundle', () => {
     ]);
   });
 
+  it('reuses bundled range-compatible versions when previous parent range mapping is absent', async () => {
+    const registryWithMovedRange: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  dep: '^1.0.0',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('dep');
+        return Promise.resolve({
+          name: 'dep',
+          versions: {
+            '1.0.0': {
+              name: 'dep',
+              version: '1.0.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.0.0.tgz' },
+            },
+            '1.1.0': {
+              name: 'dep',
+              version: '1.1.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.1.0.tgz' },
+            },
+            '1.2.0': {
+              name: 'dep',
+              version: '1.2.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.2.0.tgz' },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithMovedRange,
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0', 'dep@1.0.0', 'dep@1.1.0']),
+        packageVersionsByName: new Map([
+          ['demo', ['1.0.0']],
+          ['dep', ['1.0.0', '1.1.0']],
+        ]),
+        rangeVersions: new Map(),
+        tagVersions: new Map(),
+      },
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+      'dep@1.1.0',
+    ]);
+  });
+
   it('resolves stable exact package versions from metadata cache', async () => {
     const requestedNames: string[] = [];
     const metadataCache = new RegistryMetadataCache({

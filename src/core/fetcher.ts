@@ -27,6 +27,7 @@ import {
 } from './tarball.js';
 import { packageFileName } from './files.js';
 import {
+  stableBundledRangeRequirement,
   stableRangeRequirement,
   stableTagRequirement,
   type StableTagResolutionIndex,
@@ -283,7 +284,9 @@ export async function fetchSeedBundle(
       stableRequiredBy.has(requirement.requiredBy) &&
       options.stableTagResolutions
     ) {
-      const rangeRequirement = stableRangeRequirement(requirement, options.stableTagResolutions);
+      const rangeRequirement =
+        stableRangeRequirement(requirement, options.stableTagResolutions) ??
+        stableBundledRangeRequirement(requirement, options.stableTagResolutions);
       if (rangeRequirement) {
         return {
           name: requirement.name,

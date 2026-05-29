@@ -4,6 +4,7 @@ import type { BundleManifest, DistTagsManifest, TagRequirement } from '../types.
 import * as fs from './fs.js';
 
 export interface StableTagResolutionIndex {
+  packageVersionsByName?: Map<string, string[]>;
   rangeVersions: Map<string, string>;
   packageIds: Set<string>;
   tagVersions: Map<string, string>;
@@ -17,6 +18,7 @@ export interface StableRangeResolution {
 }
 
 const emptyStableTagResolutionIndex = (): StableTagResolutionIndex => ({
+  packageVersionsByName: new Map(),
   rangeVersions: new Map(),
   packageIds: new Set(),
   tagVersions: new Map(),
@@ -40,6 +42,16 @@ export function stableRangeResolutionKey(requirement: {
   specifier: string;
 }): string {
   return [requirement.name, requirement.specifier, requirement.requiredBy].join('\0');
+}
+
+function addPackageVersion(
+  versionsByName: Map<string, string[]>,
+  name: string,
+  version: string
+): void {
+  const versions = versionsByName.get(name) ?? [];
+  versions.push(version);
+  versionsByName.set(name, versions);
 }
 
 async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
@@ -67,9 +79,11 @@ export async function readStableTagResolutionIndex(
   }
 
   const packageIds = new Set<string>();
+  const packageVersionsByName = new Map<string, string[]>();
   for (const pkg of manifest.packages) {
     if (await fs.pathExists(path.join(bundleDir, pkg.file))) {
       packageIds.add(packageId(pkg.name, pkg.version));
+      addPackageVersion(packageVersionsByName, pkg.name, pkg.version);
     }
   }
 
@@ -104,7 +118,7 @@ export async function readStableTagResolutionIndex(
     }
   }
 
-  return { packageIds, rangeVersions, tagVersions };
+  return { packageIds, packageVersionsByName, rangeVersions, tagVersions };
 }
 
 export function stableTagRequirement(
@@ -140,6 +154,23 @@ export function stableRangeRequirement(
       specifier: requirement.specifier,
     })
   );
+
+  return version
+    ? {
+        name: requirement.name,
+        requiredBy: requirement.requiredBy,
+        specifier: requirement.specifier,
+        version,
+      }
+    : undefined;
+}
+
+export function stableBundledRangeRequirement(
+  requirement: { name: string; requiredBy: string; specifier: string },
+  index: StableTagResolutionIndex
+): StableRangeResolution | undefined {
+  const versions = index.packageVersionsByName?.get(requirement.name) ?? [];
+  const version = semver.maxSatisfying(versions, requirement.specifier);
 
   return version
     ? {
