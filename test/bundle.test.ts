@@ -73,6 +73,49 @@ describe('createBundleDocuments', () => {
     });
   });
 
+  it('preserves collected resolution reasons in seed manifest packages', () => {
+    const documents = createBundleDocuments({
+      createdAt: '2026-05-20T00:00:00.000Z',
+      outputDir: './airgap-bundle',
+      resolved: [
+        {
+          ...resolvedPackage,
+          resolvedFrom: [
+            {
+              raw: '@scope/demo@^1.0.0',
+              requiredBy: 'parent@1.0.0',
+              specifier: '^1.0.0',
+              type: 'range',
+            },
+            {
+              raw: '@scope/demo@1.2.3',
+              requiredBy: 'lockfile:package-lock.json',
+              specifier: '1.2.3',
+              type: 'version',
+            },
+          ],
+        },
+      ],
+      sourceRegistry: 'https://registry.example',
+      tagRequirements: [],
+    });
+
+    expect(documents.manifest.packages[0]?.resolvedFrom).toEqual([
+      {
+        raw: '@scope/demo@^1.0.0',
+        requiredBy: 'parent@1.0.0',
+        specifier: '^1.0.0',
+        type: 'range',
+      },
+      {
+        raw: '@scope/demo@1.2.3',
+        requiredBy: 'lockfile:package-lock.json',
+        specifier: '1.2.3',
+        type: 'version',
+      },
+    ]);
+  });
+
   it('does not persist computed bundled latest requirements', () => {
     const documents = createBundleDocuments({
       createdAt: '2026-05-20T00:00:00.000Z',

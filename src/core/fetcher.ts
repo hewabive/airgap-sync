@@ -10,6 +10,7 @@ import type {
   RangeResolutionPolicy,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
+  ResolutionReason,
   RootPackageRequirement,
   TagRequirement,
   TagResolutionPolicy,
@@ -87,14 +88,15 @@ function fetchPackageAction(
   pkg: ResolvedRootPackage,
   file = path.posix.join('packages', packageFileName(pkg.name, pkg.version))
 ): FetchPackageAction {
+  const reason = pkg.resolvedFrom?.[0] ?? resolutionReasonFromResolved(pkg);
   return {
     file,
     name: pkg.name,
-    raw: pkg.raw,
-    requiredBy: pkg.requiredBy,
+    raw: reason.raw,
+    requiredBy: reason.requiredBy,
     resolvedVia: pkg.resolvedVia,
-    specifier: pkg.specifier,
-    type: pkg.type,
+    specifier: reason.specifier,
+    type: reason.type,
     version: pkg.version,
   };
 }
@@ -114,6 +116,42 @@ function requirementId(requirement: RootPackageRequirement): string {
     requirement.type,
     requirement.alias ?? '',
   ].join('\0');
+}
+
+function resolvedRequirementId(requirement: ResolvedRootPackage): string {
+  return [
+    requirement.requiredBy,
+    requirement.name,
+    requirement.specifier,
+    requirement.type,
+    requirement.alias ?? '',
+  ].join('\0');
+}
+
+function resolutionReasonFromRequirement(requirement: RootPackageRequirement): ResolutionReason {
+  return {
+    raw: requirement.raw,
+    requiredBy: requirement.requiredBy,
+    specifier: requirement.specifier,
+    type: requirement.type,
+  };
+}
+
+function resolutionReasonFromResolved(resolved: ResolvedRootPackage): ResolutionReason {
+  return {
+    raw: resolved.raw,
+    requiredBy: resolved.requiredBy,
+    specifier: resolved.specifier,
+    type: resolved.type,
+  };
+}
+
+function resolutionReasonId(reason: ResolutionReason): string {
+  return [reason.requiredBy, reason.raw, reason.specifier, reason.type].join('\0');
+}
+
+function compareResolutionReason(left: ResolutionReason, right: ResolutionReason): number {
+  return resolutionReasonId(left).localeCompare(resolutionReasonId(right));
 }
 
 function tagRequirementId(requirement: { name: string; tag: string; version: string }): string {
@@ -249,6 +287,8 @@ export async function fetchSeedBundle(
   const stableTagRequirements = new Map<string, TagRequirement>();
   const stablePackageIds = options.stableTagResolutions?.packageIds ?? new Set<string>();
   const stableRequiredBy = new Set([...(options.stableRequiredBy ?? []), ...stablePackageIds]);
+  const originalReasonsByRequirementId = new Map<string, ResolutionReason>();
+  const resolvedReasonsByPackageId = new Map<string, Map<string, ResolutionReason>>();
   const queue = options.requirements.map((requirement) => rewriteStableRequirement(requirement));
   const latestRequirements = new Set<string>();
   const processedRequirements = new Set<string>();
@@ -288,13 +328,18 @@ export async function fetchSeedBundle(
         stableRangeRequirement(requirement, options.stableTagResolutions) ??
         stableBundledRangeRequirement(requirement, options.stableTagResolutions);
       if (rangeRequirement) {
-        return {
+        const exactRequirement: RootPackageRequirement = {
           name: requirement.name,
           raw: `${requirement.name}@${rangeRequirement.version}`,
           requiredBy: requirement.requiredBy,
           specifier: rangeRequirement.version,
           type: 'version',
         };
+        originalReasonsByRequirementId.set(
+          requirementId(exactRequirement),
+          resolutionReasonFromRequirement(requirement)
+        );
+        return exactRequirement;
       }
     }
 
@@ -314,8 +359,26 @@ export async function fetchSeedBundle(
     }
 
     const exactRequirement = exactRequirementFromStableTag(requirement, tagRequirement);
+    originalReasonsByRequirementId.set(
+      requirementId(exactRequirement),
+      resolutionReasonFromRequirement(requirement)
+    );
     stableTagRequirements.set(requirementId(exactRequirement), tagRequirement);
     return exactRequirement;
+  }
+
+  function addResolvedReason(packageIdValue: string, reason: ResolutionReason): void {
+    const reasons =
+      resolvedReasonsByPackageId.get(packageIdValue) ?? new Map<string, ResolutionReason>();
+    reasons.set(resolutionReasonId(reason), reason);
+    resolvedReasonsByPackageId.set(packageIdValue, reasons);
+  }
+
+  function resolvedReason(resolved: ResolvedRootPackage): ResolutionReason {
+    return (
+      originalReasonsByRequirementId.get(resolvedRequirementId(resolved)) ??
+      resolutionReasonFromResolved(resolved)
+    );
   }
 
   function addTagRequirement(tagRequirement: TagRequirement): void {
@@ -434,6 +497,10 @@ export async function fetchSeedBundle(
 
     const id = packageId(resolved);
     const alreadyResolved = resolvedById.has(id);
+    addResolvedReason(id, resolvedReason(resolved));
+    resolved.resolvedFrom = [
+      ...(resolvedReasonsByPackageId.get(id)?.values() ?? [resolutionReasonFromResolved(resolved)]),
+    ].sort(compareResolutionReason);
 
     if (!alreadyResolved) {
       resolvedById.set(id, resolved);
@@ -607,6 +674,13 @@ export async function fetchSeedBundle(
   });
 
   result.resolved.sort(comparePackageIdentity);
+  for (const resolved of result.resolved) {
+    resolved.resolvedFrom = [
+      ...(resolvedReasonsByPackageId.get(packageId(resolved))?.values() ?? [
+        resolutionReasonFromResolved(resolved),
+      ]),
+    ].sort(compareResolutionReason);
+  }
   result.downloadedPackages.sort(comparePackageIdentity);
   result.wouldDownloadPackages.sort(comparePackageIdentity);
   result.tagRequirements.sort(compareTagRequirement);

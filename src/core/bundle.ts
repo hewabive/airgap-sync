@@ -79,7 +79,7 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
     version: pkg.version,
     file: path.posix.join('packages', packageFileName(pkg.name, pkg.version)),
     tarball: pkg.dist.tarball,
-    resolvedFrom: [
+    resolvedFrom: pkg.resolvedFrom ?? [
       {
         raw: pkg.raw,
         requiredBy: pkg.requiredBy,

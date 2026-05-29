@@ -716,6 +716,80 @@ describe('fetchSeedBundle', () => {
       'demo@1.0.0',
       'dep@1.1.0',
     ]);
+    expect(result.resolved.find((pkg) => pkg.name === 'dep')?.resolvedFrom).toEqual([
+      {
+        raw: 'dep@^1.0.0',
+        requiredBy: 'demo@1.0.0',
+        specifier: '^1.0.0',
+        type: 'range',
+      },
+    ]);
+  });
+
+  it('records every discovered resolution reason for the same package version', async () => {
+    const registryWithDuplicateReasons: RegistryClient = {
+      getPackageMetadata(name) {
+        if (name === 'demo') {
+          return Promise.resolve({
+            name: 'demo',
+            versions: {
+              '1.0.0': {
+                name: 'demo',
+                version: '1.0.0',
+                dependencies: {
+                  dep: '^1.0.0',
+                },
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+              },
+            },
+          });
+        }
+
+        expect(name).toBe('dep');
+        return Promise.resolve({
+          name: 'dep',
+          versions: {
+            '1.0.0': {
+              name: 'dep',
+              version: '1.0.0',
+              dist: { tarball: 'https://registry.example/dep/-/dep-1.0.0.tgz' },
+            },
+          },
+        });
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      concurrency: 1,
+      download: false,
+      outputDir: '/virtual/seed',
+      registry: registryWithDuplicateReasons,
+      requirements: [
+        requirement({
+          name: 'dep',
+          raw: 'dep@1.0.0',
+          requiredBy: 'lockfile:package-lock.json',
+          specifier: '1.0.0',
+          type: 'version',
+        }),
+        requirement({}),
+      ],
+    });
+
+    expect(result.resolved.find((pkg) => pkg.name === 'dep')?.resolvedFrom).toEqual([
+      {
+        raw: 'dep@^1.0.0',
+        requiredBy: 'demo@1.0.0',
+        specifier: '^1.0.0',
+        type: 'range',
+      },
+      {
+        raw: 'dep@1.0.0',
+        requiredBy: 'lockfile:package-lock.json',
+        specifier: '1.0.0',
+        type: 'version',
+      },
+    ]);
   });
 
   it('resolves stable exact package versions from metadata cache', async () => {

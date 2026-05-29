@@ -307,6 +307,7 @@ export interface ResolvedRootPackage extends PackageIdentity {
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   raw: string;
   requiredBy: string;
+  resolvedFrom?: ResolutionReason[];
   resolvedVia: Exclude<SupportedSpecType, 'alias'>;
   specifier: string;
   type: SupportedSpecType;

@@ -34,7 +34,9 @@ airgap-bundle/
 
 ## seed-manifest.json
 
-Describes every tarball in the bundle and why it was included.
+Describes every tarball in the bundle and why it was included. A package can have
+multiple `resolvedFrom` entries when the same `name@version` satisfies several
+lockfile entries, manifest dependencies, or stable reused range/tag requirements.
 
 ```json
 {
