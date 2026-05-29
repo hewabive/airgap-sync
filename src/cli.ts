@@ -354,8 +354,8 @@ function formatDownloadSummary(report: CollectReport): string {
     report.gitFetch.updated - changedGitMirrors - report.gitFetch.unchanged
   );
   const npmLine = report.dryRun
-    ? `NPM packages: ${String(report.fetch.resolved)} resolved, dry run only, ${String(npmErrors)} errors.`
-    : `NPM packages: ${String(report.fetch.resolved)} resolved, ${String(downloadedThisRun)} downloaded, ${String(alreadyOnDisk)} already on disk, ${String(npmErrors)} errors.`;
+    ? `NPM packages: ${String(report.fetch.resolved)} resolved successfully, dry run only, ${String(npmErrors)} requirement errors.`
+    : `NPM packages: ${String(report.fetch.resolved)} resolved successfully (${String(downloadedThisRun)} downloaded, ${String(alreadyOnDisk)} already on disk), ${String(npmErrors)} requirement errors.`;
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
     : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
