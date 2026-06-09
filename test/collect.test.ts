@@ -679,6 +679,67 @@ describe('collectBundle', () => {
     });
   });
 
+  it('persists successful metadata cache entries after a failed npm fetch', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const metadataWithDependency: PackageMetadata = {
+      ...metadata,
+      versions: {
+        '1.0.0': {
+          ...metadata.versions['1.0.0']!,
+          dependencies: {
+            dep: 'latest',
+          },
+        },
+      },
+    };
+
+    const report = await collectBundle({
+      initialRequirements: [
+        {
+          name: 'demo',
+          raw: 'demo@latest',
+          requiredBy: 'root',
+          specifier: 'latest',
+          type: 'tag',
+        },
+      ],
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          if (name === 'demo') {
+            return Promise.resolve(metadataWithDependency);
+          }
+
+          throw new Error('The operation was aborted due to timeout');
+        },
+      },
+      registryUrl: 'https://registry.example',
+    });
+
+    expect(report.wroteBundle).toBe(false);
+    expect(report.fetch).toMatchObject({
+      errors: [
+        {
+          name: 'dep',
+          reason: 'The operation was aborted due to timeout',
+        },
+      ],
+      timings: {
+        metadataCacheMemoryWrites: 1,
+        metadataCachePersisted: true,
+      },
+    });
+    await expect(fs.readJson(path.join(outputDir, 'registry-metadata-cache.json'))).resolves
+      .toMatchObject({
+        packages: {
+          'demo@1.0.0': {
+            name: 'demo',
+            version: '1.0.0',
+          },
+        },
+      });
+  });
+
   it('reuses previous tag resolutions from unchanged Git source manifests', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');

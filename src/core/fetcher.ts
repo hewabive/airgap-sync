@@ -217,9 +217,12 @@ function createFetchTimings(): FetchTimings {
     dependencyScanMs: 0,
     downloadMs: 0,
     metadataCacheHits: 0,
+    metadataCacheMemoryWrites: 0,
+    metadataCachePersisted: false,
     metadataCacheWrites: 0,
     manifestReadMs: 0,
     resolveMs: 0,
+    resolveWorkerMs: 0,
     totalMs: 0,
   };
 }
@@ -620,7 +623,9 @@ export async function fetchSeedBundle(
 
       const resolveStart = performance.now();
       const resolution = await resolveRootRequirements([requirement], options.registry);
-      timings.resolveMs += elapsedMs(resolveStart);
+      const resolveMs = elapsedMs(resolveStart);
+      timings.resolveMs += resolveMs;
+      timings.resolveWorkerMs = (timings.resolveWorkerMs ?? 0) + resolveMs;
       result.errors.push(...resolution.errors);
       if (resolution.errors.length > 0) {
         options.onProgress?.({
@@ -637,6 +642,7 @@ export async function fetchSeedBundle(
 
       for (const resolved of resolution.resolved) {
         options.metadataCache?.set(metadataFromResolvedPackage(resolved));
+        timings.metadataCacheMemoryWrites = (timings.metadataCacheMemoryWrites ?? 0) + 1;
         timings.metadataCacheWrites = (timings.metadataCacheWrites ?? 0) + 1;
       }
 

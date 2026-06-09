@@ -659,16 +659,20 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         tagRequirements: resolution.tagRequirements,
       });
       await writeBundleDocuments(outputDir, documents);
-      await writeRegistryMetadataCache(outputDir, metadataCache, {
-        createdAt: generatedAt,
-        sourceRegistry: options.registryUrl,
-      });
       timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
       options.onProgress?.({
         current: documents.manifest.packages.length,
         phase: 'bundle-write',
         status: 'done',
       });
+    }
+
+    if (wroteBundle || (reportFetch.timings.metadataCacheMemoryWrites ?? 0) > 0) {
+      await writeRegistryMetadataCache(outputDir, metadataCache, {
+        createdAt: generatedAt,
+        sourceRegistry: options.registryUrl,
+      });
+      reportFetch.timings.metadataCachePersisted = true;
     }
 
     const reportWriteStart = performance.now();

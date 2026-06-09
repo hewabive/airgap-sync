@@ -118,19 +118,29 @@ function sumFetchTimings(reports: FetchReport[]): FetchTimings {
       dependencyScanMs: total.dependencyScanMs + report.timings.dependencyScanMs,
       downloadMs: total.downloadMs + report.timings.downloadMs,
       metadataCacheHits: (total.metadataCacheHits ?? 0) + (report.timings.metadataCacheHits ?? 0),
+      metadataCacheMemoryWrites:
+        (total.metadataCacheMemoryWrites ?? 0) +
+        (report.timings.metadataCacheMemoryWrites ?? report.timings.metadataCacheWrites ?? 0),
+      metadataCachePersisted:
+        (total.metadataCachePersisted ?? false) || (report.timings.metadataCachePersisted ?? false),
       metadataCacheWrites:
         (total.metadataCacheWrites ?? 0) + (report.timings.metadataCacheWrites ?? 0),
       manifestReadMs: total.manifestReadMs + report.timings.manifestReadMs,
       resolveMs: total.resolveMs + report.timings.resolveMs,
+      resolveWorkerMs:
+        (total.resolveWorkerMs ?? 0) + (report.timings.resolveWorkerMs ?? report.timings.resolveMs),
       totalMs: total.totalMs + report.timings.totalMs,
     }),
     {
       dependencyScanMs: 0,
       downloadMs: 0,
       metadataCacheHits: 0,
+      metadataCacheMemoryWrites: 0,
+      metadataCachePersisted: false,
       metadataCacheWrites: 0,
       manifestReadMs: 0,
       resolveMs: 0,
+      resolveWorkerMs: 0,
       totalMs: 0,
     }
   );

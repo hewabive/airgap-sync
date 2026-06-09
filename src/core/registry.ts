@@ -64,7 +64,7 @@ export class HttpRegistryClient implements RegistryClient {
     this.#registryUrl = registryUrl.replace(/\/$/, '');
     this.#authToken = options.authToken;
     this.#retryDelaysMs = options.retryDelaysMs;
-    this.#timeoutMs = options.timeoutMs ?? 60_000;
+    this.#timeoutMs = options.timeoutMs ?? 180_000;
   }
 
   async getPackageMetadata(name: string): Promise<PackageMetadata> {

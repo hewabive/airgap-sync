@@ -337,9 +337,12 @@ export interface FetchTimings {
   dependencyScanMs: number;
   downloadMs: number;
   metadataCacheHits?: number;
+  metadataCacheMemoryWrites?: number;
+  metadataCachePersisted?: boolean;
   metadataCacheWrites?: number;
   manifestReadMs: number;
   resolveMs: number;
+  resolveWorkerMs?: number;
   totalMs: number;
 }
 
