@@ -729,15 +729,16 @@ describe('collectBundle', () => {
         metadataCachePersisted: true,
       },
     });
-    await expect(fs.readJson(path.join(outputDir, 'registry-metadata-cache.json'))).resolves
-      .toMatchObject({
-        packages: {
-          'demo@1.0.0': {
-            name: 'demo',
-            version: '1.0.0',
-          },
+    await expect(
+      fs.readJson(path.join(outputDir, 'registry-metadata-cache.json'))
+    ).resolves.toMatchObject({
+      packages: {
+        'demo@1.0.0': {
+          name: 'demo',
+          version: '1.0.0',
         },
-      });
+      },
+    });
   });
 
   it('reuses previous tag resolutions from unchanged Git source manifests', async () => {
