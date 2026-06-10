@@ -111,11 +111,15 @@ describe('report aggregation', () => {
       gitFetchReport({
         actions: [
           {
+            addedRefs: 0,
             changed: true,
+            deletedRefs: 0,
+            newCommits: 2,
             repository: 'github.com/acme/app',
             sourceUrl: 'https://github.com/acme/app.git',
             status: 'updated',
             targetPath: '/bundle/git-mirrors/github.com/acme/app.git',
+            updatedRefs: 1,
           },
         ],
         changed: 1,
@@ -149,7 +153,9 @@ describe('report aggregation', () => {
     expect(report?.actions).toEqual([
       expect.objectContaining({
         changed: true,
+        newCommits: 2,
         repository: 'github.com/acme/app',
+        updatedRefs: 1,
       }),
     ]);
   });

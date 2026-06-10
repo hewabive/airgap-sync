@@ -125,12 +125,16 @@ export interface CollectReport {
 export type GitFetchActionStatus = 'planned' | 'cloned' | 'updated' | 'error';
 
 export interface GitFetchActionResult {
+  addedRefs?: number;
   changed?: boolean;
+  deletedRefs?: number;
   error?: string;
+  newCommits?: number;
   repository: string;
   sourceUrl: string;
   status: GitFetchActionStatus;
   targetPath: string;
+  updatedRefs?: number;
 }
 
 export interface GitFetchReport {

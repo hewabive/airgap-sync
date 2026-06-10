@@ -348,7 +348,9 @@ created as bare repositories and fetched through explicit branch/tag refspecs.
 Existing mirrors run `git remote set-url origin` and `git fetch --prune origin` for
 `refs/heads/*` and `refs/tags/*`. Provider-specific refs such as GitHub pull-request
 refs are intentionally not downloaded into new mirrors. The command writes
-`git-fetch-report.json`.
+`git-fetch-report.json`. During fetch, each mirror is logged with its
+repository, status, whether refs changed, and, when it can be counted locally, the
+number of new commits on updated refs.
 
 This is the online-side download step only. It does not push to Gitea; that belongs
 to a later offline publish command.

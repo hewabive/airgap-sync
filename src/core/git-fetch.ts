@@ -33,6 +33,7 @@ export interface FetchGitSourcesOptions {
 export type GitFetchProgressStatus = 'start' | 'progress' | 'done';
 
 export interface GitFetchProgressEvent {
+  action?: GitFetchActionResult;
   current: number;
   repository?: string;
   status: GitFetchProgressStatus;
@@ -48,6 +49,16 @@ interface FetchEntry {
 const mirrorBranchRefspec = '+refs/heads/*:refs/heads/*';
 const mirrorTagRefspec = '+refs/tags/*:refs/tags/*';
 const mirroredRefNamespaces = ['refs/heads', 'refs/tags'];
+
+type RefSnapshot = Map<string, string>;
+
+interface RefChangeSummary {
+  addedRefs: number;
+  changed: boolean;
+  deletedRefs: number;
+  newCommits?: number;
+  updatedRefs: number;
+}
 
 function redactGitArg(arg: string): string {
   return arg.startsWith('http.extraHeader=') ? 'http.extraHeader=<redacted>' : arg;
@@ -99,10 +110,24 @@ function normalizeRefs(value: string): string {
     .join('\n');
 }
 
-async function refsFingerprint(
+function parseRefs(value: string): RefSnapshot {
+  const refs: RefSnapshot = new Map();
+  for (const line of normalizeRefs(value).split('\n')) {
+    if (!line) {
+      continue;
+    }
+    const [refname, objectname] = line.split(/\s+/, 2);
+    if (refname && objectname) {
+      refs.set(refname, objectname);
+    }
+  }
+  return refs;
+}
+
+async function refsSnapshot(
   targetPath: string,
   runner: GitCommandRunner
-): Promise<string | undefined> {
+): Promise<RefSnapshot | undefined> {
   const result = await runner({
     args: safeDirectoryGitArgs(targetPath, [
       '-C',
@@ -113,7 +138,88 @@ async function refsFingerprint(
     ]),
   });
 
-  return result ? normalizeRefs(result.stdout) : undefined;
+  return result ? parseRefs(result.stdout) : undefined;
+}
+
+async function countNewCommits(options: {
+  ranges: string[];
+  runner: GitCommandRunner;
+  targetPath: string;
+}): Promise<number | undefined> {
+  if (options.ranges.length === 0) {
+    return undefined;
+  }
+
+  try {
+    const result = await options.runner({
+      args: safeDirectoryGitArgs(options.targetPath, [
+        '-C',
+        options.targetPath,
+        'rev-list',
+        '--count',
+        ...options.ranges,
+      ]),
+    });
+
+    if (!result) {
+      return undefined;
+    }
+
+    const count = Number.parseInt(result.stdout.trim(), 10);
+    return Number.isFinite(count) ? count : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function summarizeRefChanges(options: {
+  after: RefSnapshot;
+  before: RefSnapshot;
+  runner: GitCommandRunner;
+  targetPath: string;
+}): Promise<RefChangeSummary> {
+  let addedRefs = 0;
+  let deletedRefs = 0;
+  let updatedRefs = 0;
+  const commitRanges: string[] = [];
+
+  for (const [refname, afterObject] of options.after) {
+    const beforeObject = options.before.get(refname);
+    if (beforeObject === undefined) {
+      addedRefs += 1;
+      continue;
+    }
+    if (beforeObject === afterObject) {
+      continue;
+    }
+
+    updatedRefs += 1;
+    if (!refname.startsWith('refs/heads/')) {
+      continue;
+    }
+
+    commitRanges.push(`${beforeObject}..${afterObject}`);
+  }
+
+  for (const refname of options.before.keys()) {
+    if (!options.after.has(refname)) {
+      deletedRefs += 1;
+    }
+  }
+
+  const newCommits = await countNewCommits({
+    ranges: commitRanges,
+    runner: options.runner,
+    targetPath: options.targetPath,
+  });
+
+  return {
+    addedRefs,
+    changed: addedRefs > 0 || deletedRefs > 0 || updatedRefs > 0,
+    deletedRefs,
+    ...(newCommits === undefined ? {} : { newCommits }),
+    updatedRefs,
+  };
 }
 
 async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Promise<void> {
@@ -148,7 +254,7 @@ async function fetchEntry(
 ): Promise<GitFetchActionResult> {
   try {
     if (await fs.pathExists(entry.targetPath)) {
-      const before = await refsFingerprint(entry.targetPath, runner);
+      const before = await refsSnapshot(entry.targetPath, runner);
       await runner({
         args: safeDirectoryGitArgs(entry.targetPath, [
           '-C',
@@ -160,9 +266,26 @@ async function fetchEntry(
         ]),
       });
       await fetchMirrorRefs(entry.targetPath, runner);
-      const after = await refsFingerprint(entry.targetPath, runner);
+      const after = await refsSnapshot(entry.targetPath, runner);
+      const changes =
+        before !== undefined && after !== undefined
+          ? await summarizeRefChanges({
+              after,
+              before,
+              runner,
+              targetPath: entry.targetPath,
+            })
+          : undefined;
       return {
-        ...(before !== undefined && after !== undefined ? { changed: before !== after } : {}),
+        ...(changes
+          ? {
+              addedRefs: changes.addedRefs,
+              changed: changes.changed,
+              deletedRefs: changes.deletedRefs,
+              ...(changes.newCommits === undefined ? {} : { newCommits: changes.newCommits }),
+              updatedRefs: changes.updatedRefs,
+            }
+          : {}),
         repository: entry.id,
         sourceUrl: entry.sourceUrl,
         status: 'updated',
@@ -219,19 +342,29 @@ async function fetchEntries(options: {
   });
 
   if (options.dryRun) {
-    for (const entry of options.entries) {
-      actions.push({
+    for (const [index, entry] of options.entries.entries()) {
+      const action: GitFetchActionResult = {
         repository: entry.id,
         sourceUrl: entry.sourceUrl,
         status: 'planned',
         targetPath: entry.targetPath,
+      };
+      actions.push(action);
+      options.onProgress?.({
+        action,
+        current: index + 1,
+        repository: entry.id,
+        status: 'progress',
+        total: options.entries.length,
       });
     }
   } else {
     const runner = options.runner ?? runGitCommand;
     for (const [index, entry] of options.entries.entries()) {
-      actions.push(await fetchEntry(entry, runner));
+      const action = await fetchEntry(entry, runner);
+      actions.push(action);
       options.onProgress?.({
+        action,
         current: index + 1,
         repository: entry.id,
         status: 'progress',

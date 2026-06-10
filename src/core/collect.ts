@@ -171,6 +171,37 @@ function gitSourcesFetchKey(sources: GitSource[]): string {
   );
 }
 
+function formatGitFetchProgressDetail(event: GitFetchProgressEvent): string | undefined {
+  if (!event.action) {
+    return event.repository;
+  }
+
+  const action = event.action;
+  const parts = [action.repository, action.status];
+  if (action.status === 'updated') {
+    if (action.changed === false) {
+      parts.push('unchanged');
+    } else if (action.changed === true) {
+      parts.push('changed');
+    }
+  }
+  if (action.newCommits !== undefined) {
+    parts.push(`+${String(action.newCommits)} commits`);
+  }
+  const refChanges =
+    (action.addedRefs ?? 0) + (action.updatedRefs ?? 0) + (action.deletedRefs ?? 0);
+  if (refChanges > 0) {
+    parts.push(
+      `refs +${String(action.addedRefs ?? 0)}/~${String(action.updatedRefs ?? 0)}/-${String(action.deletedRefs ?? 0)}`
+    );
+  }
+  if (action.error) {
+    parts.push(action.error);
+  }
+
+  return parts.join(' ');
+}
+
 function emptyRepositoryUpdateReport(options: {
   dryRun: boolean;
   generatedAt: string;
@@ -491,9 +522,10 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         generatedAt,
         manifest: gitSources,
         onProgress: (event: GitFetchProgressEvent) => {
+          const detail = formatGitFetchProgressDetail(event);
           options.onProgress?.({
             current: event.current,
-            ...(event.repository ? { detail: event.repository } : {}),
+            ...(detail ? { detail } : {}),
             iteration,
             phase: 'git-fetch',
             status: event.status,

@@ -215,6 +215,94 @@ describe('fetchGitSources', () => {
     });
   });
 
+  it('records updated refs and new commits for changed source mirrors', async () => {
+    const targetPath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(targetPath);
+    const calls: GitCommandInvocation[] = [];
+    const refSnapshots = ['refs/heads/main old\n', 'refs/heads/main new\nrefs/tags/v1 tag\n'];
+
+    const report = await fetchGitSources({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      manifest: sourcesManifest,
+      runner: (invocation) => {
+        calls.push(invocation);
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({ stderr: '', stdout: refSnapshots.shift() ?? '' });
+        }
+        if (invocation.args.includes('rev-list')) {
+          return Promise.resolve({ stderr: '', stdout: '3\n' });
+        }
+        return Promise.resolve(undefined);
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        args: mirrorGitArgs(targetPath, [
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/heads',
+          'refs/tags',
+        ]),
+      },
+      {
+        args: mirrorGitArgs(targetPath, [
+          'remote',
+          'set-url',
+          'origin',
+          'https://github.com/owner/repo.git',
+        ]),
+      },
+      {
+        args: mirrorGitArgs(targetPath, [
+          'config',
+          '--replace-all',
+          'remote.origin.fetch',
+          '+refs/heads/*:refs/heads/*',
+        ]),
+      },
+      {
+        args: mirrorGitArgs(targetPath, [
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/tags/*:refs/tags/*',
+        ]),
+      },
+      {
+        args: mirrorGitArgs(targetPath, ['fetch', '--prune', 'origin']),
+      },
+      {
+        args: mirrorGitArgs(targetPath, [
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/heads',
+          'refs/tags',
+        ]),
+      },
+      {
+        args: mirrorGitArgs(targetPath, ['rev-list', '--count', 'old..new']),
+      },
+    ]);
+    expect(report).toMatchObject({
+      changed: 1,
+      cloned: 0,
+      errors: [],
+      unchanged: 0,
+      updated: 1,
+    });
+    expect(report.actions[0]).toMatchObject({
+      addedRefs: 1,
+      changed: true,
+      deletedRefs: 0,
+      newCommits: 3,
+      repository: 'github.com/owner/repo',
+      status: 'updated',
+      updatedRefs: 1,
+    });
+  });
+
   it('records git command failures without stopping the whole report', async () => {
     const report = await fetchGitSources({
       bundleDir,

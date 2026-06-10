@@ -75,6 +75,7 @@ import type {
   CollectReport,
   CollectProgressEvent,
   FetchSeedBundleResult,
+  GitFetchProgressEvent,
   LatestPolicy,
   PublishProgressEvent,
   PublishProgressPhase,
@@ -349,6 +350,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const changedGitMirrors = report.gitFetch.actions.filter(
     (action) => action.status === 'updated' && action.changed === true
   ).length;
+  const newGitCommits = report.gitFetch.actions.reduce(
+    (total, action) => total + (action.newCommits ?? 0),
+    0
+  );
   const unknownGitMirrors = Math.max(
     0,
     report.gitFetch.updated - changedGitMirrors - report.gitFetch.unchanged
@@ -358,7 +363,7 @@ function formatDownloadSummary(report: CollectReport): string {
     : `NPM packages: ${String(report.fetch.resolved)} resolved successfully (${String(downloadedThisRun)} downloaded, ${String(alreadyOnDisk)} already on disk), ${String(npmErrors)} requirement errors.`;
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
-    : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
+    : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed${newGitCommits > 0 ? `, +${String(newGitCommits)} commits` : ''}, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
   const reportsWritten = report.dryRun ? 'no' : 'yes';
   const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
@@ -685,6 +690,7 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
     const threshold =
       event.total && event.total > 0 ? Math.max(1, Math.ceil(event.total / 20)) : 25;
     const shouldLog =
+      event.phase === 'git-fetch' ||
       event.current === 1 ||
       event.current - last >= threshold ||
       (event.total !== undefined && event.current === event.total);
@@ -696,6 +702,51 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
     lastLogged.set(key, event.current);
     console.error(formatProgressLine(event, label, prefix));
     recordOutput(key);
+  };
+}
+
+function formatGitFetchActionDetail(event: GitFetchProgressEvent): string | undefined {
+  if (!event.action) {
+    return event.repository;
+  }
+
+  const action = event.action;
+  const parts = [action.repository, action.status];
+  if (action.status === 'updated') {
+    if (action.changed === false) {
+      parts.push('unchanged');
+    } else if (action.changed === true) {
+      parts.push('changed');
+    }
+  }
+  if (action.newCommits !== undefined) {
+    parts.push(`+${String(action.newCommits)} commits`);
+  }
+  const refChanges =
+    (action.addedRefs ?? 0) + (action.updatedRefs ?? 0) + (action.deletedRefs ?? 0);
+  if (refChanges > 0) {
+    parts.push(
+      `refs +${String(action.addedRefs ?? 0)}/~${String(action.updatedRefs ?? 0)}/-${String(action.deletedRefs ?? 0)}`
+    );
+  }
+  if (action.error) {
+    parts.push(action.error);
+  }
+
+  return parts.join(' ');
+}
+
+function createGitFetchProgressLogger(): (event: GitFetchProgressEvent) => void {
+  const logger = createCollectProgressLogger();
+  return (event) => {
+    const detail = formatGitFetchActionDetail(event);
+    logger({
+      current: event.current,
+      ...(detail ? { detail } : {}),
+      phase: 'git-fetch',
+      status: event.status,
+      total: event.total,
+    });
   };
 }
 
@@ -2519,6 +2570,7 @@ gitCommand
         bundleDir: bundle,
         dryRun: options.dryRun === true,
         manifest,
+        onProgress: createGitFetchProgressLogger(),
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
       });
 

@@ -35,18 +35,36 @@ function mergeGitFetchChanged(
   return next ?? previous;
 }
 
+function mergeOptionalCounts(previous?: number, next?: number): number | undefined {
+  if (previous === undefined) {
+    return next;
+  }
+  if (next === undefined) {
+    return previous;
+  }
+  return previous + next;
+}
+
 function mergeGitFetchAction(
   previous: GitFetchActionResult,
   next: GitFetchActionResult
 ): GitFetchActionResult {
   const changed = mergeGitFetchChanged(previous.changed, next.changed);
+  const addedRefs = mergeOptionalCounts(previous.addedRefs, next.addedRefs);
+  const deletedRefs = mergeOptionalCounts(previous.deletedRefs, next.deletedRefs);
+  const newCommits = mergeOptionalCounts(previous.newCommits, next.newCommits);
+  const updatedRefs = mergeOptionalCounts(previous.updatedRefs, next.updatedRefs);
   return {
+    ...(addedRefs === undefined ? {} : { addedRefs }),
+    ...(deletedRefs === undefined ? {} : { deletedRefs }),
     ...((next.error ?? previous.error) ? { error: next.error ?? previous.error } : {}),
+    ...(newCommits === undefined ? {} : { newCommits }),
     repository: next.repository,
     sourceUrl: next.sourceUrl,
     status: mergeGitFetchStatus(previous.status, next.status),
     targetPath: next.targetPath,
     ...(changed === undefined ? {} : { changed }),
+    ...(updatedRefs === undefined ? {} : { updatedRefs }),
   };
 }
 
