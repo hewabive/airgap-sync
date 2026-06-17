@@ -592,6 +592,8 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
 };
 
 const COLLECT_PROGRESS_HEARTBEAT_MS = 10_000;
+const gitFetchInteractivePromptHint =
+  'If SSH asked for a passphrase, type it now and press Enter; the prompt is still active.';
 
 function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
   return (event) => {
@@ -616,6 +618,11 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
 
   function formatProgressLine(event: CollectProgressEvent, label: string, prefix: string): string {
     return `${prefix} ${label}: ${formatProgressState(event)}`;
+  }
+
+  function formatHeartbeatLine(event: CollectProgressEvent, label: string, prefix: string): string {
+    const hint = event.phase === 'git-fetch' ? ` ${gitFetchInteractivePromptHint}` : '';
+    return `${prefix} ${label}: still running ${formatProgressState(event)}${hint}`;
   }
 
   function recordOutput(key: string): void {
@@ -653,7 +660,7 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
         if (Date.now() - previousOutputAt < COLLECT_PROGRESS_HEARTBEAT_MS) {
           return;
         }
-        console.error(`${prefix} ${label}: still running ${formatProgressState(latest)}`);
+        console.error(formatHeartbeatLine(latest, label, prefix));
         recordOutput(key);
       }, COLLECT_PROGRESS_HEARTBEAT_MS);
       timer.unref();
