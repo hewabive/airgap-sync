@@ -18,6 +18,7 @@ import {
   createBundleDocuments,
   createFetchReport,
   createWorkspaceGitSources,
+  createWorkspacePythonRequirements,
   createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
@@ -25,6 +26,7 @@ import {
   fetchSeedBundle,
   HttpGiteaClient,
   HttpRegistryClient,
+  HttpPythonIndexClient,
   initWorkspace,
   packageName,
   packageVersion,
@@ -127,6 +129,7 @@ interface ApplyOptions {
   mirrorsDir?: string;
   publishConcurrency: number;
   public?: boolean;
+  pythonOwner?: string;
   registry?: string;
   skipExisting?: boolean;
   skipGitProvision?: boolean;
@@ -141,6 +144,7 @@ interface VerifyInstallOptions {
   gitea: string;
   json?: boolean;
   keepTemp?: boolean;
+  pythonOwner?: string;
   registry: string;
   timeoutMs: number;
 }
@@ -298,11 +302,13 @@ function collectShouldFail(report: {
   gitManifestScanErrors: unknown[];
   gitSources: { skipped: unknown[] };
   maxIterationsReached: boolean;
+  python?: { errors: unknown[] };
   repositoryUpdate: { errors: unknown[] };
 }): boolean {
   return (
     report.repositoryUpdate.errors.length > 0 ||
     report.fetch.errors.length > 0 ||
+    (report.python?.errors.length ?? 0) > 0 ||
     report.gitSources.skipped.length > 0 ||
     report.gitFetch.errors.length > 0 ||
     report.gitManifestScanErrors.length > 0 ||
@@ -364,12 +370,18 @@ function formatDownloadSummary(report: CollectReport): string {
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
     : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed${newGitCommits > 0 ? `, +${String(newGitCommits)} commits` : ''}, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
+  const pythonLine = report.python
+    ? report.dryRun
+      ? `Python wheels: ${String(report.python.resolvedFiles)} resolved, ${String(report.python.planned)} planned, ${String(report.python.errors.length)} errors.`
+      : `Python wheels: ${String(report.python.resolvedFiles)} resolved (${String(report.python.downloaded)} downloaded, ${String(report.python.skipped)} already on disk), ${String(report.python.errors.length)} errors.`
+    : undefined;
   const reportsWritten = report.dryRun ? 'no' : 'yes';
   const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
     status,
     npmLine,
     gitLine,
+    ...(pythonLine ? [pythonLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
 
@@ -389,19 +401,21 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
   const giteaErrors = report.gitea.errors.length + report.gitea.organizationErrors.length;
   const gitApplyErrors = report.gitApply.errors.length;
   const gitConfigErrors = report.gitConfig?.errors.length ?? 0;
+  const pythonErrors = report.python?.errors.length ?? 0;
   const totalErrors =
     npmAuthErrors.length +
     npmPublishErrors.length +
     npmTagErrors.length +
     giteaErrors +
     gitApplyErrors +
-    gitConfigErrors;
+    gitConfigErrors +
+    pythonErrors;
   const mode = report.dryRun ? 'dry run, ' : '';
   const status = report.succeeded
     ? green(
         report.dryRun
           ? 'OK Publish dry run completed: planned npm, Git repository, Git mirror, and Git rewrite actions are available.'
-          : 'OK Publish completed: npm packages, dist-tags, Git repositories, and Git mirrors are up to date.'
+          : 'OK Publish completed: npm, Python, and Git targets are up to date.'
       )
     : red(`FAILED Publish incomplete: ${String(totalErrors)} errors.`);
   const npmPackageAction = report.dryRun ? 'planned' : 'published';
@@ -426,6 +440,16 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     `NPM dist-tags: ${String(report.publish.restoredTags)} ${npmTagAction}, ${String(
       npmTagErrors.length
     )} errors.`,
+    ...(report.python
+      ? [
+          `Python wheels: ${String(report.python.actions.length)} total, ${String(
+            report.python.published + report.python.planned
+          )} ${report.dryRun ? 'planned' : 'published'}, ${String(
+            report.python.skipped
+          )} already in registry, ${String(pythonErrors)} errors.`,
+          `Python index: ${report.python.indexUrl}`,
+        ]
+      : []),
     `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(
       report.gitea.created + report.gitea.planned
     )} ${giteaAction}, ${String(report.gitea.exists)} already existed, ${String(
@@ -473,6 +497,9 @@ function formatPruneSummary(report: BundlePruneReport): string {
     `NPM tarballs: ${String(report.npmPackages.total)} total, ${String(
       report.npmPackages.stale
     )} stale, ${String(report.npmPackages.removed)} removed.`,
+    `Python wheels: ${String(report.pythonPackages.total)} total, ${String(
+      report.pythonPackages.stale
+    )} stale, ${String(report.pythonPackages.removed)} removed.`,
     `Git mirrors: ${String(report.gitMirrors.total)} total, ${String(
       report.gitMirrors.stale
     )} stale, ${String(report.gitMirrors.removed)} removed.`,
@@ -501,8 +528,8 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
   return targets
     .map((target, index) => {
       const prefix = `${String(index + 1)}.`;
-      if (target.type === 'npm') {
-        return `${prefix} npm ${target.spec}`;
+      if (target.type !== 'git') {
+        return `${prefix} ${target.type} ${target.spec}`;
       }
 
       const branch = target.branch ? ` (${target.branch})` : '';
@@ -512,9 +539,9 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
 }
 
 function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
-  return target.type === 'npm'
-    ? `npm ${target.spec}`
-    : `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`;
+  return target.type === 'git'
+    ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
+    : `${target.type} ${target.spec}`;
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
@@ -523,6 +550,9 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Source registry: ${config.sourceRegistry}`,
     `Target registry: ${config.targetRegistry ?? '(not set)'}`,
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
+    `Python source index: ${config.pythonSourceIndex ?? '(disabled)'}`,
+    `Python publish owner: ${config.pythonPublishOwner ?? '(not set)'}`,
+    `Python target environments: ${String(config.pythonTargetEnvironments?.length ?? 0)}`,
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
@@ -580,6 +610,7 @@ const collectPhaseLabels: Record<CollectProgressEvent['phase'], string> = {
   'lockfile-scan': 'scan lockfiles',
   'manifest-scan': 'scan package manifests',
   'npm-fetch': 'resolve/download npm',
+  'python-fetch': 'resolve/download Python',
   'repository-update': 'update repositories',
 };
 
@@ -588,6 +619,7 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
   'git-apply': 'push Git mirrors',
   'git-config': 'configure Git rewrites',
   publish: 'publish npm packages',
+  'python-publish': 'publish Python wheels',
   report: 'write publish report',
 };
 
@@ -1076,18 +1108,20 @@ async function resolvePublishWorkspaceDefaults(options: {
   bundle: string | undefined;
   gitea: string | undefined;
   registry: string | undefined;
+  pythonOwner?: string;
 }): Promise<{
   bundle: string;
   configureGitGlobal?: WorkspacePromptBoolean;
   gitea: string;
   publicRepositories?: WorkspacePromptBoolean;
+  pythonOwner?: string;
   registry: string;
   workspaceDir: string;
 }> {
   const workspaceDir = process.cwd();
   const needsConfig = !options.bundle || !options.gitea || !options.registry;
   let config: WorkspaceConfig | undefined;
-  if (needsConfig) {
+  if (needsConfig || options.pythonOwner === undefined) {
     try {
       config = await readWorkspaceConfig(workspaceDir);
     } catch (error) {
@@ -1112,12 +1146,14 @@ async function resolvePublishWorkspaceDefaults(options: {
   if (!gitea) {
     throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
   }
+  const pythonOwner = options.pythonOwner ?? config?.pythonPublishOwner;
 
   return {
     bundle,
     ...(config ? { configureGitGlobal: config.defaults.publish.configureGitGlobal } : {}),
     gitea,
     ...(config ? { publicRepositories: config.defaults.publish.publicRepositories } : {}),
+    ...(pythonOwner ? { pythonOwner } : {}),
     registry,
     workspaceDir,
   };
@@ -1348,8 +1384,9 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('1. Show targets');
     console.log('2. Add Git target');
     console.log('3. Add npm target');
-    console.log('4. Remove target');
-    console.log('5. Download selected target');
+    console.log('4. Add PyPI target');
+    console.log('5. Remove target');
+    console.log('6. Download selected target');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -1386,6 +1423,13 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         break;
       }
       case '4': {
+        const spec = await ask(rl, 'PyPI package requirement');
+        if (spec) {
+          await runSelfCommand(['target', 'add', 'pypi', spec, workspaceDir], workspaceDir);
+        }
+        break;
+      }
+      case '5': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to remove');
         if (index) {
@@ -1393,7 +1437,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '5': {
+      case '6': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to download');
         if (index) {
@@ -1838,6 +1882,29 @@ targetAddCommand
   });
 
 targetAddCommand
+  .command('pypi')
+  .description('Add a Python package requirement target')
+  .argument('<spec>', 'PEP 508 requirement, e.g. requests[socks]>=2.31')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (spec: string, workspace: string) => {
+    try {
+      const result = await addWorkspaceTarget(workspace, {
+        spec,
+        type: 'pypi',
+      });
+      console.log(
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue({
+          spec,
+          type: 'pypi',
+        })}\nTotal targets: ${String(result.config.targets.length)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetAddCommand
   .command('npm')
   .description('Add an npm package spec target')
   .argument('<spec>', 'Package spec, e.g. eslint@latest')
@@ -2052,6 +2119,7 @@ program
             .map((target) => target.spec)
         );
         const gitTargets = createWorkspaceGitSources(activeConfig);
+        const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
@@ -2074,6 +2142,11 @@ program
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
           })
         );
+        const pythonIndex = activeConfig.pythonSourceIndex
+          ? new HttpPythonIndexClient(activeConfig.pythonSourceIndex, {
+              ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+            })
+          : undefined;
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
         const report = await collectBundle({
@@ -2084,6 +2157,7 @@ program
           initialGitRequirements: parsedTargets.gitRequirements,
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
+          initialPythonRequirements: pythonRequirements,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
           rangeResolutionPolicy,
@@ -2092,6 +2166,13 @@ program
           ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
           onProgress: createCollectProgressLogger(),
           outputDir,
+          ...(pythonIndex ? { pythonIndex } : {}),
+          ...(activeConfig.pythonSourceIndex
+            ? { pythonSourceIndex: activeConfig.pythonSourceIndex }
+            : {}),
+          ...(activeConfig.pythonTargetEnvironments
+            ? { pythonTargetEnvironments: activeConfig.pythonTargetEnvironments }
+            : {}),
           registry,
           registryUrl,
         });
@@ -2482,6 +2563,7 @@ verifyCommand
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('-r, --registry <url>', 'Target npm registry URL')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .option('--python-owner <owner>', 'Public Gitea owner for the Python package index')
   .option('--timeout-ms <ms>', 'Install timeout per project', parsePositiveInteger, 10 * 60_000)
   .option('--ignore-scripts', 'Skip npm/pnpm/yarn lifecycle scripts during install verification')
   .option('--keep-temp', 'Keep temporary project copies for debugging')
@@ -2493,6 +2575,7 @@ verifyCommand
         giteaBaseUrl: options.gitea,
         ignoreScripts: options.ignoreScripts === true,
         keepTemp: options.keepTemp === true,
+        ...(options.pythonOwner ? { pythonOwner: options.pythonOwner } : {}),
         registryUrl: options.registry,
         timeoutMs: options.timeoutMs,
       });
@@ -2731,6 +2814,7 @@ addNpmPublishOptions(
     .argument('[bundle]', 'Path to airgap bundle directory; defaults to airgap-sync.json output')
     .option('-r, --registry <url>', 'Target npm registry URL; defaults to targetRegistry')
     .option('--gitea <url>', 'Closed-network Git host base URL; defaults to giteaUrl')
+    .option('--python-owner <owner>', 'Public Gitea owner for the Python package index')
     .option(
       '--gitea-token <token>',
       `Gitea API token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
@@ -2753,6 +2837,7 @@ addNpmPublishOptions(
         bundle,
         gitea: options.gitea,
         registry: options.registry,
+        ...(options.pythonOwner ? { pythonOwner: options.pythonOwner } : {}),
       });
       const providedGitAuth = explicitGitAuth({
         password: options.gitPassword,
@@ -2763,9 +2848,9 @@ addNpmPublishOptions(
       const configureGitGlobal =
         options.configureGitGlobal === true || resolved.configureGitGlobal === true;
       const token =
-        options.dryRun === true || providedGitAuth
+        options.dryRun === true
           ? undefined
-          : options.skipGitProvision === true
+          : options.skipGitProvision === true || providedGitAuth
             ? await resolveGiteaToken({
                 cliToken: options.giteaToken,
                 workspaceDir: resolved.workspaceDir,
@@ -2777,15 +2862,13 @@ addNpmPublishOptions(
               });
 
       const httpClient =
-        options.dryRun === true || providedGitAuth || !token
+        options.dryRun === true || !token
           ? undefined
           : new HttpGiteaClient(resolved.gitea, { authToken: token });
       const client = httpClient ?? noopGiteaClient;
+      const login = httpClient && token ? await httpClient.currentUserLogin() : undefined;
       const gitAuth =
-        providedGitAuth ??
-        (httpClient && token
-          ? { password: token, username: await httpClient.currentUserLogin() }
-          : undefined);
+        providedGitAuth ?? (login && token ? { password: token, username: login } : undefined);
       const report = await applyBundle({
         bundleDir: resolved.bundle,
         configureGitGlobal,
@@ -2798,6 +2881,8 @@ addNpmPublishOptions(
         onPublishProgress: createPublishProgressLogger(),
         onProgress: createApplyProgressLogger(),
         private: !publicRepositories,
+        ...(login && token ? { pythonAuth: { password: token, username: login } } : {}),
+        ...(resolved.pythonOwner ? { pythonOwner: resolved.pythonOwner } : {}),
         publishConcurrency: options.publishConcurrency,
         registryUrl: resolved.registry,
         skipExisting: options.skipExisting !== false,

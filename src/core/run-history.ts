@@ -396,6 +396,14 @@ export async function writeDownloadRunHistory(
       path.join(options.bundleDir, 'git-fetch-report.json'),
       path.join(targetDir, 'git-fetch-report.json')
     ),
+    copyIfExists(
+      path.join(options.bundleDir, 'python-seed-manifest.json'),
+      path.join(targetDir, 'python-seed-manifest.after.json')
+    ),
+    copyIfExists(
+      path.join(options.bundleDir, 'python-fetch-report.json'),
+      path.join(targetDir, 'python-fetch-report.json')
+    ),
   ];
 
   if (options.pruneReport) {
@@ -433,6 +441,8 @@ export async function writePublishRunHistory(
       'git-config-report.json',
       'apply-report.json',
       'apply-dry-run-report.json',
+      'python-publish-report.json',
+      'python-publish-dry-run-report.json',
     ].map((fileName) =>
       copyIfExists(path.join(options.bundleDir, fileName), path.join(targetDir, fileName))
     )

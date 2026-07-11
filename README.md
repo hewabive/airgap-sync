@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/hewabive/airgap-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/hewabive/airgap-sync/actions/workflows/ci.yml)
 
-Synchronize Git repositories and npm packages across an air gap using removable media.
+Synchronize Git repositories, npm packages, and Python wheels across an air gap using
+removable media.
 
 The intended workflow is simple for the operator:
 
@@ -17,6 +18,7 @@ The intended workflow is simple for the operator:
 ```bash
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
+PIP_INDEX_URL=http://gitea.local/api/packages/pypi/pypi/simple pip install -r requirements.txt
 ```
 
 `airgap-sync` is not a live proxy and not a full npm registry mirror. It builds the
@@ -33,6 +35,8 @@ been tested with Verdaccio and Gitea:
 - Git target mirroring with preserved owner/repository paths;
 - recursive package discovery from nested `package.json` files and supported lockfiles;
 - npm dependency resolution, tarball download, checksum validation, retries, and pruning;
+- Python discovery from `requirements*.txt`, `uv.lock`, and `pylock*.toml`, with
+  per-environment wheel resolution, hash validation, and Gitea PyPI publishing;
 - Git dependency discovery and mirroring;
 - npm publish with temporary tags, dist-tag restoration, and bundled `latest` handling;
 - Gitea repository creation or publishing to already-created Git repositories;
@@ -48,7 +52,8 @@ performance on slow removable media, and operator ergonomics.
 - npm 11 or newer
 - Git
 - Online side: access to the source npm registry and upstream Git hosts
-- Closed side: an npm-compatible registry and a Git host
+- Closed side: an npm-compatible registry and Gitea 1.26.2 or newer with its package
+  registry enabled
 
 Verdaccio and Gitea are the tested closed-network path. Other npm-compatible registries
 should work when they support `npm publish` and `npm dist-tag`. Generic Git hosts can
@@ -86,6 +91,7 @@ The same workflow can be scripted:
 npm exec -- airgap-sync init
 npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
 npm exec -- airgap-sync target add npm eslint@latest
+npm exec -- airgap-sync target add pypi 'requests==2.32.4'
 
 # Online machine.
 npm exec -- airgap-sync download --prune
@@ -180,8 +186,10 @@ The bundle contains the current transferable state plus audit reports:
 
 ```text
 airgap-bundle/packages/                 npm tarballs
+airgap-bundle/python-packages/          Python wheels
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
+airgap-bundle/python-seed-manifest.json bundled Python files and target environments
 airgap-bundle/dist-tags.json            real dist-tag requirements
 airgap-bundle/git-sources.json          Git source metadata
 airgap-bundle/workspace-snapshot.json   targets for later verification
@@ -193,13 +201,15 @@ See [Bundle Format](./docs/bundle-format.md) for the full layout.
 ## Verification
 
 `airgap-sync verify ./airgap-bundle` checks bundle consistency: manifests, referenced
-tarballs, tarball readability, checksums where available, reports, and Git metadata.
+tarballs and wheels, package identity and hashes, reports, and Git metadata.
 
 `airgap-sync verify install ./airgap-bundle` runs real package-manager installs for
 configured Git targets against the closed-network npm registry and Git host. It is the
 closest automated check to the final consumer workflow, but it does not yet enforce a
 network-deny sandbox. Use `--ignore-scripts` when install scripts should not run during
-verification.
+verification. When the machine has a Python interpreter exactly matching a configured
+target environment, the command also creates a temporary venv and installs the pinned
+bundled wheels from Gitea; otherwise the Python check is recorded as skipped.
 
 pnpm v11 treats packages published into local Verdaccio as newly published packages.
 For closed-network consumers that install trusted project lockfiles, configure pnpm to

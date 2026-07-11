@@ -167,6 +167,7 @@ describe('run history', () => {
       generatedAt: '2026-05-25T00:01:00.000Z',
       gitMirrors: { kept: 0, removed: 0, stale: 0, total: 0 },
       npmPackages: { kept: 1, removed: 1, stale: 1, total: 2 },
+      pythonPackages: { kept: 0, removed: 0, stale: 0, total: 0 },
       planned: 1,
       removed: 1,
     };

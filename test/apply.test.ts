@@ -117,6 +117,65 @@ describe('applyBundle', () => {
     expect(await fs.pathExists(path.join(bundleDir, 'publish-dry-run-report.json'))).toBe(true);
   });
 
+  it('plans Python publishing when a Python seed manifest is present', async () => {
+    await fs.writeJson(
+      path.join(bundleDir, 'python-seed-manifest.json'),
+      {
+        schemaVersion: 1,
+        createdAt: '2026-07-10T00:00:00.000Z',
+        packages: [
+          {
+            files: [
+              {
+                coreMetadata: {
+                  metadataVersion: '2.4',
+                  name: 'demo-python',
+                  projectUrls: [],
+                  providesExtra: [],
+                  requiresDist: [],
+                  version: '1.0',
+                },
+                environments: ['prod'],
+                file: 'python-packages/demo_python-1.0-py3-none-any.whl',
+                filename: 'demo_python-1.0-py3-none-any.whl',
+                kind: 'wheel',
+                sha256: 'aa'.repeat(32),
+                sourceHashes: { sha256: 'aa'.repeat(32) },
+                url: 'https://files.example/demo_python-1.0-py3-none-any.whl',
+              },
+            ],
+            name: 'demo-python',
+            resolvedFrom: [],
+            version: '1.0',
+          },
+        ],
+        roots: ['demo-python==1.0'],
+        sourceIndex: 'https://pypi.org/simple/',
+        targetEnvironments: [],
+      },
+      { spaces: 2 }
+    );
+
+    const report = await applyBundle({
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-07-10T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      pythonOwner: 'public',
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.python).toMatchObject({
+      indexUrl: 'http://gitea.local/api/packages/public/pypi/simple',
+      planned: 1,
+    });
+    expect(report.succeeded).toBe(true);
+    expect(await fs.pathExists(path.join(bundleDir, 'python-publish-dry-run-report.json'))).toBe(
+      true
+    );
+  });
+
   it('plans Gitea provisioning, mirror push, and optional Git config', async () => {
     await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
 

@@ -4,7 +4,7 @@ The CLI keeps download and publish phases separate so the online and offline pha
 auditable.
 
 The preferred user workflow is workspace-based: initialize a directory on removable
-media, add Git/npm targets once, then run `download` online and `publish` offline.
+media, add Git/npm/PyPI targets once, then run `download` online and `publish` offline.
 
 ## init
 
@@ -26,6 +26,7 @@ The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 ```bash
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
+airgap-sync target add pypi 'requests==2.32.4'
 airgap-sync target list
 airgap-sync target remove 1
 ```
@@ -33,6 +34,8 @@ airgap-sync target remove 1
 Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirrors into
 `airgap-bundle/git-mirrors/` during `download`. npm targets are treated as explicit root
 package specs.
+PyPI targets use PEP 508 requirement syntax and require `pythonTargetEnvironments` in
+`airgap-sync.json`.
 
 ## menu
 
@@ -111,8 +114,9 @@ airgap-sync download ./repos \
 
 Without a root argument, reads `airgap-sync.json` from the current directory, fetches
 configured Git targets as bare mirrors, scans package manifests from those mirrors,
-scans supported lockfiles from those mirrors, includes configured npm targets as root
-package specs, resolves npm registry packages, writes portable Git source metadata,
+scans supported lockfiles from those mirrors, includes configured npm/PyPI targets as
+root package specs, resolves npm registry packages and Python wheels, writes portable
+Git source metadata,
 clones or updates Git dependency mirrors, scans package manifests and lockfiles from
 those mirrors, and repeats until no new npm or Git inputs are found. It also writes
 `workspace-snapshot.json` with the configured targets and their bundle-local mirror
@@ -159,8 +163,8 @@ Use a lower value such as `4` on slow removable media or unstable network links.
 `--retry-delays-ms 1000,5000,15000,60000`.
 
 `--prune` removes stale local bundle objects after a successful fixed-point download.
-It deletes npm tarballs not referenced by the new `seed-manifest.json` and Git mirrors
-not referenced by the new `git-sources.json`. It is skipped when the download is
+It deletes npm tarballs and Python wheels not referenced by the new manifests, and Git
+mirrors not referenced by the new `git-sources.json`. It is skipped when the download is
 incomplete. This only cleans the transfer bundle; it does not delete packages from
 Verdaccio or repositories from Gitea.
 
@@ -186,8 +190,8 @@ airgap-sync bundle prune ./airgap-bundle --dry-run
 airgap-sync bundle prune ./airgap-bundle
 ```
 
-Removes stale objects from the local transfer bundle: unreferenced `packages/*.tgz`
-files and unreferenced `git-mirrors/**/*.git` mirrors. The command refuses to run unless
+Removes stale objects from the local transfer bundle: unreferenced `packages/*.tgz`,
+`python-packages/*.whl`, and `git-mirrors/**/*.git`. The command refuses to run unless
 the latest `collect-report.json` records a successful non-dry-run fixed-point download.
 Dry runs write `prune-dry-run-report.json`; real runs write `prune-report.json`.
 
@@ -283,11 +287,12 @@ airgap-sync verify ./airgap-bundle --json
 airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
+  --python-owner pypi \
   --ignore-scripts
 ```
 
 Checks the bundle without running package-manager installs. It validates bundle
-manifests and tarballs, checks fetch and collect reports, verifies
+manifests, tarballs, Python wheel identities/hashes and environment coverage, verifies
 `workspace-snapshot.json`, checks Git mirror presence from `git-sources.json`, and
 checks `apply-report.json` when present. The command writes `verify-report.json`.
 
@@ -299,6 +304,9 @@ before the offline import has run, are reported but do not fail the command.
 mirror into a temporary directory, detects the package manager from the lockfile, sets
 the npm registry, and uses a temporary Git config with source-host rewrites to the
 provided Gitea URL. It writes `verify-install-report.json`.
+When a local Python interpreter exactly matches a configured target environment, it
+also creates a temporary venv and installs exact bundled package versions from the
+anonymous Gitea index; otherwise it records a skip reason.
 
 When the detected package manager is pnpm, `verify install` sets `trustLockfile: true`
 for that verification process. This avoids false failures from pnpm v11's default
@@ -419,11 +427,13 @@ airgap-sync publish
 Publishes the whole bundle in the closed network: publish npm packages to an
 npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, create
 missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
-import reports.
+import reports. If `python-seed-manifest.json` exists, it also streams bundled wheels
+to Gitea's PyPI endpoint without requiring Python, pip, or twine.
 
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
-`--gitea`, and `defaults.publish` for public repositories and global Git rewrites.
+`--gitea`, `pythonPublishOwner` as `--python-owner`, and `defaults.publish` for public
+repositories and global Git rewrites.
 Passing `<bundle>`, `--registry`, `--gitea`, `--public`, or
 `--configure-git-global` overrides those defaults.
 
@@ -433,6 +443,7 @@ Supported options:
 -r, --registry <url>      Target npm registry URL, defaults to targetRegistry
 --gitea <url>             Closed-network Git host base URL, defaults to giteaUrl
 --gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN or saved secrets
+--python-owner <owner>    Public Gitea owner for the anonymous Python index
 --git-username <name>     Git HTTP username for non-Gitea push authentication
 --git-password <token>    Git HTTP password/token for non-Gitea push authentication
 --mirrors-dir <dir>       Directory containing bare Git mirrors
@@ -448,8 +459,8 @@ Supported options:
 Prefer the `GITEA_TOKEN` environment variable or a saved token over `--gitea-token` so
 the token does not appear in shell history or process listings.
 
-The Gitea token is used for both API repository provisioning and Git HTTP mirror
-push authentication.
+The Gitea token is used for API repository provisioning, Git HTTP mirror push
+authentication, and Python wheel upload. Consumer pip configuration contains no token.
 
 Use `--skip-git-provision` when the closed-network Git repositories are created outside
 `airgap-sync`, or when the target Git host is not Gitea-compatible. In that mode

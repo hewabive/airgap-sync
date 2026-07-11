@@ -263,6 +263,51 @@ describe('readGitSourceManifestRequirements', () => {
     ]);
   });
 
+  it('discovers Python requirements and lockfiles from a bare mirror revision', async () => {
+    const contents: Record<string, string> = {
+      'requirements.txt': '-r requirements/base.txt\nrequests==2.32.3',
+      'requirements/base.txt': 'certifi==2026.1.1',
+      'requirements-dev.txt': 'pytest==8.3.1',
+      'uv.lock': 'version = 1\nrevision = 3\npackage = []',
+      'pyproject.toml': '[project]\nname = "app"',
+    };
+    const result = await readGitSourceManifestRequirements({
+      includeDev: true,
+      includePython: true,
+      mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+      source,
+      runner(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({ stderr: '', stdout: Object.keys(contents).join('\n') });
+        }
+        const show = /^show main:(.+)$/.exec(gitCommand(invocation));
+        if (show) {
+          const content = contents[show[1]!];
+          if (content !== undefined) {
+            return Promise.resolve({ stderr: '', stdout: content });
+          }
+        }
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(result.python.requirements.map((item) => item.requirement.name)).toEqual([
+      'certifi',
+      'requests',
+      'pytest',
+    ]);
+    expect(result.python.requirementPaths).toEqual([
+      'requirements-dev.txt',
+      'requirements.txt',
+      'requirements/base.txt',
+    ]);
+    expect(result.python.lockfilePaths).toEqual(['uv.lock']);
+    expect(result.python.pyprojectWithoutLock).toEqual([]);
+  });
+
   it('reports a clear error when the requested revision is missing', async () => {
     await expect(
       readGitSourceManifestRequirements({

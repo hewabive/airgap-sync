@@ -1,0 +1,209 @@
+import { describe, expect, it } from 'vitest';
+import type {
+  PythonIndexClient,
+  PythonIndexFile,
+  PythonMetadataResult,
+  PythonProjectIndex,
+} from '../../src/core/python/index-client.js';
+import { PythonMetadataCache, type PythonCoreMetadata } from '../../src/core/python/metadata.js';
+import { parseRequirement } from '../../src/core/python/requirements.js';
+import { resolvePython } from '../../src/core/python/resolver.js';
+import { parseUvLock } from '../../src/core/python/uv-lock.js';
+import type { PythonRequirementInput } from '../../src/core/python/input-types.js';
+
+function metadata(name: string, version: string, requiresDist: string[] = []): PythonCoreMetadata {
+  return {
+    metadataVersion: '2.4',
+    name,
+    projectUrls: [],
+    providesExtra: [],
+    requiresDist,
+    version,
+  };
+}
+
+function wheel(name: string, version: string, suffix = 'py3-none-any'): PythonIndexFile {
+  const filename = `${name.replace(/-/g, '_')}-${version}-${suffix}.whl`;
+  return {
+    filename,
+    hashes: { sha256: 'aa'.repeat(32) },
+    url: `https://files.test/${filename}`,
+  };
+}
+
+class FakeIndex implements PythonIndexClient {
+  readonly sourceIndex = 'https://index.test/simple';
+  readonly #metadata = new Map<string, PythonCoreMetadata>();
+  readonly #projects = new Map<string, PythonProjectIndex>();
+
+  add(
+    name: string,
+    version: string,
+    requiresDist: string[] = [],
+    file = wheel(name, version)
+  ): void {
+    const project = this.#projects.get(name) ?? { apiVersion: '1.0', files: [], name };
+    project.files.push(file);
+    this.#projects.set(name, project);
+    this.#metadata.set(file.url, metadata(name, version, requiresDist));
+  }
+
+  getMetadata(file: PythonIndexFile, cache: PythonMetadataCache): Promise<PythonMetadataResult> {
+    void cache;
+    const value = this.#metadata.get(file.url);
+    return value
+      ? Promise.resolve({ metadata: value, source: 'core-metadata' })
+      : Promise.reject(new Error(`missing metadata for ${file.url}`));
+  }
+
+  getProject(name: string): Promise<PythonProjectIndex> {
+    const project = this.#projects.get(name);
+    return project
+      ? Promise.resolve(project)
+      : Promise.reject(new Error(`project not found: ${name}`));
+  }
+}
+
+function requirement(
+  raw: string,
+  options: { constraint?: boolean; hash?: string; sourcePath?: string } = {}
+): PythonRequirementInput {
+  const parsed = parseRequirement(raw);
+  if (!parsed.ok) {
+    throw new Error(parsed.reason);
+  }
+  return {
+    constraint: options.constraint === true,
+    hashes: options.hash ? [{ algorithm: 'sha256', digest: options.hash }] : [],
+    line: 1,
+    requiredBy: 'root',
+    requirement: parsed.requirement,
+    sourcePath: options.sourcePath ?? 'requirements.txt',
+  };
+}
+
+const environments = [
+  {
+    arch: 'x86_64' as const,
+    manylinux: 'manylinux_2_17',
+    name: 'linux',
+    os: 'linux' as const,
+    pythonVersion: '3.11.9',
+  },
+  {
+    arch: 'x86_64' as const,
+    name: 'windows',
+    os: 'windows' as const,
+    pythonVersion: '3.12.4',
+  },
+];
+
+describe('resolvePython', () => {
+  it('resolves each environment independently with constraints, markers, and extras', async () => {
+    const index = new FakeIndex();
+    index.add('app', '1.0', ['child>=1']);
+    index.add('app', '2.0', [
+      'child>=1',
+      'colorama; sys_platform == "win32"',
+      'speed-dep; extra == "speed"',
+    ]);
+    index.add('child', '1.5');
+    index.add('child', '2.0');
+    index.add('colorama', '0.4.6');
+    index.add('speed-dep', '3.0');
+
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments,
+      index,
+      requirements: [requirement('app[speed]>=1'), requirement('child<2', { constraint: true })],
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.approximate).toBe(true);
+    const ids = result.artifacts.map(
+      (artifact) => `${artifact.environment}:${artifact.name}@${artifact.version}`
+    );
+    expect(ids).toEqual([
+      'linux:app@2.0',
+      'linux:child@1.5',
+      'linux:speed-dep@3.0',
+      'windows:app@2.0',
+      'windows:child@1.5',
+      'windows:colorama@0.4.6',
+      'windows:speed-dep@3.0',
+    ]);
+  });
+
+  it('reports packages without compatible wheels', async () => {
+    const index = new FakeIndex();
+    index.add('native', '1.0', [], wheel('native', '1.0', 'cp311-cp311-win_amd64'));
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      index,
+      requirements: [requirement('native==1.0')],
+    });
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({ environment: 'linux', name: 'native' });
+    expect(result.errors[0]?.reason).toContain('No published wheel version');
+  });
+
+  it('only selects a wheel admitted by requirement hashes', async () => {
+    const index = new FakeIndex();
+    index.add('hashed', '1.0');
+    const matching = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      index,
+      requirements: [requirement('hashed==1.0', { hash: 'aa'.repeat(32) })],
+    });
+    const rejected = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      index,
+      requirements: [requirement('hashed==1.0', { hash: 'bb'.repeat(32) })],
+    });
+
+    expect(matching.errors).toEqual([]);
+    expect(matching.artifacts).toHaveLength(1);
+    expect(rejected.artifacts).toEqual([]);
+    expect(rejected.errors[0]?.reason).toContain('No published wheel version');
+  });
+
+  it('traverses uv production and development lock edges without re-resolving versions', async () => {
+    const lock = parseUvLock(`
+version = 1
+revision = 3
+[[package]]
+name = "app"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [{ name = "requests" }]
+[package.dev-dependencies]
+dev = [{ name = "pytest" }]
+
+[[package]]
+name = "requests"
+version = "2.32.3"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://files.test/requests-2.32.3-py3-none-any.whl", hash = "sha256:${'aa'.repeat(32)}" }]
+
+[[package]]
+name = "pytest"
+version = "8.3.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://files.test/pytest-8.3.1-py3-none-any.whl", hash = "sha256:${'bb'.repeat(32)}" }]
+`);
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      includeDev: true,
+      index: new FakeIndex(),
+      lockfiles: [lock],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.artifacts.map((artifact) => artifact.name)).toEqual(['requests', 'pytest']);
+    expect(result.artifacts.every((artifact) => !artifact.approximate)).toBe(true);
+  });
+});

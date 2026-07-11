@@ -40,6 +40,19 @@ import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
 import type { RepositoryUpdateProgressEvent } from './repos.js';
 import { readStableTagResolutionIndex } from './tag-resolution.js';
+import { discoverPythonInputs, emptyPythonDiscoveredInputs } from './python/discovery.js';
+import type {
+  PythonDiscoveredInputs,
+  PythonLockInput,
+  PythonRequirementInput,
+  UnsupportedPythonInput,
+} from './python/input-types.js';
+import type { PythonIndexClient } from './python/index-client.js';
+import type { PythonTargetEnvironmentConfig } from './python/environments.js';
+import { readPythonMetadataCache, writePythonMetadataCache } from './python/metadata.js';
+import { resolvePython } from './python/resolver.js';
+import { fetchPythonBundle } from './python/fetch.js';
+import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
 
 export interface CollectBundleOptions {
   concurrency?: number;
@@ -55,6 +68,11 @@ export interface CollectBundleOptions {
   maxIterations?: number;
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
+  initialPythonRequirements?: PythonRequirementInput[];
+  pythonIndex?: PythonIndexClient;
+  pythonSourceIndex?: string;
+  pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
+  pythonTimeoutMs?: number;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   registryUrl: string;
@@ -73,6 +91,7 @@ export type CollectProgressPhase =
   | 'npm-fetch'
   | 'git-fetch'
   | 'git-manifest-scan'
+  | 'python-fetch'
   | 'bundle-write';
 
 export type CollectProgressStatus = 'start' | 'progress' | 'done' | 'error';
@@ -127,6 +146,46 @@ function gitRequirementKey(requirement: GitRequirement): string {
 
 function unsupportedKey(requirement: UnsupportedRootPackageRequirement): string {
   return [requirement.requiredBy, requirement.raw, requirement.type, requirement.reason].join('\0');
+}
+
+function pythonRequirementKey(input: PythonRequirementInput): string {
+  return [
+    input.constraint ? 'constraint' : 'requirement',
+    input.requirement.normalizedName,
+    input.requirement.specifier,
+    input.requirement.marker ?? '',
+    input.sourcePath,
+    String(input.line),
+  ].join('\0');
+}
+
+function pythonLockfileKey(input: PythonLockInput): string {
+  return [input.format, input.sourcePath].join('\0');
+}
+
+function unsupportedPythonKey(input: UnsupportedPythonInput): string {
+  return [input.sourcePath, String(input.line ?? ''), input.type, input.raw].join('\0');
+}
+
+function mergePythonInputs(
+  target: PythonDiscoveredInputs,
+  source: PythonDiscoveredInputs,
+  seen: {
+    lockfiles: Set<string>;
+    requirements: Set<string>;
+    unsupported: Set<string>;
+  }
+): void {
+  addUnique(target.lockfiles, seen.lockfiles, source.lockfiles, pythonLockfileKey);
+  addUnique(target.requirements, seen.requirements, source.requirements, pythonRequirementKey);
+  addUnique(target.unsupported, seen.unsupported, source.unsupported, unsupportedPythonKey);
+  target.lockfilePaths = [...new Set([...target.lockfilePaths, ...source.lockfilePaths])].sort();
+  target.requirementPaths = [
+    ...new Set([...target.requirementPaths, ...source.requirementPaths]),
+  ].sort();
+  target.pyprojectWithoutLock = [
+    ...new Set([...target.pyprojectWithoutLock, ...source.pyprojectWithoutLock]),
+  ].sort();
 }
 
 function addUnique<T>(
@@ -245,6 +304,7 @@ async function scanGitSourceManifests(options: {
   bundleDir: string;
   includeDev: boolean;
   includePeer: boolean;
+  includePython: boolean;
   runGitOutputCommand?: GitOutputCommandRunner;
   scannedSourceIds: Set<string>;
   sources: GitSource[];
@@ -254,6 +314,7 @@ async function scanGitSourceManifests(options: {
   scanned: number;
   stableRequiredBy: Set<string>;
   state: RequirementState;
+  python: PythonDiscoveredInputs;
 }> {
   const errors: CollectGitManifestScanError[] = [];
   const stableRequiredBy = new Set<string>();
@@ -263,6 +324,12 @@ async function scanGitSourceManifests(options: {
     unsupported: [],
   };
   let scanned = 0;
+  const python = emptyPythonDiscoveredInputs();
+  const seenPython = {
+    lockfiles: new Set<string>(),
+    requirements: new Set<string>(),
+    unsupported: new Set<string>(),
+  };
 
   for (const source of options.sources) {
     if (options.scannedSourceIds.has(source.id)) {
@@ -286,6 +353,7 @@ async function scanGitSourceManifests(options: {
       const result = await readGitSourceManifestRequirements({
         includeDev: options.includeDev,
         includePeer: options.includePeer,
+        includePython: options.includePython,
         mirrorPath,
         ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
         source,
@@ -300,6 +368,7 @@ async function scanGitSourceManifests(options: {
       state.requirements.push(...result.requirements);
       state.gitRequirements.push(...result.gitRequirements);
       state.unsupported.push(...result.unsupported);
+      mergePythonInputs(python, result.python, seenPython);
     } catch (error) {
       errors.push({
         error: (error as Error).message,
@@ -309,7 +378,7 @@ async function scanGitSourceManifests(options: {
     }
   }
 
-  return { errors, scanned, stableRequiredBy, state };
+  return { errors, python, scanned, stableRequiredBy, state };
 }
 
 export async function collectBundle(options: CollectBundleOptions): Promise<CollectReport> {
@@ -323,6 +392,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const includePeer = options.includePeer === true;
   const maxIterations = options.maxIterations ?? 10;
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
+  const pythonEnabled = Boolean(
+    options.pythonIndex && options.pythonSourceIndex && options.pythonTargetEnvironments?.length
+  );
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
   const metadataCache = await readRegistryMetadataCache(outputDir);
   const stableRequiredBy = new Set<string>();
@@ -390,6 +462,25 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     status: 'done',
   });
   timings.lockfileScanMs = elapsedMs(lockfileScanStart);
+  const pythonInputs = emptyPythonDiscoveredInputs();
+  const seenPython = {
+    lockfiles: new Set<string>(),
+    requirements: new Set<string>(),
+    unsupported: new Set<string>(),
+  };
+  if (pythonEnabled && root) {
+    mergePythonInputs(pythonInputs, await discoverPythonInputs(root, { includeDev }), seenPython);
+  }
+  if (pythonEnabled && options.initialPythonRequirements) {
+    mergePythonInputs(
+      pythonInputs,
+      {
+        ...emptyPythonDiscoveredInputs(),
+        requirements: options.initialPythonRequirements,
+      },
+      seenPython
+    );
+  }
   const state: RequirementState = {
     gitRequirements: [],
     requirements: [],
@@ -573,6 +664,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         bundleDir: outputDir,
         includeDev,
         includePeer,
+        includePython: pythonEnabled,
         ...(options.runGitOutputCommand
           ? { runGitOutputCommand: options.runGitOutputCommand }
           : {}),
@@ -597,6 +689,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         gitRequirementKey
       );
       addUnique(state.unsupported, seenUnsupported, scan.state.unsupported, unsupportedKey);
+      mergePythonInputs(pythonInputs, scan.python, seenPython);
       gitManifestScanMs = elapsedMs(gitManifestScanStart);
       timings.gitManifestScanMs += gitManifestScanMs;
       options.onProgress?.({
@@ -650,10 +743,56 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     iterations.at(-1)?.addedUnsupported === 0;
   const reportGitFetch = aggregateGitFetchReports(gitFetchReports) ?? gitFetch;
   const reportFetch = aggregateFetchReports(fetchReports) ?? fetch;
+  let pythonResult: Awaited<ReturnType<typeof fetchPythonBundle>> | undefined;
+  let pythonMetadataCache: Awaited<ReturnType<typeof readPythonMetadataCache>> | undefined;
+  if (
+    pythonEnabled &&
+    options.pythonIndex &&
+    options.pythonSourceIndex &&
+    options.pythonTargetEnvironments
+  ) {
+    options.onProgress?.({
+      detail: `${String(pythonInputs.requirements.length)} requirements, ${String(pythonInputs.lockfiles.length)} lockfiles`,
+      phase: 'python-fetch',
+      status: 'start',
+    });
+    pythonMetadataCache = await readPythonMetadataCache(outputDir, options.pythonSourceIndex);
+    const pythonResolution = await resolvePython({
+      cache: pythonMetadataCache,
+      environments: options.pythonTargetEnvironments,
+      includeDev,
+      index: options.pythonIndex,
+      lockfiles: pythonInputs.lockfiles,
+      requirements: pythonInputs.requirements,
+    });
+    pythonResult = await fetchPythonBundle({
+      bundleDir: outputDir,
+      cache: pythonMetadataCache,
+      dryRun,
+      generatedAt,
+      resolution: pythonResolution,
+      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+      roots: pythonInputs.requirements
+        .filter((input) => !input.constraint)
+        .map((input) => input.requirement.raw),
+      sourceIndex: options.pythonSourceIndex,
+      targetEnvironments: options.pythonTargetEnvironments,
+      ...(options.pythonTimeoutMs ? { timeoutMs: options.pythonTimeoutMs } : {}),
+      unsupported: pythonInputs.unsupported,
+    });
+    reportFetch.python = pythonResult.report;
+    options.onProgress?.({
+      current: pythonResult.report.resolvedFiles,
+      phase: 'python-fetch',
+      status: pythonResult.report.errors.length > 0 ? 'error' : 'done',
+      total: pythonResult.report.resolvedFiles,
+    });
+  }
   const wroteBundle =
     !dryRun &&
     reportFetch.errors.length === 0 &&
     reportGitFetch.errors.length === 0 &&
+    (pythonResult?.report.errors.length ?? 0) === 0 &&
     scanErrors.length === 0 &&
     !maxIterationsReached;
 
@@ -674,6 +813,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     root: root ?? outputDir,
     timings,
     wroteBundle,
+    ...(pythonResult ? { python: pythonResult.report } : {}),
   };
 
   if (!dryRun) {
@@ -691,6 +831,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         tagRequirements: resolution.tagRequirements,
       });
       await writeBundleDocuments(outputDir, documents);
+      if (pythonResult?.manifest) {
+        await writePythonSeedManifest(outputDir, pythonResult.manifest);
+      }
       timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
       options.onProgress?.({
         current: documents.manifest.packages.length,
@@ -706,11 +849,20 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       });
       reportFetch.timings.metadataCachePersisted = true;
     }
+    if (pythonMetadataCache && options.pythonSourceIndex && wroteBundle) {
+      await writePythonMetadataCache(outputDir, pythonMetadataCache, {
+        createdAt: generatedAt,
+        sourceIndex: options.pythonSourceIndex,
+      });
+    }
 
     const reportWriteStart = performance.now();
     await writeFetchReport(outputDir, reportFetch);
     await writeGitSourcesManifest(outputDir, gitSources);
     await writeGitFetchReport(outputDir, reportGitFetch);
+    if (pythonResult) {
+      await writePythonFetchReport(outputDir, pythonResult.report);
+    }
     timings.reportWriteMs = elapsedMs(reportWriteStart);
     timings.totalMs = elapsedMs(totalStart);
     await writeCollectReport(outputDir, report);

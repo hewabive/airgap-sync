@@ -7,11 +7,20 @@ import type {
   RangeResolutionPolicy,
   TagResolutionPolicy,
 } from '../types.js';
+import {
+  resolveTargetEnvironment,
+  type PythonTargetArch,
+  type PythonTargetEnvironmentConfig,
+  type PythonTargetOs,
+} from './python/environments.js';
+import { parseRequirement } from './python/requirements.js';
+import type { PythonRequirementInput } from './python/input-types.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
+const defaultWorkspacePythonSourceIndex = 'https://pypi.org/simple/';
 
 export interface WorkspaceGitTarget {
   branch?: string;
@@ -24,7 +33,12 @@ export interface WorkspaceNpmTarget {
   type: 'npm';
 }
 
-export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget;
+interface WorkspacePypiTarget {
+  spec: string;
+  type: 'pypi';
+}
+
+export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget | WorkspacePypiTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
 
 export interface WorkspaceDefaults {
@@ -49,6 +63,9 @@ export interface WorkspaceConfig {
   defaults: WorkspaceDefaults;
   giteaUrl?: string;
   output: string;
+  pythonPublishOwner?: string;
+  pythonSourceIndex?: string;
+  pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   schemaVersion: 1;
   sourceRegistry: string;
   targetRegistry?: string;
@@ -73,11 +90,22 @@ interface WorkspaceNpmTargetSnapshot {
   type: 'npm';
 }
 
-export type WorkspaceTargetSnapshot = WorkspaceGitTargetSnapshot | WorkspaceNpmTargetSnapshot;
+interface WorkspacePypiTargetSnapshot {
+  spec: string;
+  type: 'pypi';
+}
+
+export type WorkspaceTargetSnapshot =
+  | WorkspaceGitTargetSnapshot
+  | WorkspaceNpmTargetSnapshot
+  | WorkspacePypiTargetSnapshot;
 
 export interface WorkspaceSnapshot {
   createdAt: string;
   output: string;
+  pythonPublishOwner?: string;
+  pythonSourceIndex?: string;
+  pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   schemaVersion: 1;
   sourceRegistry: string;
   targets: WorkspaceTargetSnapshot[];
@@ -162,18 +190,108 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     };
   }
 
-  if (value.type === 'npm') {
+  if (value.type === 'npm' || value.type === 'pypi') {
     if (typeof value.spec !== 'string' || value.spec.trim().length === 0) {
-      throw new Error('npm target must include a non-empty spec');
+      throw new Error(`${value.type} target must include a non-empty spec`);
     }
 
+    if (value.type === 'pypi') {
+      const parsed = parseRequirement(value.spec.trim());
+      if (!parsed.ok || parsed.requirement.url) {
+        throw new Error(
+          `Invalid pypi target: ${parsed.ok ? 'direct URLs are not supported' : parsed.reason}`
+        );
+      }
+    }
     return {
       spec: value.spec.trim(),
-      type: 'npm',
+      type: value.type,
     };
   }
 
   throw new Error(`Unsupported workspace target type: ${value.type}`);
+}
+
+const pythonTargetOs = new Set<PythonTargetOs>(['linux', 'macos', 'windows']);
+const pythonTargetArch = new Set<PythonTargetArch>([
+  'aarch64',
+  'arm64',
+  'i686',
+  'ppc64le',
+  's390x',
+  'x86_64',
+]);
+
+function normalizePythonTargetEnvironment(value: unknown): PythonTargetEnvironmentConfig {
+  if (!isRecord(value)) {
+    throw new Error('Python target environment must be an object');
+  }
+  if (typeof value.name !== 'string' || !value.name.trim()) {
+    throw new Error('Python target environment must have a non-empty name');
+  }
+  if (typeof value.pythonVersion !== 'string') {
+    throw new Error(`Python target environment ${value.name} must have pythonVersion`);
+  }
+  if (typeof value.os !== 'string' || !pythonTargetOs.has(value.os as PythonTargetOs)) {
+    throw new Error(`Python target environment ${value.name} has unsupported os`);
+  }
+  if (typeof value.arch !== 'string' || !pythonTargetArch.has(value.arch as PythonTargetArch)) {
+    throw new Error(`Python target environment ${value.name} has unsupported arch`);
+  }
+  const markerOverrides = isRecord(value.markerOverrides)
+    ? {
+        ...(typeof value.markerOverrides.platformRelease === 'string'
+          ? { platformRelease: value.markerOverrides.platformRelease }
+          : {}),
+        ...(typeof value.markerOverrides.platformVersion === 'string'
+          ? { platformVersion: value.markerOverrides.platformVersion }
+          : {}),
+      }
+    : undefined;
+  const config: PythonTargetEnvironmentConfig = {
+    arch: value.arch as PythonTargetArch,
+    name: value.name.trim(),
+    os: value.os as PythonTargetOs,
+    pythonVersion: value.pythonVersion.trim(),
+    ...(typeof value.macosVersion === 'string' ? { macosVersion: value.macosVersion.trim() } : {}),
+    ...(typeof value.manylinux === 'string' ? { manylinux: value.manylinux.trim() } : {}),
+    ...(typeof value.musllinux === 'string' ? { musllinux: value.musllinux.trim() } : {}),
+    ...(Array.isArray(value.platformTags) &&
+    value.platformTags.every((item): item is string => typeof item === 'string')
+      ? { platformTags: [...value.platformTags] }
+      : {}),
+    ...(markerOverrides && Object.keys(markerOverrides).length > 0 ? { markerOverrides } : {}),
+  };
+  resolveTargetEnvironment(config);
+  return config;
+}
+
+function normalizePythonTargetEnvironments(
+  value: unknown
+): PythonTargetEnvironmentConfig[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('pythonTargetEnvironments must be a non-empty array when provided');
+  }
+  const environments = value.map(normalizePythonTargetEnvironment);
+  const names = new Set<string>();
+  for (const environment of environments) {
+    if (names.has(environment.name)) {
+      throw new Error(`Duplicate Python target environment name: ${environment.name}`);
+    }
+    names.add(environment.name);
+  }
+  return environments;
+}
+
+function normalizeHttpUrl(value: string, description: string): string {
+  const parsed = new URL(value);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${description} must use HTTP or HTTPS`);
+  }
+  return parsed.toString();
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -264,6 +382,25 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
     : [];
   const giteaUrl = optionalString(value.giteaUrl);
   const targetRegistry = optionalString(value.targetRegistry);
+  const pythonTargetEnvironments = normalizePythonTargetEnvironments(
+    value.pythonTargetEnvironments
+  );
+  const pythonSourceIndexValue = optionalString(value.pythonSourceIndex);
+  const pythonSourceIndex = pythonTargetEnvironments
+    ? normalizeHttpUrl(
+        pythonSourceIndexValue ?? defaultWorkspacePythonSourceIndex,
+        'pythonSourceIndex'
+      )
+    : pythonSourceIndexValue
+      ? normalizeHttpUrl(pythonSourceIndexValue, 'pythonSourceIndex')
+      : undefined;
+  const pythonPublishOwner = optionalString(value.pythonPublishOwner);
+  if (
+    targets.some((target) => target.type === 'pypi') &&
+    (!pythonTargetEnvironments || pythonTargetEnvironments.length === 0)
+  ) {
+    throw new Error('pypi targets require pythonTargetEnvironments');
+  }
 
   return {
     defaults: normalizeWorkspaceDefaults(value.defaults),
@@ -272,6 +409,9 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       typeof value.output === 'string' && value.output.trim().length > 0
         ? value.output.trim()
         : defaultWorkspaceOutputDir,
+    ...(pythonPublishOwner ? { pythonPublishOwner } : {}),
+    ...(pythonSourceIndex ? { pythonSourceIndex } : {}),
+    ...(pythonTargetEnvironments ? { pythonTargetEnvironments } : {}),
     schemaVersion: 1,
     sourceRegistry:
       typeof value.sourceRegistry === 'string' && value.sourceRegistry.trim().length > 0
@@ -366,7 +506,7 @@ export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<Wo
 function targetKey(target: WorkspaceTarget): string {
   return target.type === 'git'
     ? ['git', target.url, target.branch ?? ''].join('\0')
-    : ['npm', target.spec].join('\0');
+    : [target.type, target.spec].join('\0');
 }
 
 export async function addWorkspaceTarget(
@@ -374,6 +514,9 @@ export async function addWorkspaceTarget(
   target: WorkspaceTarget
 ): Promise<{ added: boolean; config: WorkspaceConfig }> {
   const config = await readWorkspaceConfig(workspaceDir);
+  if (target.type === 'pypi' && !config.pythonTargetEnvironments?.length) {
+    throw new Error('pypi targets require pythonTargetEnvironments');
+  }
   const id = targetKey(target);
   const exists = config.targets.some((existing) => targetKey(existing) === id);
   if (!exists) {
@@ -446,6 +589,30 @@ export function createWorkspaceGitSources(config: WorkspaceConfig): GitSource[] 
     );
 }
 
+export function createWorkspacePythonRequirements(
+  config: WorkspaceConfig
+): PythonRequirementInput[] {
+  return config.targets.flatMap((target, index) => {
+    if (target.type !== 'pypi') {
+      return [];
+    }
+    const parsed = parseRequirement(target.spec);
+    if (!parsed.ok || parsed.requirement.url) {
+      throw new Error(`Invalid pypi target at index ${String(index + 1)}: ${target.spec}`);
+    }
+    return [
+      {
+        constraint: false,
+        hashes: [],
+        line: index + 1,
+        requiredBy: 'root',
+        requirement: parsed.requirement,
+        sourcePath: 'workspace-targets',
+      },
+    ];
+  });
+}
+
 export function createWorkspaceSnapshot(
   options: CreateWorkspaceSnapshotOptions
 ): WorkspaceSnapshot {
@@ -456,13 +623,22 @@ export function createWorkspaceSnapshot(
   return {
     createdAt: options.createdAt ?? new Date().toISOString(),
     output: options.config.output,
+    ...(options.config.pythonPublishOwner
+      ? { pythonPublishOwner: options.config.pythonPublishOwner }
+      : {}),
+    ...(options.config.pythonSourceIndex
+      ? { pythonSourceIndex: options.config.pythonSourceIndex }
+      : {}),
+    ...(options.config.pythonTargetEnvironments
+      ? { pythonTargetEnvironments: options.config.pythonTargetEnvironments }
+      : {}),
     schemaVersion: 1,
     sourceRegistry: options.config.sourceRegistry,
     targets: options.config.targets.map((target) => {
-      if (target.type === 'npm') {
+      if (target.type === 'npm' || target.type === 'pypi') {
         return {
           spec: target.spec,
-          type: 'npm',
+          type: target.type,
         };
       }
 

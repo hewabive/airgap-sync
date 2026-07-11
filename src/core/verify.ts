@@ -15,6 +15,8 @@ import type {
   VerifyReport,
 } from '../types.js';
 import type { WorkspaceSnapshot } from './workspace.js';
+import type { PythonFetchReport, PythonSeedManifest } from './python/bundle.js';
+import { verifyPythonBundle } from './python/verify.js';
 
 export interface VerifyBundleOptions {
   bundleDir: string;
@@ -255,6 +257,47 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
           'workspace-snapshot.json is missing; install verification will be unavailable'
         )
   );
+
+  const pythonManifestPath = path.join(bundleDir, 'python-seed-manifest.json');
+  const hasPythonManifest = await fs.pathExists(pythonManifestPath);
+  if (hasPythonManifest) {
+    try {
+      const pythonManifest = await fs.readJson<PythonSeedManifest>(pythonManifestPath);
+      let pythonFetchReport: PythonFetchReport | undefined;
+      try {
+        pythonFetchReport = await readOptionalJson<PythonFetchReport>(
+          path.join(bundleDir, 'python-fetch-report.json')
+        );
+      } catch (error) {
+        checks.push(
+          check('python-fetch-report', 'error', 'python-fetch-report.json is unreadable', {
+            error: (error as Error).message,
+          })
+        );
+      }
+      checks.push(
+        ...(await verifyPythonBundle({
+          bundleDir,
+          ...(pythonFetchReport ? { fetchReport: pythonFetchReport } : {}),
+          manifest: pythonManifest,
+        }))
+      );
+    } catch (error) {
+      checks.push(
+        check('python-seed-manifest', 'error', 'python-seed-manifest.json is unreadable', {
+          error: (error as Error).message,
+        })
+      );
+    }
+  } else if (workspaceSnapshot?.pythonTargetEnvironments?.length || fetchReport?.python?.enabled) {
+    checks.push(
+      check(
+        'python-seed-manifest',
+        'error',
+        'Python target environments are configured but python-seed-manifest.json is missing'
+      )
+    );
+  }
 
   const collectReport = await readOptionalJson<CollectReport>(
     path.join(bundleDir, 'collect-report.json')

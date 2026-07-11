@@ -1,11 +1,22 @@
 import nativeFs from 'node:fs';
 import path from 'node:path';
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 
 export type { Dirent } from 'node:fs';
 
 export const createWriteStream = nativeFs.createWriteStream;
-export { copyFile, mkdtemp, readdir, readFile, stat, writeFile };
+export const createReadStream = nativeFs.createReadStream;
+export { copyFile, mkdtemp, readdir, readFile, rename, stat, writeFile };
 
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
@@ -36,6 +47,21 @@ export async function writeJson(
   const indentation = options.spaces ?? 0;
   const suffix = indentation > 0 ? '\n' : '';
   await writeFile(filePath, `${JSON.stringify(value, null, indentation)}${suffix}`);
+}
+
+export async function writeJsonAtomic(
+  filePath: string,
+  value: unknown,
+  options: { spaces?: number } = {}
+): Promise<void> {
+  await ensureDir(path.dirname(filePath));
+  const tempPath = `${filePath}.tmp-${String(process.pid)}`;
+  try {
+    await writeJson(tempPath, value, options);
+    await rename(tempPath, filePath);
+  } finally {
+    await rm(tempPath, { force: true });
+  }
 }
 
 export async function remove(filePath: string): Promise<void> {

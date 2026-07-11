@@ -1,0 +1,24 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "fixture-app"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [{ name = "requests" }]
+
+[package.dev-dependencies]
+dev = [{ name = "pytest" }]
+
+[[package]]
+name = "requests"
+version = "2.32.4"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://files.example/requests-2.32.4-py3-none-any.whl", hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+
+[[package]]
+name = "pytest"
+version = "8.3.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://files.example/pytest-8.3.1-py3-none-any.whl", hash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }]

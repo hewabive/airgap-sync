@@ -9,6 +9,7 @@ import type {
   CollectReport,
   GitSourcesManifest,
 } from '../types.js';
+import { readPythonSeedManifest } from './python/bundle.js';
 
 export interface PruneBundleOptions {
   bundleDir: string;
@@ -32,6 +33,7 @@ function successfulCollectReport(report: CollectReport): boolean {
     !report.maxIterationsReached &&
     report.repositoryUpdate.errors.length === 0 &&
     report.fetch.errors.length === 0 &&
+    (report.python?.errors.length ?? 0) === 0 &&
     report.gitSources.skipped.length === 0 &&
     report.gitFetch.errors.length === 0 &&
     report.gitManifestScanErrors.length === 0
@@ -61,6 +63,22 @@ async function listPackageFiles(bundleDir: string): Promise<string[]> {
     return entries
       .filter((entry) => entry.isFile() && entry.name.endsWith('.tgz'))
       .map((entry) => path.posix.join('packages', entry.name))
+      .sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function listPythonPackageFiles(bundleDir: string): Promise<string[]> {
+  const packageDir = path.join(bundleDir, 'python-packages');
+  try {
+    const entries = await fs.readdir(packageDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.whl'))
+      .map((entry) => path.posix.join('python-packages', entry.name))
       .sort();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -161,6 +179,14 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     path.join(bundleDir, 'collect-report.json'),
     'collect-report.json'
   );
+  const pythonManifestPath = path.join(bundleDir, 'python-seed-manifest.json');
+  const pythonManifest = (await fs.pathExists(pythonManifestPath))
+    ? await readPythonSeedManifest(bundleDir).catch((error: unknown) => {
+        throw new Error(
+          `python-seed-manifest.json is missing or unreadable: ${(error as Error).message}`
+        );
+      })
+    : undefined;
 
   if (!successfulCollectReport(collectReport)) {
     throw new Error('Refusing to prune: the last download did not complete successfully');
@@ -175,8 +201,17 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     )
   );
   const packageFiles = await listPackageFiles(bundleDir);
+  const pythonPackageFiles = pythonManifest ? await listPythonPackageFiles(bundleDir) : [];
   const gitMirrors = await listGitMirrorDirs(bundleDir);
   const stalePackageFiles = packageFiles.filter((file) => !livePackageFiles.has(file));
+  const livePythonPackageFiles = new Set(
+    pythonManifest?.packages.flatMap((pkg) =>
+      pkg.files.map((file) => ensureRelativePath(file.file, 'Python manifest package file'))
+    ) ?? []
+  );
+  const stalePythonPackageFiles = pythonPackageFiles.filter(
+    (file) => !livePythonPackageFiles.has(file)
+  );
   const staleGitMirrors = gitMirrors.filter((mirror) => !liveGitMirrors.has(mirror));
   const actions: BundlePruneActionResult[] = [];
   const errors: BundlePruneActionResult[] = [];
@@ -211,6 +246,23 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     }
   }
 
+  for (const stalePythonPackage of stalePythonPackageFiles) {
+    try {
+      actions.push(
+        await removeStaleObject(bundleDir, 'python-package', stalePythonPackage, dryRun)
+      );
+    } catch (error) {
+      const action: BundlePruneActionResult = {
+        error: (error as Error).message,
+        path: stalePythonPackage,
+        status: 'error',
+        type: 'python-package',
+      };
+      actions.push(action);
+      errors.push(action);
+    }
+  }
+
   return {
     actions,
     bundleDir,
@@ -230,6 +282,14 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
       dryRun
         ? 0
         : stalePackageFiles.length - errors.filter((error) => error.type === 'npm-package').length
+    ),
+    pythonPackages: summary(
+      pythonPackageFiles.length,
+      stalePythonPackageFiles.length,
+      dryRun
+        ? 0
+        : stalePythonPackageFiles.length -
+            errors.filter((error) => error.type === 'python-package').length
     ),
     planned: actions.length,
     removed: actions.filter((action) => action.status === 'removed').length,

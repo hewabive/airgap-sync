@@ -272,4 +272,86 @@ describe('verifyInstall', () => {
       stderr: 'missing dependency',
     });
   });
+
+  it('creates a venv and verifies pinned wheels against the anonymous Gitea index', async () => {
+    if (process.platform !== 'linux' || process.arch !== 'x64') {
+      return;
+    }
+    await writeWorkspaceSnapshot({
+      ...workspaceSnapshot,
+      pythonPublishOwner: 'public',
+      pythonTargetEnvironments: [
+        {
+          arch: 'x86_64',
+          manylinux: 'manylinux_2_17',
+          name: 'local',
+          os: 'linux',
+          pythonVersion: '3.11.9',
+        },
+      ],
+      targets: [{ spec: 'demo==1.0', type: 'pypi' }],
+    });
+    await fs.writeJson(
+      path.join(bundleDir, 'python-seed-manifest.json'),
+      {
+        schemaVersion: 1,
+        createdAt: '2026-07-10T00:00:00.000Z',
+        packages: [
+          {
+            files: [
+              {
+                environments: ['local'],
+                file: 'python-packages/demo-1.0-py3-none-any.whl',
+              },
+            ],
+            name: 'demo',
+            version: '1.0',
+          },
+        ],
+        roots: ['demo==1.0'],
+        sourceIndex: 'https://pypi.org/simple/',
+        targetEnvironments: [
+          {
+            arch: 'x86_64',
+            manylinux: 'manylinux_2_17',
+            name: 'local',
+            os: 'linux',
+            pythonVersion: '3.11.9',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+    const calls: InstallCommandInvocation[] = [];
+    const report = await verifyInstall({
+      bundleDir,
+      giteaBaseUrl: 'http://gitea.local',
+      registryUrl: 'http://verdaccio.local:4873',
+      runner(invocation) {
+        calls.push(invocation);
+        return Promise.resolve({
+          exitCode: 0,
+          stderr: invocation.args[0] === '--version' ? 'Python 3.11.9' : '',
+          stdout: '',
+        });
+      },
+    });
+
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toMatchObject({ args: ['--version'], command: 'python3' });
+    expect(calls[1]?.args.slice(0, 2)).toEqual(['-m', 'venv']);
+    expect(calls[2]?.args).toEqual(
+      expect.arrayContaining([
+        'pip',
+        'install',
+        '--index-url',
+        'http://gitea.local/api/packages/public/pypi/simple',
+        '--no-deps',
+        'demo==1.0',
+      ])
+    );
+    expect(report.projects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ packageManager: 'pip', status: 'passed' })])
+    );
+  });
 });

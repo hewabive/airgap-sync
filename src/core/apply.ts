@@ -18,6 +18,12 @@ import {
   type GiteaClient,
 } from './gitea.js';
 import { publishBundle, type PublishBundleOptions } from './publisher.js';
+import { readPythonSeedManifest, writePythonPublishReport } from './python/bundle.js';
+import {
+  publishPythonBundle,
+  type PythonPublishAuth,
+  type PythonPublishReport,
+} from './python/publisher.js';
 import type {
   ApplyBundleReport,
   GiteaRepositoryProvisionReport,
@@ -40,6 +46,8 @@ export interface ApplyBundleOptions {
   onProgress?: (event: ApplyProgressEvent) => void;
   onPublishProgress?: PublishBundleOptions['onProgress'];
   private?: boolean;
+  pythonAuth?: PythonPublishAuth;
+  pythonOwner?: string;
   publishConcurrency?: number;
   registryUrl: string;
   runGitCommand?: GitCommandRunner;
@@ -47,7 +55,13 @@ export interface ApplyBundleOptions {
   skipGitProvision?: boolean;
 }
 
-export type ApplyProgressPhase = 'publish' | 'gitea' | 'git-apply' | 'git-config' | 'report';
+export type ApplyProgressPhase =
+  | 'publish'
+  | 'python-publish'
+  | 'gitea'
+  | 'git-apply'
+  | 'git-config'
+  | 'report';
 
 export type ApplyProgressStatus = 'start' | 'done';
 
@@ -82,9 +96,11 @@ function applySucceeded(reports: {
   gitConfig?: GitConfigReport;
   gitea: GiteaRepositoryProvisionReport;
   publish: PublishReport;
+  python?: PythonPublishReport;
 }): boolean {
   return (
     reports.publish.errors.length === 0 &&
+    (reports.python?.errors.length ?? 0) === 0 &&
     reports.gitea.errors.length === 0 &&
     reports.gitea.organizationErrors.length === 0 &&
     reports.gitApply.errors.length === 0 &&
@@ -99,6 +115,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const manifest = await readBundleManifest(bundleDir);
   const distTags = await readDistTagsManifest(bundleDir);
   const gitSources = await readOptionalGitSourcesManifest(bundleDir, generatedAt);
+  const pythonManifest = (await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json')))
+    ? await readPythonSeedManifest(bundleDir)
+    : undefined;
 
   options.onProgress?.({ phase: 'publish', status: 'start' });
   const publish = await publishBundle(manifest, distTags, {
@@ -116,6 +135,27 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   });
   await writePublishReport(bundleDir, publish);
   options.onProgress?.({ phase: 'publish', status: 'done' });
+
+  let python: PythonPublishReport | undefined;
+  if (pythonManifest) {
+    if (!options.pythonOwner) {
+      throw new Error('Python bundle publishing requires pythonPublishOwner or --python-owner');
+    }
+    options.onProgress?.({ phase: 'python-publish', status: 'start' });
+    python = await publishPythonBundle(pythonManifest, {
+      ...(options.pythonAuth ? { auth: options.pythonAuth } : {}),
+      bundleDir,
+      dryRun,
+      generatedAt,
+      giteaBaseUrl: options.giteaBaseUrl,
+      owner: options.pythonOwner,
+      ...(options.publishConcurrency === undefined
+        ? {}
+        : { concurrency: options.publishConcurrency }),
+    });
+    await writePythonPublishReport(bundleDir, python);
+    options.onProgress?.({ phase: 'python-publish', status: 'done' });
+  }
 
   options.onProgress?.({ phase: 'gitea', status: 'start' });
   const gitea =
@@ -176,8 +216,15 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ...(gitConfig ? { gitConfig } : {}),
     gitea,
     publish,
+    ...(python ? { python } : {}),
     registryUrl: options.registryUrl,
-    succeeded: applySucceeded({ gitApply, ...(gitConfig ? { gitConfig } : {}), gitea, publish }),
+    succeeded: applySucceeded({
+      gitApply,
+      ...(gitConfig ? { gitConfig } : {}),
+      gitea,
+      publish,
+      ...(python ? { python } : {}),
+    }),
   };
   options.onProgress?.({ phase: 'report', status: 'start' });
   await writeApplyReport(bundleDir, report);

@@ -6,12 +6,12 @@ for debugging individual phases.
 
 ## Assumptions
 
-- The online machine can reach the source npm registry and public Git hosts.
+- The online machine can reach the source npm/Python registries and public Git hosts.
 - Project Git repositories are on removable media or in a directory that can be
   refreshed on the online machine.
 - The transfer bundle directory is on removable media or can be copied to it.
-- The closed network has an npm-compatible registry and a Git host. Verdaccio and
-  Gitea are the tested path.
+- The closed network has an npm-compatible registry and Gitea. Verdaccio and Gitea are
+  the tested path; Gitea owns the anonymous consumer-facing Python index.
 - The npm registry is populated only through `npm publish` and `npm dist-tag`.
 - The registry, and any reverse proxy in front of it, allows large package uploads. Large
   native packages can fail with HTTP `E413` unless Verdaccio `max_body_size` and proxy
@@ -43,6 +43,7 @@ airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
+airgap-sync target add pypi 'requests==2.32.4'
 airgap-sync target list
 ```
 
@@ -75,6 +76,31 @@ workspace, it asks for these defaults during setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
+
+Python support is enabled by adding explicit target environments. Full patch versions
+and Linux compatibility levels are required so wheel selection never guesses the
+consumer platform:
+
+```json
+{
+  "pythonSourceIndex": "https://pypi.org/simple/",
+  "pythonPublishOwner": "pypi",
+  "pythonTargetEnvironments": [
+    {
+      "name": "prod-linux",
+      "pythonVersion": "3.11.9",
+      "os": "linux",
+      "arch": "x86_64",
+      "manylinux": "manylinux_2_17"
+    }
+  ]
+}
+```
+
+`requirements*.txt`, `uv.lock`, and `pylock*.toml` are discovered in workspace
+repositories and mirrored Git dependencies. `--include-dev` also includes development
+requirements files and lock dependency groups. Direct URL, VCS, editable, path, sdist,
+and extra-index inputs are intentionally reported as unsupported in this version.
 
 ## Online Phase
 
@@ -138,6 +164,8 @@ The download step writes npm metadata and Git source metadata:
 - package tarballs under `packages/`
 - local bare Git mirrors under `git-mirrors/`
 - Git source records for offline publish
+- `python-seed-manifest.json`, `python-fetch-report.json`, and verified wheels under
+  `python-packages/` when Python target environments are configured
 
 By default, download uses `latestPolicy: "bundled"`: publish computes `latest` from
 `seed-manifest.json`, using the newest version already present in the bundle for each
@@ -182,8 +210,8 @@ airgap-sync bundle prune ./airgap-bundle --dry-run
 airgap-sync bundle prune ./airgap-bundle
 ```
 
-Pruning removes tarballs and Git mirrors that are no longer referenced by the latest
-successful bundle documents. It refuses to run after an incomplete download and does
+Pruning removes tarballs, wheels, and Git mirrors that are no longer referenced by the
+latest successful bundle documents. It refuses to run after an incomplete download and does
 not delete anything from Verdaccio or Gitea.
 
 Before transfer, inspect the bundle:
@@ -210,6 +238,7 @@ Copy the whole `./airgap-bundle` directory to the closed network, including:
 - `fetch-report.json`
 - Git source metadata
 - Git mirror fetch reports
+- `python-packages/`, `python-seed-manifest.json`, and Python reports when present
 
 Do not copy only tarballs. The JSON files are the audit trail and are required by later
 commands.
@@ -243,6 +272,18 @@ The offline publish step should:
 - create missing Gitea owners or repositories;
 - push local bare mirrors into Gitea using the provided Gitea token;
 - generate install configuration for consumer machines.
+- publish every bundled wheel under `pythonPublishOwner` through Gitea's PyPI upload
+  API; a 409 is accepted only when the existing file has the same sha256.
+
+For a public owner, consumers need no credentials:
+
+```bash
+export PIP_INDEX_URL=http://gitea.local/api/packages/pypi/pypi/simple
+pip install --only-binary=:all: -r requirements.txt
+```
+
+Use this index as the primary `index-url`, not as an extra index, to avoid dependency
+confusion and accidental access to the public internet.
 
 If Git repositories are created by another process, or the target Git host is not
 Gitea-compatible, skip repository provisioning:

@@ -8,6 +8,8 @@ import {
 import { safeDirectoryGitArgs } from './git-safe.js';
 import { parseLockfileRequirementsFromContent } from './lockfiles.js';
 import { runGitOutputCommand, type GitOutputCommandRunner } from './repos.js';
+import type { PythonDiscoveredInputs } from './python/input-types.js';
+import { discoverPythonInputsFromPaths, emptyPythonDiscoveredInputs } from './python/discovery.js';
 
 const supportedLockfileNames = new Set([
   'npm-shrinkwrap.json',
@@ -30,6 +32,7 @@ const ignoredPathParts = new Set([
 ]);
 
 export interface ReadGitSourceManifestRequirementsOptions extends ReadManifestRequirementsOptions {
+  includePython?: boolean;
   mirrorPath: string;
   runner?: GitOutputCommandRunner;
   source: GitSource;
@@ -39,6 +42,7 @@ export interface GitSourceManifestRequirementsResult extends ParseRootSpecsResul
   lockfilePaths: string[];
   manifestPaths: string[];
   mirrorPath: string;
+  python: PythonDiscoveredInputs;
   revision: string;
   sourceId: string;
 }
@@ -221,6 +225,19 @@ export async function readGitSourceManifestRequirements(
       )
     );
   }
+  const python = options.includePython
+    ? await discoverPythonInputsFromPaths(
+        repositoryPaths.filter((filePath) => !isIgnoredRepositoryPath(filePath)),
+        (filePath) =>
+          readFileFromGit({
+            filePath,
+            mirrorPath,
+            revision,
+            runner,
+          }),
+        { includeDev: options.includeDev === true }
+      )
+    : emptyPythonDiscoveredInputs();
 
   return {
     gitRequirements: [
@@ -238,6 +255,7 @@ export async function readGitSourceManifestRequirements(
     lockfilePaths,
     manifestPaths: unlockedManifestPaths,
     mirrorPath,
+    python,
     revision,
     sourceId: options.source.id,
   };

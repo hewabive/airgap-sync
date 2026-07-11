@@ -188,6 +188,46 @@ describe('pruneBundle', () => {
     ).resolves.toBe(true);
   });
 
+  it('removes stale wheels when a Python seed manifest is present', async () => {
+    await writeBundleFiles();
+    await fs.ensureDir(path.join(bundleDir, 'python-packages'));
+    await fs.writeFile(path.join(bundleDir, 'python-packages/kept-1.0-py3-none-any.whl'), 'kept');
+    await fs.writeFile(path.join(bundleDir, 'python-packages/stale-1.0-py3-none-any.whl'), 'stale');
+    await fs.writeJson(
+      path.join(bundleDir, 'python-seed-manifest.json'),
+      {
+        schemaVersion: 1,
+        createdAt: '2026-07-10T00:00:00.000Z',
+        packages: [
+          {
+            files: [
+              {
+                file: 'python-packages/kept-1.0-py3-none-any.whl',
+              },
+            ],
+            name: 'kept',
+            resolvedFrom: [],
+            version: '1.0',
+          },
+        ],
+        roots: ['kept==1.0'],
+        sourceIndex: 'https://pypi.org/simple/',
+        targetEnvironments: [],
+      },
+      { spaces: 2 }
+    );
+
+    const report = await pruneBundle({ bundleDir });
+
+    expect(report.pythonPackages).toEqual({ kept: 1, removed: 1, stale: 1, total: 2 });
+    await expect(
+      fs.pathExists(path.join(bundleDir, 'python-packages/kept-1.0-py3-none-any.whl'))
+    ).resolves.toBe(true);
+    await expect(
+      fs.pathExists(path.join(bundleDir, 'python-packages/stale-1.0-py3-none-any.whl'))
+    ).resolves.toBe(false);
+  });
+
   it('refuses to prune after an incomplete download', async () => {
     await writeBundleFiles(collectReport({ fixedPoint: false, wroteBundle: false }));
 

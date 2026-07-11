@@ -13,6 +13,8 @@ import type {
   VerifyInstallReport,
 } from '../types.js';
 import type { WorkspaceSnapshot, WorkspaceTargetSnapshot } from './workspace.js';
+import { readPythonSeedManifest, type PythonSeedManifest } from './python/bundle.js';
+import type { PythonTargetEnvironmentConfig } from './python/environments.js';
 
 export interface InstallCommandInvocation {
   args: string[];
@@ -39,6 +41,7 @@ export interface VerifyInstallOptions {
   gitRunner?: GitCommandRunner;
   ignoreScripts?: boolean;
   keepTemp?: boolean;
+  pythonOwner?: string;
   registryUrl: string;
   runner?: InstallCommandRunner;
   timeoutMs?: number;
@@ -201,6 +204,137 @@ function installEnv(options: {
   };
 }
 
+function localPythonPlatformMatches(environment: PythonTargetEnvironmentConfig): boolean {
+  const osMatches =
+    (process.platform === 'linux' && environment.os === 'linux') ||
+    (process.platform === 'darwin' && environment.os === 'macos') ||
+    (process.platform === 'win32' && environment.os === 'windows');
+  const archMatches =
+    (process.arch === 'x64' && environment.arch === 'x86_64') ||
+    (process.arch === 'arm64' && environment.arch === 'aarch64');
+  return osMatches && archMatches;
+}
+
+async function verifyPythonInstall(options: {
+  env: NodeJS.ProcessEnv;
+  indexUrl: string;
+  manifest: PythonSeedManifest;
+  runner: InstallCommandRunner;
+  tempRoot: string;
+  timeoutMs: number;
+}): Promise<VerifyInstallProjectResult> {
+  const candidates = process.platform === 'win32' ? ['py', 'python'] : ['python3', 'python'];
+  for (const command of candidates) {
+    const versionResult = await options.runner({
+      args: ['--version'],
+      command,
+      cwd: options.tempRoot,
+      env: options.env,
+      timeoutMs: options.timeoutMs,
+    });
+    if (versionResult.exitCode !== 0) {
+      continue;
+    }
+    const version = /Python\s+(\d+\.\d+\.\d+)/i.exec(
+      `${versionResult.stdout}\n${versionResult.stderr}`
+    )?.[1];
+    const environment = options.manifest.targetEnvironments.find(
+      (item) => item.pythonVersion === version && localPythonPlatformMatches(item)
+    );
+    if (!environment) {
+      continue;
+    }
+    const requirements = options.manifest.packages
+      .filter((pkg) => pkg.files.some((file) => file.environments.includes(environment.name)))
+      .map((pkg) => `${pkg.name}==${pkg.version}`)
+      .sort();
+    if (requirements.length === 0) {
+      return {
+        packageManager: 'pip',
+        projectPath: `python:${environment.name}`,
+        reason: 'No bundled Python packages apply to the matching target environment',
+        status: 'skipped',
+        targetUrl: options.indexUrl,
+      };
+    }
+    const venvPath = path.join(options.tempRoot, 'python-venv');
+    const create = await options.runner({
+      args: ['-m', 'venv', venvPath],
+      command,
+      cwd: options.tempRoot,
+      env: options.env,
+      timeoutMs: options.timeoutMs,
+    });
+    if (create.exitCode !== 0) {
+      const output = `${create.stdout}\n${create.stderr}`;
+      if (/ensurepip|python\S*-venv|no module named ['"]?venv/i.test(output)) {
+        return {
+          command: [command, '-m', 'venv', venvPath],
+          exitCode: create.exitCode,
+          packageManager: 'pip',
+          projectPath: `python:${environment.name}`,
+          reason:
+            'Matching Python interpreter is present but venv/ensurepip support is unavailable',
+          status: 'skipped',
+          stderr: truncateOutput(create.stderr),
+          stdout: truncateOutput(create.stdout),
+          targetUrl: options.indexUrl,
+        };
+      }
+      return {
+        command: [command, '-m', 'venv', venvPath],
+        exitCode: create.exitCode,
+        packageManager: 'pip',
+        projectPath: `python:${environment.name}`,
+        status: 'failed',
+        stderr: truncateOutput(create.stderr),
+        stdout: truncateOutput(create.stdout),
+        targetUrl: options.indexUrl,
+      };
+    }
+    const python =
+      process.platform === 'win32'
+        ? path.join(venvPath, 'Scripts', 'python.exe')
+        : path.join(venvPath, 'bin', 'python');
+    const args = [
+      '-m',
+      'pip',
+      'install',
+      '--index-url',
+      options.indexUrl,
+      '--only-binary',
+      ':all:',
+      '--no-deps',
+      ...requirements,
+    ];
+    const install = await options.runner({
+      args,
+      command: python,
+      cwd: options.tempRoot,
+      env: options.env,
+      timeoutMs: options.timeoutMs,
+    });
+    return {
+      command: [python, ...args],
+      exitCode: install.exitCode,
+      packageManager: 'pip',
+      projectPath: `python:${environment.name}`,
+      status: install.exitCode === 0 ? 'passed' : 'failed',
+      stderr: truncateOutput(install.stderr),
+      stdout: truncateOutput(install.stdout),
+      targetUrl: options.indexUrl,
+      tempPath: venvPath,
+    };
+  }
+  return {
+    packageManager: 'pip',
+    projectPath: 'python',
+    reason: 'No local Python interpreter exactly matches a configured target environment',
+    status: 'skipped',
+    targetUrl: options.indexUrl,
+  };
+}
+
 function summarize(
   projects: VerifyInstallProjectResult[]
 ): Pick<VerifyInstallReport, 'failed' | 'ok' | 'passed' | 'skipped' | 'totalProjects'> {
@@ -304,6 +438,14 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const timeoutMs = options.timeoutMs ?? defaultInstallTimeoutMs;
   const snapshot = await readWorkspaceSnapshot(bundleDir);
+  const pythonManifest = (await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json')))
+    ? await readPythonSeedManifest(bundleDir)
+    : undefined;
+  const pythonOwner = options.pythonOwner ?? snapshot.pythonPublishOwner;
+  const pythonIndexUrl =
+    pythonManifest && pythonOwner
+      ? `${normalizeBaseUrl(options.giteaBaseUrl)}/api/packages/${encodeURIComponent(pythonOwner)}/pypi/simple`
+      : undefined;
   const gitSources = await readOptionalGitSources(bundleDir);
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-install-'));
   const gitConfigPath = path.join(tempRoot, 'gitconfig');
@@ -349,6 +491,26 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
         })
       );
     }
+    if (pythonManifest) {
+      projects.push(
+        pythonIndexUrl
+          ? await verifyPythonInstall({
+              env,
+              indexUrl: pythonIndexUrl,
+              manifest: pythonManifest,
+              runner,
+              tempRoot,
+              timeoutMs,
+            })
+          : {
+              packageManager: 'pip',
+              projectPath: 'python',
+              reason: 'Python publish owner is not configured',
+              status: 'skipped',
+              targetUrl: options.giteaBaseUrl,
+            }
+      );
+    }
   } finally {
     if (options.keepTemp !== true) {
       await fs.remove(tempRoot);
@@ -362,6 +524,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
     giteaBaseUrl: options.giteaBaseUrl,
     ignoreScripts: options.ignoreScripts === true,
     projects,
+    ...(pythonIndexUrl ? { pythonIndexUrl } : {}),
     registryUrl: options.registryUrl,
     ...summary,
   };

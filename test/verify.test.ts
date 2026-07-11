@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as tar from 'tar';
 import * as fs from '../src/core/fs.js';
@@ -368,6 +369,85 @@ describe('verifyBundle', () => {
     expect(report.ok).toBe(false);
     expect(report.checks).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'git-mirrors', status: 'error' })])
+    );
+  });
+
+  it('verifies Python wheel hashes, identities, and target-environment coverage', async () => {
+    await writeValidBundle();
+    const wheel = Buffer.from('verified wheel');
+    const wheelHash = createHash('sha256').update(wheel).digest('hex');
+    await fs.ensureDir(path.join(bundleDir, 'python-packages'));
+    await fs.writeFile(path.join(bundleDir, 'python-packages/demo-1.0-py3-none-any.whl'), wheel);
+    await fs.writeJson(
+      path.join(bundleDir, 'python-seed-manifest.json'),
+      {
+        schemaVersion: 1,
+        createdAt: '2026-07-10T00:00:00.000Z',
+        packages: [
+          {
+            files: [
+              {
+                coreMetadata: {
+                  metadataVersion: '2.4',
+                  name: 'demo',
+                  projectUrls: [],
+                  providesExtra: [],
+                  requiresDist: [],
+                  version: '1.0',
+                },
+                environments: ['linux'],
+                file: 'python-packages/demo-1.0-py3-none-any.whl',
+                filename: 'demo-1.0-py3-none-any.whl',
+                kind: 'wheel',
+                sha256: wheelHash,
+                sourceHashes: { sha256: wheelHash },
+                url: 'https://files.example/demo-1.0-py3-none-any.whl',
+              },
+            ],
+            name: 'demo',
+            resolvedFrom: [],
+            version: '1.0',
+          },
+        ],
+        roots: ['demo==1.0'],
+        sourceIndex: 'https://pypi.org/simple/',
+        targetEnvironments: [
+          {
+            arch: 'x86_64',
+            manylinux: 'manylinux_2_17',
+            name: 'linux',
+            os: 'linux',
+            pythonVersion: '3.11.9',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+    await fs.writeJson(
+      path.join(bundleDir, 'python-fetch-report.json'),
+      { actions: [], errors: [], unsupported: [] },
+      { spaces: 2 }
+    );
+
+    const valid = await verifyBundle({ bundleDir });
+    expect(valid.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'python-wheel-files', status: 'ok' }),
+        expect.objectContaining({ name: 'python-wheel-integrity', status: 'ok' }),
+        expect.objectContaining({ name: 'python-environment-coverage', status: 'ok' }),
+      ])
+    );
+
+    await fs.writeFile(
+      path.join(bundleDir, 'python-packages/demo-1.0-py3-none-any.whl'),
+      'changed'
+    );
+    const corrupt = await verifyBundle({ bundleDir });
+    expect(corrupt.ok).toBe(false);
+    expect(corrupt.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'python-wheel-integrity', status: 'error' }),
+      ])
     );
   });
 });

@@ -22,6 +22,8 @@ export {
 } from './core/bundle.js';
 export { applyBundle } from './core/apply.js';
 export { collectBundle } from './core/collect.js';
+export { HttpPythonIndexClient } from './core/python/index-client.js';
+export { publishPythonBundle } from './core/python/publisher.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
@@ -69,6 +71,7 @@ export {
   addWorkspaceTarget,
   clearWorkspaceGiteaToken,
   createWorkspaceGitSources,
+  createWorkspacePythonRequirements,
   createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
@@ -189,6 +192,12 @@ export type {
 export type { DownloadedTarball } from './core/tarball.js';
 
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
+export type {
+  PublishPythonBundleOptions,
+  PythonPublishAction,
+  PythonPublishAuth,
+  PythonPublishReport,
+} from './core/python/publisher.js';
 
 export type {
   ApplyBundleReport,

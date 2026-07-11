@@ -9,6 +9,7 @@ const giteaUser = process.env.GITEA_USER ?? 'maxim';
 const giteaPassword = process.env.GITEA_PASSWORD ?? '11111111';
 const cliPath = path.resolve('dist/cli.cjs');
 const fakeGithubOwner = 'airgap-sync-e2e';
+const pythonPackage = { name: 'idna', version: '3.10' };
 
 function log(message) {
   console.log(`[e2e] ${message}`);
@@ -57,12 +58,15 @@ async function writeGitConfig(filePath, rules) {
 }
 
 async function writeOnlineGitConfig(workDir) {
-  return writeGitConfig(path.join(workDir, 'online-gitconfig'), [
-    {
-      insteadOf: `https://github.com/${fakeGithubOwner}/`,
-      targetUrl: `${giteaBaseUrl.replace(/\/$/, '')}/${giteaUser}/`,
-    },
-  ]);
+  const targetUrl = `${giteaBaseUrl.replace(/\/$/, '')}/${giteaUser}/`;
+  return writeGitConfig(
+    path.join(workDir, 'online-gitconfig'),
+    [
+      `https://github.com/${fakeGithubOwner}/`,
+      `ssh://git@github.com/${fakeGithubOwner}/`,
+      `git@github.com:${fakeGithubOwner}/`,
+    ].map((insteadOf) => ({ insteadOf, targetUrl }))
+  );
 }
 
 async function writeApplyGitConfig(workDir) {
@@ -157,6 +161,18 @@ async function deleteOrg(token, name) {
     method: 'DELETE',
   }).catch((error) => {
     log(`org cleanup skipped for ${name}: ${error.message}`);
+  });
+}
+
+async function deletePythonPackage(token) {
+  await request(
+    `${giteaBaseUrl}/api/v1/packages/${giteaUser}/pypi/${pythonPackage.name}/${pythonPackage.version}`,
+    {
+      headers: { Authorization: tokenAuthHeader(token) },
+      method: 'DELETE',
+    }
+  ).catch((error) => {
+    log(`Python package cleanup skipped: ${error.message}`);
   });
 }
 
@@ -414,6 +430,55 @@ async function createGitPackageRepo(options) {
   await run('git', ['push', '-u', 'origin', 'main'], { cwd: repoDir });
 }
 
+async function configureWorkspacePython(workspaceDir) {
+  let pythonVersion = '3.11.9';
+  try {
+    const version = await run('python3', ['--version'], {
+      capture: true,
+      label: 'detect local Python for install verification',
+    });
+    pythonVersion =
+      /Python\s+(\d+\.\d+\.\d+)/i.exec(`${version.stdout}\n${version.stderr}`)?.[1] ??
+      pythonVersion;
+  } catch {
+    log('python3 unavailable; install verification will record a Python skip');
+  }
+  const platform =
+    process.platform === 'linux'
+      ? { manylinux: 'manylinux_2_17', os: 'linux' }
+      : process.platform === 'darwin'
+        ? { macosVersion: '11.0', os: 'macos' }
+        : process.platform === 'win32'
+          ? { os: 'windows' }
+          : undefined;
+  const arch = process.arch === 'x64' ? 'x86_64' : process.arch === 'arm64' ? 'aarch64' : undefined;
+  if (!platform || !arch) {
+    throw new Error(`Unsupported e2e Python target host: ${process.platform}/${process.arch}`);
+  }
+  const configPath = path.join(workspaceDir, 'airgap-sync.json');
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
+  config.pythonPublishOwner = giteaUser;
+  config.pythonSourceIndex = 'https://pypi.org/simple/';
+  config.pythonTargetEnvironments = [
+    {
+      arch,
+      name: 'e2e-local',
+      pythonVersion,
+      ...platform,
+    },
+  ];
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+async function verifyAnonymousPythonIndex() {
+  const url = `${giteaBaseUrl}/api/packages/${giteaUser}/pypi/simple/${pythonPackage.name}/`;
+  const response = await fetch(url);
+  const body = await response.text();
+  if (!response.ok || !body.includes(`${pythonPackage.name}-${pythonPackage.version}`)) {
+    throw new Error(`Anonymous Gitea Python index check failed: ${response.status} ${body}`);
+  }
+}
+
 async function main() {
   await request(`${giteaBaseUrl}/api/v1/user`, {
     headers: { Authorization: basicAuthHeader() },
@@ -450,10 +515,20 @@ async function main() {
     const workspaceDir = path.join(workDir, 'workspace');
     await mkdir(workspaceDir, { recursive: true });
     await run('node', [cliPath, 'init'], { cwd: workspaceDir });
-    await run('node', [cliPath, 'target', 'add', 'git', publicRepoUrl(repoName)], {
-      cwd: workspaceDir,
-    });
-    await run('node', [cliPath, 'collect', '--concurrency', '4'], {
+    await configureWorkspacePython(workspaceDir);
+    await run(
+      'node',
+      [cliPath, 'target', 'add', 'git', publicRepoUrl(repoName), '--branch', 'main'],
+      {
+        cwd: workspaceDir,
+      }
+    );
+    await run(
+      'node',
+      [cliPath, 'target', 'add', 'pypi', `${pythonPackage.name}==${pythonPackage.version}`],
+      { cwd: workspaceDir }
+    );
+    await run('node', [cliPath, 'download', '--concurrency', '4'], {
       cwd: workspaceDir,
       env: {
         GIT_CONFIG_GLOBAL: onlineGitConfig,
@@ -464,7 +539,7 @@ async function main() {
       'node',
       [
         cliPath,
-        'apply',
+        'publish',
         './airgap-bundle',
         '--registry',
         verdaccio.registryUrl,
@@ -482,9 +557,10 @@ async function main() {
           npm_config_userconfig: npmUserConfig,
         },
         label:
-          'node dist/cli.cjs apply ./airgap-bundle --registry <verdaccio> --gitea <gitea> --gitea-token <redacted> --public',
+          'node dist/cli.cjs publish ./airgap-bundle --registry <verdaccio> --gitea <gitea> --gitea-token <redacted> --public',
       }
     );
+    await verifyAnonymousPythonIndex();
     await run('node', [cliPath, 'verify', './airgap-bundle'], { cwd: workspaceDir });
     await run(
       'node',
@@ -505,11 +581,15 @@ async function main() {
       await readFile(path.join(workspaceDir, 'airgap-bundle', 'apply-report.json'), 'utf8')
     );
     log(`passed: ${applyReport.publish.published} packages published to ${verdaccio.registryUrl}`);
+    log(
+      `passed: ${applyReport.python?.published ?? 0} Python wheels published to ${applyReport.python?.indexUrl ?? 'missing index'}`
+    );
   } finally {
     if (verdaccio) {
       await verdaccio.stop();
     }
     if (token) {
+      await deletePythonPackage(token);
       await deleteRepo(token, repoName);
       await deleteRepo(token, libRepoName);
       await deleteOwnedRepo(token, mirrorOwner, libRepoName);

@@ -6,6 +6,7 @@ import { collectBundle } from '../src/core/collect.js';
 import type { GitCommandInvocation } from '../src/core/git-fetch.js';
 import type { GitOutputCommandInvocation, GitOutputCommandResult } from '../src/core/repos.js';
 import type { PackageManifest, PackageMetadata, ResolvedRootPackage } from '../src/types.js';
+import type { PythonIndexClient } from '../src/core/python/index-client.js';
 
 const tarballMocks = vi.hoisted(() => ({
   dependencySpecsFromManifest: vi.fn(),
@@ -1072,5 +1073,74 @@ __metadata:
         return `${pkg.name}@${pkg.version}`;
       })
     ).toEqual(['extra@1.0.0']);
+  });
+
+  it('discovers and reports Python requirements for every target environment', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'package.json'),
+      { name: 'root', version: '1.0.0' },
+      { spaces: 2 }
+    );
+    await fs.writeFile(path.join(tempDir, 'requirements.txt'), 'demo-python==1.0\n');
+    const file = {
+      filename: 'demo_python-1.0-py3-none-any.whl',
+      hashes: { sha256: 'aa'.repeat(32) },
+      size: 42,
+      url: 'https://files.example/demo_python-1.0-py3-none-any.whl',
+    };
+    const pythonIndex: PythonIndexClient = {
+      sourceIndex: 'https://python.example/simple',
+      getMetadata() {
+        return Promise.resolve({
+          metadata: {
+            metadataVersion: '2.4',
+            name: 'demo-python',
+            projectUrls: [],
+            providesExtra: [],
+            requiresDist: [],
+            version: '1.0',
+          },
+          source: 'core-metadata',
+        });
+      },
+      getProject(name) {
+        expect(name).toBe('demo-python');
+        return Promise.resolve({ apiVersion: '1.0', files: [file], name });
+      },
+    };
+
+    const report = await collectBundle({
+      dryRun: true,
+      generatedAt: '2026-07-10T00:00:00.000Z',
+      outputDir: path.join(tempDir, 'airgap-bundle'),
+      pythonIndex,
+      pythonSourceIndex: pythonIndex.sourceIndex,
+      pythonTargetEnvironments: [
+        {
+          arch: 'x86_64',
+          manylinux: 'manylinux_2_17',
+          name: 'prod',
+          os: 'linux',
+          pythonVersion: '3.11.9',
+        },
+      ],
+      registry: {
+        getPackageMetadata(name) {
+          throw new Error(`Unexpected registry lookup for ${name}`);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      root: tempDir,
+      runGitOutputCommand: cleanRepositoryRunner(tempDir),
+    });
+
+    expect(report.python).toMatchObject({
+      approximate: true,
+      errors: [],
+      planned: 1,
+      resolvedFiles: 1,
+      resolvedPackages: 1,
+    });
+    expect(report.fetch.python).toEqual(report.python);
   });
 });

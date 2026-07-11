@@ -1,3 +1,6 @@
+import type { PythonFetchReport } from './core/python/bundle.js';
+import type { PythonPublishReport } from './core/python/publisher.js';
+
 export interface PackageIdentity {
   name: string;
   version: string;
@@ -115,6 +118,7 @@ export interface CollectReport {
   iterations: CollectIterationReport[];
   maxIterationsReached: boolean;
   outputDir: string;
+  python?: PythonFetchReport;
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
   root: string;
@@ -365,6 +369,7 @@ export interface FetchReport {
   errors: ResolutionError[];
   generatedAt: string;
   gitRequirements: GitRequirement[];
+  python?: PythonFetchReport;
   resolved: number;
   skipped: number;
   timings: FetchTimings;
@@ -453,11 +458,12 @@ export interface ApplyBundleReport {
   gitConfig?: GitConfigReport;
   gitea: GiteaRepositoryProvisionReport;
   publish: PublishReport;
+  python?: PythonPublishReport;
   registryUrl: string;
   succeeded: boolean;
 }
 
-export type BundlePruneObjectType = 'git-mirror' | 'npm-package';
+export type BundlePruneObjectType = 'git-mirror' | 'npm-package' | 'python-package';
 export type BundlePruneActionStatus = 'planned' | 'removed' | 'error';
 
 export interface BundlePruneActionResult {
@@ -482,6 +488,7 @@ export interface BundlePruneReport {
   generatedAt: string;
   gitMirrors: BundlePruneObjectSummary;
   npmPackages: BundlePruneObjectSummary;
+  pythonPackages: BundlePruneObjectSummary;
   planned: number;
   removed: number;
 }
@@ -507,7 +514,7 @@ export interface VerifyReport {
   };
 }
 
-export type VerifyInstallPackageManager = 'npm' | 'pnpm' | 'yarn';
+export type VerifyInstallPackageManager = 'npm' | 'pip' | 'pnpm' | 'yarn';
 export type VerifyInstallProjectStatus = 'passed' | 'failed' | 'skipped';
 
 export interface VerifyInstallProjectResult {
@@ -533,6 +540,7 @@ export interface VerifyInstallReport {
   ok: boolean;
   passed: number;
   projects: VerifyInstallProjectResult[];
+  pythonIndexUrl?: string;
   registryUrl: string;
   skipped: number;
   totalProjects: number;

@@ -6,6 +6,7 @@ import {
   addWorkspaceTarget,
   clearWorkspaceGiteaToken,
   createWorkspaceGitSources,
+  createWorkspacePythonRequirements,
   createWorkspaceSnapshot,
   initWorkspace,
   readWorkspaceConfig,
@@ -138,6 +139,74 @@ describe('workspace config', () => {
       giteaUrl: 'http://gitea.local',
       targetRegistry: 'http://verdaccio.local:4873',
     });
+  });
+
+  it('normalizes Python settings and PyPI targets', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        output: './airgap-bundle',
+        pythonPublishOwner: ' pypi ',
+        pythonSourceIndex: 'https://packages.example/simple',
+        pythonTargetEnvironments: [
+          {
+            arch: 'x86_64',
+            manylinux: 'manylinux_2_17',
+            name: 'prod-linux',
+            os: 'linux',
+            pythonVersion: '3.11.9',
+          },
+        ],
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [{ spec: 'requests[socks]>=2.31', type: 'pypi' }],
+      },
+      { spaces: 2 }
+    );
+
+    expect(await readWorkspaceConfig(tempDir)).toMatchObject({
+      pythonPublishOwner: 'pypi',
+      pythonSourceIndex: 'https://packages.example/simple',
+      pythonTargetEnvironments: [
+        {
+          arch: 'x86_64',
+          manylinux: 'manylinux_2_17',
+          name: 'prod-linux',
+          os: 'linux',
+          pythonVersion: '3.11.9',
+        },
+      ],
+      targets: [{ spec: 'requests[socks]>=2.31', type: 'pypi' }],
+    });
+  });
+
+  it('requires target environments for PyPI targets', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await expect(
+      addWorkspaceTarget(tempDir, { spec: 'requests==2.32.3', type: 'pypi' })
+    ).rejects.toThrow(/pythonTargetEnvironments/);
+  });
+
+  it('creates Python requirements for configured PyPI targets', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.targets.push({ spec: 'requests[socks]>=2.31', type: 'pypi' });
+    expect(createWorkspacePythonRequirements(config)).toEqual([
+      {
+        constraint: false,
+        hashes: [],
+        line: 1,
+        requiredBy: 'root',
+        requirement: {
+          extras: ['socks'],
+          name: 'requests',
+          normalizedName: 'requests',
+          raw: 'requests[socks]>=2.31',
+          specifier: '>=2.31',
+        },
+        sourcePath: 'workspace-targets',
+      },
+    ]);
   });
 
   it('normalizes workspace menu defaults', async () => {
