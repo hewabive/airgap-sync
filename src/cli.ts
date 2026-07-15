@@ -19,6 +19,7 @@ import {
   createFetchReport,
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
+  createWorkspacePythonRootWheels,
   createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
@@ -534,12 +535,7 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
   return targets
     .map((target, index) => {
       const prefix = `${String(index + 1)}.`;
-      if (target.type !== 'git') {
-        return `${prefix} ${target.type} ${target.spec}`;
-      }
-
-      const branch = target.branch ? ` (${target.branch})` : '';
-      return `${prefix} git ${target.url}${branch}`;
+      return `${prefix} ${formatTargetValue(target)}`;
     })
     .join('\n');
 }
@@ -547,7 +543,9 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
 function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
   return target.type === 'git'
     ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
-    : `${target.type} ${target.spec}`;
+    : target.type === 'python-wheel'
+      ? `python-wheel ${target.url}#sha256=${target.sha256}`
+      : `${target.type} ${target.spec}`;
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
@@ -1946,6 +1944,25 @@ targetAddCommand
   });
 
 targetAddCommand
+  .command('python-wheel')
+  .description('Add an exact Python root wheel target')
+  .argument('<url>', 'HTTP(S) or file URL to the wheel')
+  .requiredOption('--sha256 <digest>', 'Expected wheel SHA-256')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (url: string, workspace: string, options: { sha256: string }) => {
+    try {
+      const target = { sha256: options.sha256, type: 'python-wheel' as const, url };
+      const result = await addWorkspaceTarget(workspace, target);
+      console.log(
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetAddCommand
   .command('npm')
   .description('Add an npm package spec target')
   .argument('<spec>', 'Package spec, e.g. eslint@latest')
@@ -2165,6 +2182,7 @@ program
         );
         const gitTargets = createWorkspaceGitSources(activeConfig);
         const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
+        const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
@@ -2207,6 +2225,7 @@ program
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
           initialPythonRequirements: pythonRequirements,
+          initialPythonRootWheels: pythonRootWheels,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
           rangeResolutionPolicy,

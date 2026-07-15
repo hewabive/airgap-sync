@@ -92,6 +92,7 @@ npm exec -- airgap-sync init
 npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
 npm exec -- airgap-sync target add npm eslint@latest
 npm exec -- airgap-sync target add pypi 'requests==2.32.4'
+npm exec -- airgap-sync target add python-wheel 'https://example/vllm.whl' --sha256 <digest>
 
 # Online machine.
 npm exec -- airgap-sync download --prune

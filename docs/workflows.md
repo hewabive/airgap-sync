@@ -44,6 +44,7 @@ airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
 airgap-sync target add pypi 'requests==2.32.4'
+airgap-sync target add python-wheel 'https://example/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' --sha256 <digest>
 airgap-sync target list
 ```
 
@@ -106,6 +107,9 @@ and extra-index inputs are intentionally reported as unsupported in this version
 Unlocked requirements and direct PyPI targets fail by default. Set
 `pythonResolutionMode` to `approximate`, or pass `--allow-approximate-python` for one
 run, to explicitly accept the simplified resolver without dependency backtracking.
+An exact `python-wheel` target also needs this opt-in for its transitive metadata
+closure, but the root itself is always pinned and verified by SHA-256. All resolved
+wheels are published through the same Gitea PyPI owner during the offline phase.
 
 ## Online Phase
 

@@ -7,6 +7,7 @@ import {
   clearWorkspaceGiteaToken,
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
+  createWorkspacePythonRootWheels,
   createWorkspaceSnapshot,
   initWorkspace,
   readWorkspaceConfig,
@@ -180,6 +181,46 @@ describe('workspace config', () => {
         },
       ],
       targets: [{ spec: 'requests[socks]>=2.31', type: 'pypi' }],
+    });
+  });
+
+  it('normalizes exact Python wheel targets and creates transfer inputs', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        output: './airgap-bundle',
+        pythonResolutionMode: 'approximate',
+        pythonTargetEnvironments: [
+          {
+            arch: 'x86_64',
+            manylinux: 'manylinux_2_34',
+            name: 'cpu',
+            os: 'linux',
+            pythonVersion: '3.12.13',
+          },
+        ],
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [
+          {
+            sha256: 'A'.repeat(64),
+            type: 'python-wheel',
+            url: 'https://example.test/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+
+    const config = await readWorkspaceConfig(tempDir);
+    expect(config.targets[0]).toMatchObject({
+      sha256: 'a'.repeat(64),
+      type: 'python-wheel',
+    });
+    expect(createWorkspacePythonRootWheels(config)[0]).toMatchObject({
+      requiredBy: 'root',
+      sha256: 'a'.repeat(64),
+      sourcePath: 'workspace-wheel-targets',
     });
   });
 

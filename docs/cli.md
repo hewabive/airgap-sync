@@ -27,6 +27,9 @@ The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
 airgap-sync target add pypi 'requests==2.32.4'
+airgap-sync target add python-wheel \
+  'https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' \
+  --sha256 <64-hex-digest>
 airgap-sync target list
 airgap-sync target remove 1
 ```
@@ -137,6 +140,14 @@ as an error before its dependency closure is guessed. Use
 `--allow-approximate-python`, or set `"pythonResolutionMode": "approximate"`, only when
 the simplified highest-compatible/no-backtracking resolver is an accepted tradeoff.
 The resulting fetch report remains marked `approximate: true`.
+
+`target add python-wheel` handles an exact root wheel that is not listed by the source
+index, such as a vLLM CPU release asset. SHA-256 is mandatory. During download the wheel
+is streamed into the bundle, hashed, and its embedded `METADATA` is validated against
+the filename. That exact root is overlaid on the configured Python index; its
+`Requires-Dist` edges are then resolved and the realized package/file/hash closure is
+written to `python-seed-manifest.json`. Because dependency selection still uses the
+no-backtracking resolver, this target requires the same explicit approximate opt-in.
 
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in

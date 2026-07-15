@@ -15,6 +15,7 @@ import {
 } from './python/environments.js';
 import { parseRequirement } from './python/requirements.js';
 import type { PythonRequirementInput } from './python/input-types.js';
+import type { PythonRootWheelInput } from './python/input-types.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
@@ -39,7 +40,17 @@ interface WorkspacePypiTarget {
   type: 'pypi';
 }
 
-export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget | WorkspacePypiTarget;
+export interface WorkspacePythonWheelTarget {
+  sha256: string;
+  type: 'python-wheel';
+  url: string;
+}
+
+export type WorkspaceTarget =
+  | WorkspaceGitTarget
+  | WorkspaceNpmTarget
+  | WorkspacePypiTarget
+  | WorkspacePythonWheelTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
 export type PythonResolutionMode = 'approximate' | 'locked-only';
 
@@ -101,10 +112,17 @@ interface WorkspacePypiTargetSnapshot {
   type: 'pypi';
 }
 
+interface WorkspacePythonWheelTargetSnapshot {
+  sha256: string;
+  type: 'python-wheel';
+  url: string;
+}
+
 export type WorkspaceTargetSnapshot =
   | WorkspaceGitTargetSnapshot
   | WorkspaceNpmTargetSnapshot
-  | WorkspacePypiTargetSnapshot;
+  | WorkspacePypiTargetSnapshot
+  | WorkspacePythonWheelTargetSnapshot;
 
 export interface WorkspaceSnapshot {
   createdAt: string;
@@ -218,6 +236,27 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     return {
       spec: value.spec.trim(),
       type: value.type,
+    };
+  }
+
+  if (value.type === 'python-wheel') {
+    if (typeof value.url !== 'string' || !value.url.trim()) {
+      throw new Error('python-wheel target must include a non-empty url');
+    }
+    const url = new URL(value.url.trim());
+    if (!['file:', 'http:', 'https:'].includes(url.protocol)) {
+      throw new Error('python-wheel target URL must use file, HTTP, or HTTPS');
+    }
+    if (url.username || url.password) {
+      throw new Error('python-wheel target URL must not contain credentials');
+    }
+    if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(value.sha256.trim())) {
+      throw new Error('python-wheel target must include a 64-character SHA-256');
+    }
+    return {
+      sha256: value.sha256.trim().toLowerCase(),
+      type: 'python-wheel',
+      url: url.toString(),
     };
   }
 
@@ -424,7 +463,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
     );
   }
   if (
-    targets.some((target) => target.type === 'pypi') &&
+    targets.some((target) => target.type === 'pypi' || target.type === 'python-wheel') &&
     (!pythonTargetEnvironments || pythonTargetEnvironments.length === 0)
   ) {
     throw new Error('pypi targets require pythonTargetEnvironments');
@@ -538,7 +577,9 @@ export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<Wo
 function targetKey(target: WorkspaceTarget): string {
   return target.type === 'git'
     ? ['git', target.url, target.branch ?? ''].join('\0')
-    : [target.type, target.spec].join('\0');
+    : target.type === 'python-wheel'
+      ? [target.type, target.url, target.sha256].join('\0')
+      : [target.type, target.spec].join('\0');
 }
 
 export async function addWorkspaceTarget(
@@ -546,7 +587,10 @@ export async function addWorkspaceTarget(
   target: WorkspaceTarget
 ): Promise<{ added: boolean; config: WorkspaceConfig }> {
   const config = await readWorkspaceConfig(workspaceDir);
-  if (target.type === 'pypi' && !config.pythonTargetEnvironments?.length) {
+  if (
+    (target.type === 'pypi' || target.type === 'python-wheel') &&
+    !config.pythonTargetEnvironments?.length
+  ) {
     throw new Error('pypi targets require pythonTargetEnvironments');
   }
   const id = targetKey(target);
@@ -645,6 +689,24 @@ export function createWorkspacePythonRequirements(
   });
 }
 
+export function createWorkspacePythonRootWheels(
+  config: WorkspaceConfig
+): PythonRootWheelInput[] {
+  return config.targets.flatMap((target, index) =>
+    target.type === 'python-wheel'
+      ? [
+          {
+            line: index + 1,
+            requiredBy: 'root',
+            sha256: target.sha256,
+            sourcePath: 'workspace-wheel-targets',
+            url: target.url,
+          },
+        ]
+      : []
+  );
+}
+
 export function createWorkspaceSnapshot(
   options: CreateWorkspaceSnapshotOptions
 ): WorkspaceSnapshot {
@@ -680,6 +742,10 @@ export function createWorkspaceSnapshot(
           spec: target.spec,
           type: target.type,
         };
+      }
+
+      if (target.type === 'python-wheel') {
+        return { sha256: target.sha256, type: target.type, url: target.url };
       }
 
       const source = gitSourcesByUrl.get(target.url.replace(/^git\+/, ''));

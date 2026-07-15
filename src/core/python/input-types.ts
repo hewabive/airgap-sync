@@ -14,6 +14,14 @@ export interface PythonRequirementInput {
   sourcePath: string;
 }
 
+export interface PythonRootWheelInput {
+  line: number;
+  requiredBy: string;
+  sha256: string;
+  sourcePath: string;
+  url: string;
+}
+
 export interface UnsupportedPythonInput {
   line?: number;
   raw: string;

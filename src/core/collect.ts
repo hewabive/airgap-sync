@@ -45,6 +45,7 @@ import type {
   PythonDiscoveredInputs,
   PythonLockInput,
   PythonRequirementInput,
+  PythonRootWheelInput,
   UnsupportedPythonInput,
 } from './python/input-types.js';
 import type { PythonIndexClient } from './python/index-client.js';
@@ -53,6 +54,7 @@ import { readPythonMetadataCache, writePythonMetadataCache } from './python/meta
 import { resolvePython } from './python/resolver.js';
 import { fetchPythonBundle } from './python/fetch.js';
 import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
+import { preparePythonRootWheels, RootWheelPythonIndex } from './python/root-wheels.js';
 
 export interface CollectBundleOptions {
   allowApproximatePython?: boolean;
@@ -70,6 +72,7 @@ export interface CollectBundleOptions {
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
   initialPythonRequirements?: PythonRequirementInput[];
+  initialPythonRootWheels?: PythonRootWheelInput[];
   pythonIndex?: PythonIndexClient;
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
@@ -753,19 +756,40 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     options.pythonTargetEnvironments
   ) {
     options.onProgress?.({
-      detail: `${String(pythonInputs.requirements.length)} requirements, ${String(pythonInputs.lockfiles.length)} lockfiles`,
+      detail: `${String(pythonInputs.requirements.length)} requirements, ${String(options.initialPythonRootWheels?.length ?? 0)} root wheels, ${String(pythonInputs.lockfiles.length)} lockfiles`,
       phase: 'python-fetch',
       status: 'start',
     });
     pythonMetadataCache = await readPythonMetadataCache(outputDir, options.pythonSourceIndex);
+    if (
+      (options.initialPythonRootWheels?.length ?? 0) > 0 &&
+      options.allowApproximatePython !== true
+    ) {
+      throw new Error(
+        'Python root wheel targets require --allow-approximate-python for transitive dependency resolution'
+      );
+    }
+    const preparedRootWheels = await preparePythonRootWheels({
+      bundleDir: outputDir,
+      dryRun,
+      inputs: options.initialPythonRootWheels ?? [],
+    });
+    const pythonRequirements = [
+      ...pythonInputs.requirements,
+      ...preparedRootWheels.map((rootWheel) => rootWheel.requirement),
+    ];
+    const pythonIndex =
+      preparedRootWheels.length > 0
+        ? new RootWheelPythonIndex(options.pythonIndex, preparedRootWheels)
+        : options.pythonIndex;
     const pythonResolution = await resolvePython({
       allowApproximate: options.allowApproximatePython === true,
       cache: pythonMetadataCache,
       environments: options.pythonTargetEnvironments,
       includeDev,
-      index: options.pythonIndex,
+      index: pythonIndex,
       lockfiles: pythonInputs.lockfiles,
-      requirements: pythonInputs.requirements,
+      requirements: pythonRequirements,
     });
     pythonResult = await fetchPythonBundle({
       bundleDir: outputDir,
@@ -774,7 +798,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       generatedAt,
       resolution: pythonResolution,
       ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-      roots: pythonInputs.requirements
+      roots: pythonRequirements
         .filter((input) => !input.constraint)
         .map((input) => input.requirement.raw),
       sourceIndex: options.pythonSourceIndex,

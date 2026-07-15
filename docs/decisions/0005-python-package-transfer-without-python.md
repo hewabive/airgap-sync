@@ -65,8 +65,10 @@ Python dependency semantics differ from npm in two ways that matter for collecti
 6. Package metadata comes from the PEP 691 JSON simple index and PEP 658/714 core
    metadata files, cached by source index and artifact identity. Source artifact and
    metadata hashes are verified; the bundle records a locally computed sha256.
-7. v1 inputs: `requirements*.txt`, `uv.lock`, `pylock.toml`, and direct
-   `target add pypi` specs. Development requirements are included when the existing
+7. v1 inputs: `requirements*.txt`, `uv.lock`, `pylock.toml`, direct
+   `target add pypi` specs, and SHA-256-pinned `target add python-wheel` URLs. Root
+   wheels are downloaded once, verified, and their embedded core metadata supplies the
+   exact root plus dependency edges before the resulting closure is recorded. Development requirements are included when the existing
    `includeDev` policy is enabled. A `pyproject.toml` without a supported lockfile is
    reported with guidance instead of being resolved implicitly. Git, URL, and path
    Python requirements are reported and skipped with `requiredBy` context. Other
