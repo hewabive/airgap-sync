@@ -16,6 +16,7 @@ import {
 import { parseRequirement } from './python/requirements.js';
 import type { PythonRequirementInput } from './python/input-types.js';
 import type { PythonRootWheelInput } from './python/input-types.js';
+import type { PythonRuntimeArtifactInput } from './python/runtime-artifacts.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
@@ -46,11 +47,19 @@ export interface WorkspacePythonWheelTarget {
   url: string;
 }
 
+export interface WorkspacePythonRuntimeTarget {
+  pythonVersion: string;
+  sha256: string;
+  type: 'python-runtime';
+  url: string;
+}
+
 export type WorkspaceTarget =
   | WorkspaceGitTarget
   | WorkspaceNpmTarget
   | WorkspacePypiTarget
-  | WorkspacePythonWheelTarget;
+  | WorkspacePythonWheelTarget
+  | WorkspacePythonRuntimeTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
 export type PythonResolutionMode = 'approximate' | 'locked-only';
 
@@ -118,11 +127,19 @@ interface WorkspacePythonWheelTargetSnapshot {
   url: string;
 }
 
+interface WorkspacePythonRuntimeTargetSnapshot {
+  pythonVersion: string;
+  sha256: string;
+  type: 'python-runtime';
+  url: string;
+}
+
 export type WorkspaceTargetSnapshot =
   | WorkspaceGitTargetSnapshot
   | WorkspaceNpmTargetSnapshot
   | WorkspacePypiTargetSnapshot
-  | WorkspacePythonWheelTargetSnapshot;
+  | WorkspacePythonWheelTargetSnapshot
+  | WorkspacePythonRuntimeTargetSnapshot;
 
 export interface WorkspaceSnapshot {
   createdAt: string;
@@ -256,6 +273,31 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     return {
       sha256: value.sha256.trim().toLowerCase(),
       type: 'python-wheel',
+      url: url.toString(),
+    };
+  }
+
+  if (value.type === 'python-runtime') {
+    if (typeof value.url !== 'string' || !value.url.trim()) {
+      throw new Error('python-runtime target must include a non-empty url');
+    }
+    const url = new URL(value.url.trim());
+    if (!['file:', 'http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+      throw new Error('python-runtime target URL must be credential-free file, HTTP, or HTTPS');
+    }
+    if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(value.sha256.trim())) {
+      throw new Error('python-runtime target must include a 64-character SHA-256');
+    }
+    if (
+      typeof value.pythonVersion !== 'string' ||
+      !/^\d+\.\d+\.\d+$/.test(value.pythonVersion.trim())
+    ) {
+      throw new Error('python-runtime target requires a full X.Y.Z pythonVersion');
+    }
+    return {
+      pythonVersion: value.pythonVersion.trim(),
+      sha256: value.sha256.trim().toLowerCase(),
+      type: 'python-runtime',
       url: url.toString(),
     };
   }
@@ -577,7 +619,7 @@ export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<Wo
 function targetKey(target: WorkspaceTarget): string {
   return target.type === 'git'
     ? ['git', target.url, target.branch ?? ''].join('\0')
-    : target.type === 'python-wheel'
+    : target.type === 'python-wheel' || target.type === 'python-runtime'
       ? [target.type, target.url, target.sha256].join('\0')
       : [target.type, target.spec].join('\0');
 }
@@ -707,6 +749,22 @@ export function createWorkspacePythonRootWheels(
   );
 }
 
+export function createWorkspacePythonRuntimeArtifacts(
+  config: WorkspaceConfig
+): PythonRuntimeArtifactInput[] {
+  return config.targets.flatMap((target) =>
+    target.type === 'python-runtime'
+      ? [
+          {
+            pythonVersion: target.pythonVersion,
+            sha256: target.sha256,
+            url: target.url,
+          },
+        ]
+      : []
+  );
+}
+
 export function createWorkspaceSnapshot(
   options: CreateWorkspaceSnapshotOptions
 ): WorkspaceSnapshot {
@@ -746,6 +804,15 @@ export function createWorkspaceSnapshot(
 
       if (target.type === 'python-wheel') {
         return { sha256: target.sha256, type: target.type, url: target.url };
+      }
+
+      if (target.type === 'python-runtime') {
+        return {
+          pythonVersion: target.pythonVersion,
+          sha256: target.sha256,
+          type: target.type,
+          url: target.url,
+        };
       }
 
       const source = gitSourcesByUrl.get(target.url.replace(/^git\+/, ''));

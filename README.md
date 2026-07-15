@@ -93,6 +93,7 @@ npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch 
 npm exec -- airgap-sync target add npm eslint@latest
 npm exec -- airgap-sync target add pypi 'requests==2.32.4'
 npm exec -- airgap-sync target add python-wheel 'https://example/vllm.whl' --sha256 <digest>
+npm exec -- airgap-sync target add python-runtime 3.12.13 'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' --sha256 <digest>
 
 # Online machine.
 npm exec -- airgap-sync download --prune

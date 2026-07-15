@@ -30,6 +30,9 @@ airgap-sync target add pypi 'requests==2.32.4'
 airgap-sync target add python-wheel \
   'https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' \
   --sha256 <64-hex-digest>
+airgap-sync target add python-runtime 3.12.13 \
+  'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' \
+  --sha256 <64-hex-digest>
 airgap-sync target list
 airgap-sync target remove 1
 ```
@@ -148,6 +151,12 @@ the filename. That exact root is overlaid on the configured Python index; its
 `Requires-Dist` edges are then resolved and the realized package/file/hash closure is
 written to `python-seed-manifest.json`. Because dependency selection still uses the
 no-backtracking resolver, this target requires the same explicit approximate opt-in.
+
+`target add python-runtime` transfers a python-build-standalone archive into
+`python-runtime-mirror/<build>/<archive>` and writes a checksum manifest. Point
+llama-manager's `pythonMirrorUrl` at that bundle directory and select mirror
+provisioning. The source URL must contain `/releases/download/` because uv's `--mirror`
+contract preserves the path after that segment.
 
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in

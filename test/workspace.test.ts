@@ -8,6 +8,7 @@ import {
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
   createWorkspacePythonRootWheels,
+  createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   initWorkspace,
   readWorkspaceConfig,
@@ -222,6 +223,35 @@ describe('workspace config', () => {
       sha256: 'a'.repeat(64),
       sourcePath: 'workspace-wheel-targets',
     });
+  });
+
+  it('normalizes portable Python runtime targets', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        output: './airgap-bundle',
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [
+          {
+            pythonVersion: '3.12.13',
+            sha256: 'b'.repeat(64),
+            type: 'python-runtime',
+            url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython.tar.gz',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+
+    const config = await readWorkspaceConfig(tempDir);
+    expect(createWorkspacePythonRuntimeArtifacts(config)).toEqual([
+      {
+        pythonVersion: '3.12.13',
+        sha256: 'b'.repeat(64),
+        url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython.tar.gz',
+      },
+    ]);
   });
 
   it('requires target environments for PyPI targets', async () => {

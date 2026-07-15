@@ -20,6 +20,7 @@ import {
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
   createWorkspacePythonRootWheels,
+  createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
@@ -545,6 +546,8 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
     ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
     : target.type === 'python-wheel'
       ? `python-wheel ${target.url}#sha256=${target.sha256}`
+      : target.type === 'python-runtime'
+        ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
       : `${target.type} ${target.spec}`;
 }
 
@@ -1963,6 +1966,38 @@ targetAddCommand
   });
 
 targetAddCommand
+  .command('python-runtime')
+  .description('Add a portable uv CPython runtime archive')
+  .argument('<python-version>', 'Full Python version, e.g. 3.12.13')
+  .argument('<url>', 'python-build-standalone release archive URL')
+  .requiredOption('--sha256 <digest>', 'Expected archive SHA-256')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(
+    async (
+      pythonVersion: string,
+      url: string,
+      workspace: string,
+      options: { sha256: string }
+    ) => {
+      try {
+        const target = {
+          pythonVersion,
+          sha256: options.sha256,
+          type: 'python-runtime' as const,
+          url,
+        };
+        const result = await addWorkspaceTarget(workspace, target);
+        console.log(
+          `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
+        );
+      } catch (error) {
+        console.error(`Error: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
+    }
+  );
+
+targetAddCommand
   .command('npm')
   .description('Add an npm package spec target')
   .argument('<spec>', 'Package spec, e.g. eslint@latest')
@@ -2183,6 +2218,7 @@ program
         const gitTargets = createWorkspaceGitSources(activeConfig);
         const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
         const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
+        const pythonRuntimes = createWorkspacePythonRuntimeArtifacts(activeConfig);
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
@@ -2226,6 +2262,7 @@ program
           initialRequirements: parsedTargets.requirements,
           initialPythonRequirements: pythonRequirements,
           initialPythonRootWheels: pythonRootWheels,
+          initialPythonRuntimes: pythonRuntimes,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
           rangeResolutionPolicy,

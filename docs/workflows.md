@@ -45,6 +45,7 @@ airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
 airgap-sync target add pypi 'requests==2.32.4'
 airgap-sync target add python-wheel 'https://example/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' --sha256 <digest>
+airgap-sync target add python-runtime 3.12.13 'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' --sha256 <digest>
 airgap-sync target list
 ```
 
