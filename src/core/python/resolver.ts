@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {
   PythonRequirementInput,
   PythonLockInput,
@@ -42,12 +43,49 @@ interface SelectedPackage {
 }
 
 export interface ResolvePythonOptions {
+  allowApproximate?: boolean;
   cache: PythonMetadataCache;
   environments: PythonTargetEnvironmentConfig[];
   includeDev?: boolean;
   index: PythonIndexClient;
   lockfiles?: PythonLockInput[];
   requirements?: PythonRequirementInput[];
+}
+
+function unlockedRequirements(
+  requirements: PythonRequirementInput[],
+  lockfiles: PythonLockInput[]
+): PythonRequirementInput[] {
+  const lockedDirectories = new Set(
+    lockfiles.map((lock) => path.posix.dirname(lock.sourcePath.replace(/\\/g, '/')))
+  );
+  return requirements.filter((input) => {
+    const sourcePath = input.sourcePath.replace(/\\/g, '/');
+    const basename = path.posix.basename(sourcePath);
+    const isRequirementsFile =
+      basename.startsWith('requirements') && basename.endsWith('.txt');
+    return !(
+      isRequirementsFile && lockedDirectories.has(path.posix.dirname(sourcePath))
+    );
+  });
+}
+
+function lockedOnlyErrors(
+  requirements: PythonRequirementInput[],
+  environment: ResolvedTargetEnvironment
+): PythonResolutionError[] {
+  return requirements
+    .filter((input) => !input.constraint)
+    .map((input) => ({
+      environment: environment.name,
+      name: input.requirement.normalizedName,
+      raw: input.requirement.raw,
+      reason:
+        `Unlocked Python input ${input.sourcePath}:${String(input.line)} requires approximate ` +
+        'resolution; add uv.lock/pylock.toml beside it or opt in with ' +
+        '--allow-approximate-python',
+      requiredBy: input.requiredBy,
+    }));
 }
 
 function markerApplies(
@@ -591,19 +629,23 @@ export async function resolvePython(
   const environments = options.environments.map(resolveTargetEnvironment);
   const artifacts: ResolvedPythonArtifact[] = [];
   const errors: PythonResolutionError[] = [];
+  const lockfiles = options.lockfiles ?? [];
+  const requirements = unlockedRequirements(options.requirements ?? [], lockfiles);
   for (const environment of environments) {
     const locked = resolveLockedEnvironment(
-      options.lockfiles ?? [],
+      lockfiles,
       environment,
       options.includeDev === true
     );
     errors.push(...locked.errors);
-    const unlocked = await resolveUnlockedEnvironment({
-      cache: options.cache,
-      environment,
-      index: options.index,
-      requirements: options.requirements ?? [],
-    });
+    const unlocked = options.allowApproximate
+      ? await resolveUnlockedEnvironment({
+          cache: options.cache,
+          environment,
+          index: options.index,
+          requirements,
+        })
+      : { artifacts: [], errors: lockedOnlyErrors(requirements, environment) };
     errors.push(...unlocked.errors);
     const environmentArtifacts = [...locked.artifacts, ...unlocked.artifacts];
     const versionsByName = new Map<string, Set<string>>();

@@ -1110,6 +1110,7 @@ __metadata:
     };
 
     const report = await collectBundle({
+      allowApproximatePython: true,
       dryRun: true,
       generatedAt: '2026-07-10T00:00:00.000Z',
       outputDir: path.join(tempDir, 'airgap-bundle'),

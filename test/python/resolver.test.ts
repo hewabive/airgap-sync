@@ -99,6 +99,55 @@ const environments = [
 ];
 
 describe('resolvePython', () => {
+  it('rejects unlocked requirements by default with lock-first remediation', async () => {
+    const index = new FakeIndex();
+    index.add('app', '1.0');
+
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      index,
+      requirements: [requirement('app==1.0')],
+    });
+
+    expect(result.artifacts).toEqual([]);
+    expect(result.approximate).toBe(false);
+    expect(result.errors[0]?.reason).toContain('add uv.lock/pylock.toml');
+    expect(result.errors[0]?.reason).toContain('--allow-approximate-python');
+  });
+
+  it('does not re-resolve requirements covered by a lockfile in the same directory', async () => {
+    const lock = parseUvLock(
+      'version = 1\nrevision = 3\npackage = []',
+      'services/api/uv.lock'
+    );
+
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      index: new FakeIndex(),
+      lockfiles: [lock],
+      requirements: [
+        requirement('app==1.0', { sourcePath: 'services/api/requirements.txt' }),
+      ],
+    });
+
+    expect(result).toMatchObject({ approximate: false, artifacts: [], errors: [] });
+  });
+
+  it('does not let an unrelated lockfile hide an explicit PyPI target', async () => {
+    const lock = parseUvLock('version = 1\nrevision = 3\npackage = []', 'uv.lock');
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      environments: [environments[0]!],
+      index: new FakeIndex(),
+      lockfiles: [lock],
+      requirements: [requirement('app==1.0', { sourcePath: 'workspace-targets' })],
+    });
+
+    expect(result.errors[0]?.reason).toContain('workspace-targets');
+  });
+
   it('resolves each environment independently with constraints, markers, and extras', async () => {
     const index = new FakeIndex();
     index.add('app', '1.0', ['child>=1']);
@@ -113,6 +162,7 @@ describe('resolvePython', () => {
     index.add('speed-dep', '3.0');
 
     const result = await resolvePython({
+      allowApproximate: true,
       cache: new PythonMetadataCache(),
       environments,
       index,
@@ -139,6 +189,7 @@ describe('resolvePython', () => {
     const index = new FakeIndex();
     index.add('native', '1.0', [], wheel('native', '1.0', 'cp311-cp311-win_amd64'));
     const result = await resolvePython({
+      allowApproximate: true,
       cache: new PythonMetadataCache(),
       environments: [environments[0]!],
       index,
@@ -153,12 +204,14 @@ describe('resolvePython', () => {
     const index = new FakeIndex();
     index.add('hashed', '1.0');
     const matching = await resolvePython({
+      allowApproximate: true,
       cache: new PythonMetadataCache(),
       environments: [environments[0]!],
       index,
       requirements: [requirement('hashed==1.0', { hash: 'aa'.repeat(32) })],
     });
     const rejected = await resolvePython({
+      allowApproximate: true,
       cache: new PythonMetadataCache(),
       environments: [environments[0]!],
       index,

@@ -41,6 +41,7 @@ interface WorkspacePypiTarget {
 
 export type WorkspaceTarget = WorkspaceGitTarget | WorkspaceNpmTarget | WorkspacePypiTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
+export type PythonResolutionMode = 'approximate' | 'locked-only';
 
 export interface WorkspaceDefaults {
   download: {
@@ -68,6 +69,7 @@ export interface WorkspaceConfig {
   gitPublishOwnerKind?: GitPublishOwnerKind;
   output: string;
   pythonPublishOwner?: string;
+  pythonResolutionMode: PythonResolutionMode;
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   schemaVersion: 1;
@@ -111,6 +113,7 @@ export interface WorkspaceSnapshot {
   gitPublishOwnerKind?: GitPublishOwnerKind;
   output: string;
   pythonPublishOwner?: string;
+  pythonResolutionMode?: PythonResolutionMode;
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   schemaVersion: 1;
@@ -158,6 +161,7 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
       },
     },
     output: defaultWorkspaceOutputDir,
+    pythonResolutionMode: 'locked-only',
     gitOwnerStrategy: 'preserve',
     schemaVersion: 1,
     sourceRegistry: defaultWorkspaceSourceRegistry,
@@ -403,6 +407,8 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       ? normalizeHttpUrl(pythonSourceIndexValue, 'pythonSourceIndex')
       : undefined;
   const pythonPublishOwner = optionalString(value.pythonPublishOwner);
+  const pythonResolutionMode: PythonResolutionMode =
+    value.pythonResolutionMode === 'approximate' ? 'approximate' : 'locked-only';
   const gitOwnerStrategy: GitOwnerStrategy =
     value.gitOwnerStrategy === 'authenticated-user' || value.gitOwnerStrategy === 'fixed-owner'
       ? value.gitOwnerStrategy
@@ -435,6 +441,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
         ? value.output.trim()
         : defaultWorkspaceOutputDir,
     ...(pythonPublishOwner ? { pythonPublishOwner } : {}),
+    pythonResolutionMode,
     ...(pythonSourceIndex ? { pythonSourceIndex } : {}),
     ...(pythonTargetEnvironments ? { pythonTargetEnvironments } : {}),
     schemaVersion: 1,
@@ -658,6 +665,7 @@ export function createWorkspaceSnapshot(
     ...(options.config.pythonPublishOwner
       ? { pythonPublishOwner: options.config.pythonPublishOwner }
       : {}),
+    pythonResolutionMode: options.config.pythonResolutionMode,
     ...(options.config.pythonSourceIndex
       ? { pythonSourceIndex: options.config.pythonSourceIndex }
       : {}),

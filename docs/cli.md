@@ -130,6 +130,14 @@ is enabled, because other targets may still depend on existing bundle objects.
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
 
+Python resolution is strict and lock-first by default. `uv.lock` and `pylock.toml` are
+consumed exactly; a `requirements*.txt` beside a lock is treated as covered and is not
+resolved a second time. An uncovered requirements file or direct PyPI target is reported
+as an error before its dependency closure is guessed. Use
+`--allow-approximate-python`, or set `"pythonResolutionMode": "approximate"`, only when
+the simplified highest-compatible/no-backtracking resolver is an accepted tradeoff.
+The resulting fetch report remains marked `approximate: true`.
+
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in
 the bundle for each package name. `--latest-policy source` also resolves and downloads

@@ -86,6 +86,7 @@ consumer platform:
   "gitOwnerStrategy": "preserve",
   "pythonSourceIndex": "https://pypi.org/simple/",
   "pythonPublishOwner": "pypi",
+  "pythonResolutionMode": "locked-only",
   "pythonTargetEnvironments": [
     {
       "name": "prod-linux",
@@ -102,6 +103,9 @@ consumer platform:
 repositories and mirrored Git dependencies. `--include-dev` also includes development
 requirements files and lock dependency groups. Direct URL, VCS, editable, path, sdist,
 and extra-index inputs are intentionally reported as unsupported in this version.
+Unlocked requirements and direct PyPI targets fail by default. Set
+`pythonResolutionMode` to `approximate`, or pass `--allow-approximate-python` for one
+run, to explicitly accept the simplified resolver without dependency backtracking.
 
 ## Online Phase
 

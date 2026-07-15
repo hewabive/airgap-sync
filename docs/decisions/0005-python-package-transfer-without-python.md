@@ -43,14 +43,17 @@ Python dependency semantics differ from npm in two ways that matter for collecti
    - Lockfiles are authoritative. `uv.lock` and standardized `pylock.toml` graphs are
      filtered for each target environment and downloaded without re-resolving their
      dependency versions.
-   - A `requirements.txt` entry is a root requirement even when it is exactly pinned.
-     Its `Requires-Dist` closure is traversed; other entries in the same input provide
-     constraints, and `--hash` values constrain acceptable files.
-   - Direct pypi targets and unpinned requirements use a simplified closure: choose
+   - An uncovered `requirements.txt` entry or direct PyPI target is rejected by
+     default, including exact pins, because dependency metadata alone is not a lock.
+     Requirements beside a supported lockfile are treated as covered by that lock.
+   - Operators can explicitly opt in to approximate resolution. In that mode,
+     requirements and direct PyPI targets use a simplified closure: choose
      the highest version satisfying each PEP 440 specifier, read `Requires-Dist` from
      wheel core metadata, evaluate environment markers against the configured target
      environments, and recurse. No backtracking. The fetch report marks these results
-     as approximate; install verification is the safety net.
+     as approximate; install verification is the safety net. Other entries in a
+     requirements input provide constraints, and `--hash` values constrain acceptable
+     files.
 4. Target environments are explicit configuration: a list of (full Python version,
    OS, architecture, libc/manylinux level) entries. Dependency resolution and wheel
    selection run independently for every configured environment and their results are

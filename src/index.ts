@@ -183,6 +183,7 @@ export type {
 } from './core/verify-install.js';
 export type {
   InitWorkspaceOptions,
+  PythonResolutionMode,
   WorkspaceConfig,
   WorkspaceDefaults,
   WorkspaceGitTarget,

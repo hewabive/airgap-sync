@@ -155,6 +155,7 @@ interface VerifyInstallOptions {
 }
 
 interface CollectOptions {
+  allowApproximatePython?: boolean;
   concurrency: number;
   dryRun?: boolean;
   includeDev?: boolean;
@@ -2098,6 +2099,10 @@ program
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option(
+    '--allow-approximate-python',
+    'Opt in to simplified no-backtracking resolution for unlocked Python requirements'
+  )
+  .option(
     '--latest-policy <policy>',
     'Latest dist-tag policy: bundled or source',
     parseLatestPolicy
@@ -2173,6 +2178,9 @@ program
           options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
         const prune =
           !targetSelection && (options.prune === true || config.defaults.download.prune === true);
+        const allowApproximatePython =
+          options.allowApproximatePython === true ||
+          activeConfig.pythonResolutionMode === 'approximate';
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -2190,6 +2198,7 @@ program
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
         const report = await collectBundle({
+          allowApproximatePython,
           dryRun: options.dryRun === true,
           concurrency: options.concurrency,
           includeDev,

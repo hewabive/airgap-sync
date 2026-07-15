@@ -51,6 +51,7 @@ describe('workspace config', () => {
       },
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
+      pythonResolutionMode: 'locked-only',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
       targets: [],
@@ -387,6 +388,7 @@ describe('workspace config', () => {
       createdAt: '2026-05-21T00:00:00.000Z',
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
+      pythonResolutionMode: 'locked-only',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
       targets: [

@@ -55,6 +55,7 @@ import { fetchPythonBundle } from './python/fetch.js';
 import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
 
 export interface CollectBundleOptions {
+  allowApproximatePython?: boolean;
   concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
@@ -758,6 +759,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     });
     pythonMetadataCache = await readPythonMetadataCache(outputDir, options.pythonSourceIndex);
     const pythonResolution = await resolvePython({
+      allowApproximate: options.allowApproximatePython === true,
       cache: pythonMetadataCache,
       environments: options.pythonTargetEnvironments,
       includeDev,
