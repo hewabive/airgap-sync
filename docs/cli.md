@@ -432,8 +432,8 @@ to Gitea's PyPI endpoint without requiring Python, pip, or twine.
 
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
-`--gitea`, `pythonPublishOwner` as `--python-owner`, and `defaults.publish` for public
-repositories and global Git rewrites.
+`--gitea`, `pythonPublishOwner` as `--python-owner`, the `gitOwnerStrategy` settings
+described below, and `defaults.publish` for public repositories and global Git rewrites.
 Passing `<bundle>`, `--registry`, `--gitea`, `--public`, or
 `--configure-git-global` overrides those defaults.
 
@@ -446,6 +446,9 @@ Supported options:
 --python-owner <owner>    Public Gitea owner for the anonymous Python index
 --git-username <name>     Git HTTP username for non-Gitea push authentication
 --git-password <token>    Git HTTP password/token for non-Gitea push authentication
+--git-owner-strategy <strategy> preserve, authenticated-user, or fixed-owner
+--git-publish-owner <owner> Destination owner for fixed-owner mapping
+--git-publish-owner-kind <kind> user or organization for fixed-owner mapping
 --mirrors-dir <dir>       Directory containing bare Git mirrors
 --public                  Create public Gitea repositories instead of private repositories
 --skip-git-provision      Assume target Git repositories already exist and skip Gitea API provisioning
@@ -473,6 +476,27 @@ Git target paths preserve source owner/repository names by default. For example,
 consumer machines can use one broad `insteadOf` rule for the source host. `publish`
 writes those rewrite rules into `git-apply-report.json`; it only mutates global Git
 config when `--configure-git-global` is passed.
+
+Owner mapping is explicit so an upstream owner that already exists as a Gitea user does
+not get treated as an organization by accident:
+
+- `preserve` (default) mirrors `<upstream-owner>/<repo>` and provisions missing owners
+  as organizations;
+- `authenticated-user` publishes under the token's user as
+  `<user>/<upstream-owner>--<repo>` and never provisions an organization;
+- `fixed-owner` publishes under `gitPublishOwner` with the declared
+  `gitPublishOwnerKind`. A fixed user must match the token's authenticated user.
+
+Remapped repositories use repository-specific Git rewrite rules. The source identity and
+bundle mirror path remain unchanged. Equivalent workspace configuration is:
+
+```json
+{
+  "gitOwnerStrategy": "fixed-owner",
+  "gitPublishOwner": "mirrors",
+  "gitPublishOwnerKind": "organization"
+}
+```
 
 After a non-dry-run publish, the generated publish/apply reports are copied into
 `airgap-bundle/runs/publish/<run-id>/` so the previous offline import diagnostics are

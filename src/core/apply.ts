@@ -13,6 +13,11 @@ import { applyGitSources, type GitHttpAuth } from './git-apply.js';
 import { configureGitRewrites } from './git-config.js';
 import { type GitCommandRunner } from './git-fetch.js';
 import {
+  resolveGitPublishTargets,
+  type GitOwnerStrategy,
+  type GitPublishOwnerKind,
+} from './git-publish-targets.js';
+import {
   assumeGiteaRepositoriesExist,
   provisionGiteaRepositories,
   type GiteaClient,
@@ -40,6 +45,10 @@ export interface ApplyBundleOptions {
   dryRun?: boolean;
   generatedAt?: string;
   gitAuth?: GitHttpAuth;
+  gitAuthenticatedUser?: string;
+  gitOwnerStrategy?: GitOwnerStrategy;
+  gitPublishOwner?: string;
+  gitPublishOwnerKind?: GitPublishOwnerKind;
   giteaBaseUrl: string;
   giteaClient: GiteaClient;
   mirrorsDir?: string;
@@ -114,7 +123,16 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const dryRun = options.dryRun === true;
   const manifest = await readBundleManifest(bundleDir);
   const distTags = await readDistTagsManifest(bundleDir);
-  const gitSources = await readOptionalGitSourcesManifest(bundleDir, generatedAt);
+  const sourceGitSources = await readOptionalGitSourcesManifest(bundleDir, generatedAt);
+  const gitSources = resolveGitPublishTargets({
+    ...(options.gitAuthenticatedUser
+      ? { authenticatedUser: options.gitAuthenticatedUser }
+      : {}),
+    ...(options.gitPublishOwner ? { fixedOwner: options.gitPublishOwner } : {}),
+    ...(options.gitPublishOwnerKind ? { fixedOwnerKind: options.gitPublishOwnerKind } : {}),
+    manifest: sourceGitSources,
+    ...(options.gitOwnerStrategy ? { strategy: options.gitOwnerStrategy } : {}),
+  });
   const pythonManifest = (await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json')))
     ? await readPythonSeedManifest(bundleDir)
     : undefined;

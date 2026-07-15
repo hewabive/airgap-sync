@@ -6,7 +6,21 @@ export function normalizeBaseUrl(url: string): string {
 }
 
 export function gitSourceTargetUrl(source: GitSource, giteaBaseUrl: string): string {
-  return `${normalizeBaseUrl(giteaBaseUrl)}/${source.owner}/${source.repo}.git`;
+  return `${normalizeBaseUrl(giteaBaseUrl)}/${source.publishOwner ?? source.owner}/${source.publishRepo ?? source.repo}.git`;
+}
+
+export function gitSourcePublishOwner(source: GitSource): string {
+  return source.publishOwner ?? source.owner;
+}
+
+export function gitSourcePublishOwnerKind(
+  source: GitSource
+): 'organization' | 'user' {
+  return source.publishOwnerKind ?? 'organization';
+}
+
+export function gitSourcePublishRepo(source: GitSource): string {
+  return source.publishRepo ?? source.repo;
 }
 
 export function gitSourceMirrorPath(options: {

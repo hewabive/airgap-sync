@@ -325,9 +325,11 @@ git config --global url."http://gitea.local/".insteadOf "https://github.com/"
 ```
 
 The closed-network publish phase can create missing Gitea owners or repositories, or it
-can skip provisioning and assume target repositories already exist. Flattened names
-such as `github.com-antvis-g2` should be treated as a temporary implementation detail
-or fallback for hosts that cannot be mapped cleanly to an owner/repository path.
+can skip provisioning and assume target repositories already exist. Owner handling is
+an explicit policy: preserve upstream owners as organizations, publish beneath the
+authenticated user, or publish beneath one configured user/organization. Namespaced
+strategies use `<upstream-owner>--<repo>` and repository-specific rewrites while keeping
+the immutable source identity and local mirror path separate from the publish target.
 
 Possible mechanisms for making installs resolve to local mirrors:
 

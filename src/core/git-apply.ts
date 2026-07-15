@@ -36,21 +36,60 @@ export function createGitConfigRewriteRules(
   giteaBaseUrl: string
 ): GitConfigRewriteRule[] {
   const seen = new Set<string>();
-  const targetUrl = `${normalizeBaseUrl(giteaBaseUrl)}/`;
+  const rules: GitConfigRewriteRule[] = [];
 
   for (const source of manifest.sources) {
-    seen.add(`git@${source.host}:`);
-    seen.add(`https://${source.host}/`);
-    seen.add(`ssh://git@${source.host}/`);
+    if (
+      (source.publishOwner ?? source.owner) === source.owner &&
+      (source.publishRepo ?? source.repo) === source.repo
+    ) {
+      const targetUrl = `${normalizeBaseUrl(giteaBaseUrl)}/`;
+      for (const insteadOf of [
+        `git@${source.host}:`,
+        `https://${source.host}/`,
+        `ssh://git@${source.host}/`,
+      ]) {
+        const key = `${targetUrl}\0${insteadOf}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          rules.push({
+            command: `git config --global --add url.${quoteGitConfigPart(targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
+            insteadOf,
+            targetUrl,
+          });
+        }
+      }
+      continue;
+    }
+
+    const targetWithSuffix = gitSourceTargetUrl(source, giteaBaseUrl);
+    const targetWithoutSuffix = targetWithSuffix.replace(/\.git$/, '');
+    for (const sourcePrefix of [
+      `git@${source.host}:${source.owner}/${source.repo}`,
+      `https://${source.host}/${source.owner}/${source.repo}`,
+      `ssh://git@${source.host}/${source.owner}/${source.repo}`,
+    ]) {
+      for (const [targetUrl, insteadOf] of [
+        [targetWithSuffix, `${sourcePrefix}.git`],
+        [targetWithoutSuffix, sourcePrefix],
+      ] as [string, string][]) {
+        const key = `${targetUrl}\0${insteadOf}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          rules.push({
+            command: `git config --global --add url.${quoteGitConfigPart(targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
+            insteadOf,
+            targetUrl,
+          });
+        }
+      }
+    }
   }
 
-  return [...seen]
-    .map((insteadOf) => ({
-      command: `git config --global --add url.${quoteGitConfigPart(targetUrl)}.insteadOf ${quoteGitConfigPart(insteadOf)}`,
-      insteadOf,
-      targetUrl,
-    }))
-    .sort((left, right) => left.insteadOf.localeCompare(right.insteadOf));
+  return rules.sort(
+    (left, right) =>
+      left.insteadOf.localeCompare(right.insteadOf) || left.targetUrl.localeCompare(right.targetUrl)
+  );
 }
 
 function sourcePath(source: GitSource, options: ApplyGitSourcesOptions): string {

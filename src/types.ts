@@ -59,6 +59,9 @@ export interface GitSource {
   id: string;
   localMirrorPath: string;
   owner: string;
+  publishOwner?: string;
+  publishOwnerKind?: 'organization' | 'user';
+  publishRepo?: string;
   repo: string;
   requirements: GitRequirement[];
   sourceUrl: string;

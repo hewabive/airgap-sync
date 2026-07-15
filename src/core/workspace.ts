@@ -15,6 +15,7 @@ import {
 } from './python/environments.js';
 import { parseRequirement } from './python/requirements.js';
 import type { PythonRequirementInput } from './python/input-types.js';
+import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
@@ -62,6 +63,9 @@ export interface WorkspaceDefaults {
 export interface WorkspaceConfig {
   defaults: WorkspaceDefaults;
   giteaUrl?: string;
+  gitOwnerStrategy: GitOwnerStrategy;
+  gitPublishOwner?: string;
+  gitPublishOwnerKind?: GitPublishOwnerKind;
   output: string;
   pythonPublishOwner?: string;
   pythonSourceIndex?: string;
@@ -102,6 +106,9 @@ export type WorkspaceTargetSnapshot =
 
 export interface WorkspaceSnapshot {
   createdAt: string;
+  gitOwnerStrategy?: GitOwnerStrategy;
+  gitPublishOwner?: string;
+  gitPublishOwnerKind?: GitPublishOwnerKind;
   output: string;
   pythonPublishOwner?: string;
   pythonSourceIndex?: string;
@@ -151,6 +158,7 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
       },
     },
     output: defaultWorkspaceOutputDir,
+    gitOwnerStrategy: 'preserve',
     schemaVersion: 1,
     sourceRegistry: defaultWorkspaceSourceRegistry,
     targets: [],
@@ -395,6 +403,20 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       ? normalizeHttpUrl(pythonSourceIndexValue, 'pythonSourceIndex')
       : undefined;
   const pythonPublishOwner = optionalString(value.pythonPublishOwner);
+  const gitOwnerStrategy: GitOwnerStrategy =
+    value.gitOwnerStrategy === 'authenticated-user' || value.gitOwnerStrategy === 'fixed-owner'
+      ? value.gitOwnerStrategy
+      : 'preserve';
+  const gitPublishOwner = optionalString(value.gitPublishOwner);
+  const gitPublishOwnerKind: GitPublishOwnerKind | undefined =
+    value.gitPublishOwnerKind === 'user' || value.gitPublishOwnerKind === 'organization'
+      ? value.gitPublishOwnerKind
+      : undefined;
+  if (gitOwnerStrategy === 'fixed-owner' && (!gitPublishOwner || !gitPublishOwnerKind)) {
+    throw new Error(
+      'fixed-owner gitOwnerStrategy requires gitPublishOwner and gitPublishOwnerKind'
+    );
+  }
   if (
     targets.some((target) => target.type === 'pypi') &&
     (!pythonTargetEnvironments || pythonTargetEnvironments.length === 0)
@@ -405,6 +427,9 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   return {
     defaults: normalizeWorkspaceDefaults(value.defaults),
     ...(giteaUrl ? { giteaUrl } : {}),
+    gitOwnerStrategy,
+    ...(gitPublishOwner ? { gitPublishOwner } : {}),
+    ...(gitPublishOwnerKind ? { gitPublishOwnerKind } : {}),
     output:
       typeof value.output === 'string' && value.output.trim().length > 0
         ? value.output.trim()
@@ -622,6 +647,13 @@ export function createWorkspaceSnapshot(
 
   return {
     createdAt: options.createdAt ?? new Date().toISOString(),
+    gitOwnerStrategy: options.config.gitOwnerStrategy,
+    ...(options.config.gitPublishOwner
+      ? { gitPublishOwner: options.config.gitPublishOwner }
+      : {}),
+    ...(options.config.gitPublishOwnerKind
+      ? { gitPublishOwnerKind: options.config.gitPublishOwnerKind }
+      : {}),
     output: options.config.output,
     ...(options.config.pythonPublishOwner
       ? { pythonPublishOwner: options.config.pythonPublishOwner }

@@ -83,6 +83,7 @@ consumer platform:
 
 ```json
 {
+  "gitOwnerStrategy": "preserve",
   "pythonSourceIndex": "https://pypi.org/simple/",
   "pythonPublishOwner": "pypi",
   "pythonTargetEnvironments": [

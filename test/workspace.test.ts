@@ -49,6 +49,7 @@ describe('workspace config', () => {
           ignoreScripts: true,
         },
       },
+      gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',
@@ -384,6 +385,7 @@ describe('workspace config', () => {
       })
     ).toEqual({
       createdAt: '2026-05-21T00:00:00.000Z',
+      gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
       schemaVersion: 1,
       sourceRegistry: 'https://registry.npmjs.org',

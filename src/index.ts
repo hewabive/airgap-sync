@@ -25,6 +25,12 @@ export { collectBundle } from './core/collect.js';
 export { HttpPythonIndexClient } from './core/python/index-client.js';
 export { publishPythonBundle } from './core/python/publisher.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
+export { resolveGitPublishTargets } from './core/git-publish-targets.js';
+export type {
+  GitOwnerStrategy,
+  GitPublishOwnerKind,
+  ResolveGitPublishTargetsOptions,
+} from './core/git-publish-targets.js';
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';

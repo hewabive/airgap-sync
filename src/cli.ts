@@ -78,6 +78,8 @@ import type {
   CollectProgressEvent,
   FetchSeedBundleResult,
   GitFetchProgressEvent,
+  GitOwnerStrategy,
+  GitPublishOwnerKind,
   LatestPolicy,
   PublishProgressEvent,
   PublishProgressPhase,
@@ -124,6 +126,9 @@ interface ApplyOptions {
   gitea?: string;
   giteaToken?: string;
   gitPassword?: string;
+  gitOwnerStrategy?: GitOwnerStrategy;
+  gitPublishOwner?: string;
+  gitPublishOwnerKind?: GitPublishOwnerKind;
   gitUsername?: string;
   json?: boolean;
   mirrorsDir?: string;
@@ -1109,19 +1114,43 @@ async function resolvePublishWorkspaceDefaults(options: {
   gitea: string | undefined;
   registry: string | undefined;
   pythonOwner?: string;
+  gitOwnerStrategy?: GitOwnerStrategy;
+  gitPublishOwner?: string;
+  gitPublishOwnerKind?: GitPublishOwnerKind;
 }): Promise<{
   bundle: string;
   configureGitGlobal?: WorkspacePromptBoolean;
   gitea: string;
   publicRepositories?: WorkspacePromptBoolean;
   pythonOwner?: string;
+  gitOwnerStrategy: GitOwnerStrategy;
+  gitPublishOwner?: string;
+  gitPublishOwnerKind?: GitPublishOwnerKind;
   registry: string;
   workspaceDir: string;
 }> {
+  if (
+    options.gitOwnerStrategy !== undefined &&
+    !['preserve', 'authenticated-user', 'fixed-owner'].includes(options.gitOwnerStrategy)
+  ) {
+    throw new Error(
+      '--git-owner-strategy must be preserve, authenticated-user, or fixed-owner'
+    );
+  }
+  if (
+    options.gitPublishOwnerKind !== undefined &&
+    !['user', 'organization'].includes(options.gitPublishOwnerKind)
+  ) {
+    throw new Error('--git-publish-owner-kind must be user or organization');
+  }
   const workspaceDir = process.cwd();
   const needsConfig = !options.bundle || !options.gitea || !options.registry;
   let config: WorkspaceConfig | undefined;
-  if (needsConfig || options.pythonOwner === undefined) {
+  if (
+    needsConfig ||
+    options.pythonOwner === undefined ||
+    options.gitOwnerStrategy === undefined
+  ) {
     try {
       config = await readWorkspaceConfig(workspaceDir);
     } catch (error) {
@@ -1147,11 +1176,22 @@ async function resolvePublishWorkspaceDefaults(options: {
     throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
   }
   const pythonOwner = options.pythonOwner ?? config?.pythonPublishOwner;
+  const gitOwnerStrategy = options.gitOwnerStrategy ?? config?.gitOwnerStrategy ?? 'preserve';
+  const gitPublishOwner = options.gitPublishOwner ?? config?.gitPublishOwner;
+  const gitPublishOwnerKind = options.gitPublishOwnerKind ?? config?.gitPublishOwnerKind;
+  if (gitOwnerStrategy === 'fixed-owner' && (!gitPublishOwner || !gitPublishOwnerKind)) {
+    throw new Error(
+      'fixed-owner strategy requires --git-publish-owner and --git-publish-owner-kind'
+    );
+  }
 
   return {
     bundle,
     ...(config ? { configureGitGlobal: config.defaults.publish.configureGitGlobal } : {}),
     gitea,
+    gitOwnerStrategy,
+    ...(gitPublishOwner ? { gitPublishOwner } : {}),
+    ...(gitPublishOwnerKind ? { gitPublishOwnerKind } : {}),
     ...(config ? { publicRepositories: config.defaults.publish.publicRepositories } : {}),
     ...(pythonOwner ? { pythonOwner } : {}),
     registry,
@@ -2821,6 +2861,15 @@ addNpmPublishOptions(
     )
     .option('--git-username <name>', 'Git HTTP username for non-Gitea push authentication')
     .option('--git-password <token>', 'Git HTTP password/token for non-Gitea push authentication')
+    .option(
+      '--git-owner-strategy <strategy>',
+      'Git owner mapping: preserve, authenticated-user, or fixed-owner'
+    )
+    .option('--git-publish-owner <owner>', 'Destination Gitea owner for fixed-owner mapping')
+    .option(
+      '--git-publish-owner-kind <kind>',
+      'Destination owner kind for fixed-owner mapping: user or organization'
+    )
     .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
     .option('--public', 'Create public Gitea repositories instead of private repositories')
     .option(
@@ -2838,6 +2887,13 @@ addNpmPublishOptions(
         gitea: options.gitea,
         registry: options.registry,
         ...(options.pythonOwner ? { pythonOwner: options.pythonOwner } : {}),
+        ...(options.gitOwnerStrategy
+          ? { gitOwnerStrategy: options.gitOwnerStrategy }
+          : {}),
+        ...(options.gitPublishOwner ? { gitPublishOwner: options.gitPublishOwner } : {}),
+        ...(options.gitPublishOwnerKind
+          ? { gitPublishOwnerKind: options.gitPublishOwnerKind }
+          : {}),
       });
       const providedGitAuth = explicitGitAuth({
         password: options.gitPassword,
@@ -2847,8 +2903,18 @@ addNpmPublishOptions(
         options.public === true ? true : resolved.publicRepositories === true;
       const configureGitGlobal =
         options.configureGitGlobal === true || resolved.configureGitGlobal === true;
+      const needsAuthenticatedGitOwner =
+        resolved.gitOwnerStrategy === 'authenticated-user' ||
+        (resolved.gitOwnerStrategy === 'fixed-owner' &&
+          resolved.gitPublishOwnerKind === 'user');
       const token =
-        options.dryRun === true
+        needsAuthenticatedGitOwner
+          ? await requireGiteaToken({
+              cliToken: options.giteaToken,
+              optionName: '--gitea-token <token>',
+              workspaceDir: resolved.workspaceDir,
+            })
+          : options.dryRun === true
           ? undefined
           : options.skipGitProvision === true || providedGitAuth
             ? await resolveGiteaToken({
@@ -2875,6 +2941,14 @@ addNpmPublishOptions(
         distTagConcurrency: options.distTagConcurrency,
         dryRun: options.dryRun === true,
         ...(gitAuth ? { gitAuth } : {}),
+        ...(login ? { gitAuthenticatedUser: login } : {}),
+        gitOwnerStrategy: resolved.gitOwnerStrategy,
+        ...(resolved.gitPublishOwner
+          ? { gitPublishOwner: resolved.gitPublishOwner }
+          : {}),
+        ...(resolved.gitPublishOwnerKind
+          ? { gitPublishOwnerKind: resolved.gitPublishOwnerKind }
+          : {}),
         giteaBaseUrl: resolved.gitea,
         giteaClient: client,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),

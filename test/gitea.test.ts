@@ -76,6 +76,23 @@ describe('HttpGiteaClient', () => {
     });
   });
 
+  it('creates repositories for the authenticated user through /user/repos', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 201 }));
+    const client = new HttpGiteaClient('http://gitea.local/', {
+      authToken: 'secret',
+    });
+
+    await client.createRepository({
+      description: 'mirror',
+      name: 'vllm-project--vllm',
+      owner: 'maxim',
+      ownerKind: 'user',
+      private: true,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gitea.local/api/v1/user/repos');
+  });
+
   it('surfaces Gitea JSON error messages in provision reports', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ message: 'repo lookup failed' }), {
@@ -106,6 +123,48 @@ describe('HttpGiteaClient', () => {
 });
 
 describe('provisionGiteaRepositories', () => {
+  it('does not try to provision an organization for a user-owned repository', async () => {
+    const userManifest: GitSourcesManifest = {
+      ...manifest,
+      sources: manifest.sources.map((source) => ({
+        ...source,
+        publishOwner: 'maxim',
+        publishOwnerKind: 'user',
+        publishRepo: 'owner--repo',
+      })),
+    };
+    const createCalls: unknown[] = [];
+    const client: GiteaClient = {
+      createOrganization: () => {
+        throw new Error('organization creation must not be called');
+      },
+      createRepository: (options) => {
+        createCalls.push(options);
+        return Promise.resolve();
+      },
+      organizationExists: () => {
+        throw new Error('organization lookup must not be called');
+      },
+      repositoryExists: () => Promise.resolve(false),
+    };
+
+    const report = await provisionGiteaRepositories({
+      client,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      manifest: userManifest,
+    });
+
+    expect(report.totalOrganizations).toBe(0);
+    expect(createCalls).toEqual([
+      expect.objectContaining({
+        name: 'owner--repo',
+        owner: 'maxim',
+        ownerKind: 'user',
+      }),
+    ]);
+  });
+
   it('plans repository creation without calling Gitea in dry-run mode', async () => {
     const calls: string[] = [];
     const client: GiteaClient = {
@@ -228,6 +287,7 @@ describe('provisionGiteaRepositories', () => {
         description: 'airgap-sync mirror for github.com/owner/repo',
         name: 'repo',
         owner: 'owner',
+        ownerKind: 'organization',
         private: false,
       },
     ]);

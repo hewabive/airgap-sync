@@ -5,7 +5,13 @@ import type {
   GitSource,
   GitSourcesManifest,
 } from '../types.js';
-import { gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
+import {
+  gitSourcePublishOwner,
+  gitSourcePublishOwnerKind,
+  gitSourcePublishRepo,
+  gitSourceTargetUrl,
+  normalizeBaseUrl,
+} from './git-targets.js';
 
 export interface GiteaClient {
   createOrganization(options: {
@@ -17,6 +23,7 @@ export interface GiteaClient {
     description: string;
     name: string;
     owner: string;
+    ownerKind: 'organization' | 'user';
     private: boolean;
   }): Promise<void>;
   organizationExists(owner: string): Promise<boolean>;
@@ -89,7 +96,13 @@ async function responseData(response: Response): Promise<unknown> {
 }
 
 function uniqueOwners(manifest: GitSourcesManifest): string[] {
-  return [...new Set(manifest.sources.map((source) => source.owner))].sort();
+  return [
+    ...new Set(
+      manifest.sources
+        .filter((source) => gitSourcePublishOwnerKind(source) === 'organization')
+        .map(gitSourcePublishOwner)
+    ),
+  ].sort();
 }
 
 export class HttpGiteaClient implements GiteaClient {
@@ -182,9 +195,14 @@ export class HttpGiteaClient implements GiteaClient {
     description: string;
     name: string;
     owner: string;
+    ownerKind: 'organization' | 'user';
     private: boolean;
   }): Promise<void> {
-    await this.#request(`/orgs/${encodePathPart(options.owner)}/repos`, {
+    await this.#request(
+      options.ownerKind === 'user'
+        ? '/user/repos'
+        : `/orgs/${encodePathPart(options.owner)}/repos`,
+      {
       body: {
         auto_init: false,
         description: options.description,
@@ -193,7 +211,8 @@ export class HttpGiteaClient implements GiteaClient {
       },
       method: 'POST',
       validStatuses: new Set([201]),
-    });
+      }
+    );
   }
 
   async currentUserLogin(): Promise<string> {
@@ -251,14 +270,16 @@ async function provisionRepository(
   isPrivate: boolean
 ): Promise<GiteaRepositoryActionResult> {
   const targetUrl = gitSourceTargetUrl(source, options.giteaBaseUrl);
+  const owner = gitSourcePublishOwner(source);
+  const repo = gitSourcePublishRepo(source);
 
   try {
-    const exists = await options.client.repositoryExists(source.owner, source.repo);
+    const exists = await options.client.repositoryExists(owner, repo);
     if (exists) {
       return {
-        owner: source.owner,
+        owner,
         private: isPrivate,
-        repository: source.repo,
+        repository: repo,
         status: 'exists',
         targetUrl,
       };
@@ -266,24 +287,25 @@ async function provisionRepository(
 
     await options.client.createRepository({
       description: `airgap-sync mirror for ${source.id}`,
-      name: source.repo,
-      owner: source.owner,
+      name: repo,
+      owner,
+      ownerKind: gitSourcePublishOwnerKind(source),
       private: isPrivate,
     });
 
     return {
-      owner: source.owner,
+      owner,
       private: isPrivate,
-      repository: source.repo,
+      repository: repo,
       status: 'created',
       targetUrl,
     };
   } catch (error) {
     return {
       error: errorMessage(error),
-      owner: source.owner,
+      owner,
       private: isPrivate,
-      repository: source.repo,
+      repository: repo,
       status: 'error',
       targetUrl,
     };
@@ -297,10 +319,10 @@ function repositoryBlockedByOrganizationError(
   isPrivate: boolean
 ): GiteaRepositoryActionResult {
   return {
-    error: `Organization ${source.owner} could not be provisioned: ${organization.error ?? 'unknown error'}`,
-    owner: source.owner,
+    error: `Organization ${gitSourcePublishOwner(source)} could not be provisioned: ${organization.error ?? 'unknown error'}`,
+    owner: gitSourcePublishOwner(source),
     private: isPrivate,
-    repository: source.repo,
+    repository: gitSourcePublishRepo(source),
     status: 'error',
     targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
   };
@@ -312,9 +334,9 @@ function existingRepositoryAction(
   isPrivate: boolean
 ): GiteaRepositoryActionResult {
   return {
-    owner: source.owner,
+    owner: gitSourcePublishOwner(source),
     private: isPrivate,
-    repository: source.repo,
+    repository: gitSourcePublishRepo(source),
     status: 'exists',
     targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
   };
@@ -341,9 +363,9 @@ export async function provisionGiteaRepositories(
 
     for (const source of options.manifest.sources) {
       actions.push({
-        owner: source.owner,
+        owner: gitSourcePublishOwner(source),
         private: isPrivate,
-        repository: source.repo,
+        repository: gitSourcePublishRepo(source),
         status: 'planned',
         targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
       });
@@ -353,16 +375,21 @@ export async function provisionGiteaRepositories(
 
     for (const source of options.manifest.sources) {
       try {
-        const exists = await options.client.repositoryExists(source.owner, source.repo);
+        const owner = gitSourcePublishOwner(source);
+        const repo = gitSourcePublishRepo(source);
+        const exists = await options.client.repositoryExists(owner, repo);
         if (exists) {
           actions.push(existingRepositoryAction(source, options, isPrivate));
-          if (!organizationActionsByOwner.has(source.owner)) {
+          if (
+            gitSourcePublishOwnerKind(source) === 'organization' &&
+            !organizationActionsByOwner.has(owner)
+          ) {
             const action: GiteaOrganizationActionResult = {
-              owner: source.owner,
+              owner,
               status: 'exists',
             };
             organizationActions.push(action);
-            organizationActionsByOwner.set(source.owner, action);
+            organizationActionsByOwner.set(owner, action);
           }
           continue;
         }
@@ -371,9 +398,9 @@ export async function provisionGiteaRepositories(
       } catch (error) {
         actions.push({
           error: errorMessage(error),
-          owner: source.owner,
+          owner: gitSourcePublishOwner(source),
           private: isPrivate,
-          repository: source.repo,
+          repository: gitSourcePublishRepo(source),
           status: 'error',
           targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
         });
@@ -390,7 +417,7 @@ export async function provisionGiteaRepositories(
     }
 
     for (const source of missingSources) {
-      const organization = organizationActionsByOwner.get(source.owner);
+      const organization = organizationActionsByOwner.get(gitSourcePublishOwner(source));
       if (organization?.status === 'error') {
         actions.push(
           repositoryBlockedByOrganizationError(source, organization, options, isPrivate)
@@ -435,9 +462,9 @@ export function assumeGiteaRepositoriesExist(
     })
   );
   const actions: GiteaRepositoryActionResult[] = options.manifest.sources.map((source) => ({
-    owner: source.owner,
+    owner: gitSourcePublishOwner(source),
     private: isPrivate,
-    repository: source.repo,
+    repository: gitSourcePublishRepo(source),
     status: 'exists',
     targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
   }));
