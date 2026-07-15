@@ -14,7 +14,7 @@ resolution-markers = ["sys_platform == 'linux'", "sys_platform == 'win32'"]
 name = "app"
 version = "0.1.0"
 source = { virtual = "." }
-dependencies = [{ name = "requests" }]
+dependencies = [{ name = "requests", extra = ["socks"] }]
 [package.dev-dependencies]
 dev = [{ name = "pytest", version = "8.3.1" }]
 [package.optional-dependencies]
@@ -40,6 +40,7 @@ wheels = [
       version: '1.3',
     });
     expect(lock.packages[0]).toMatchObject({
+      dependencies: [{ extras: ['socks'], name: 'requests' }],
       devDependencies: { dev: [{ name: 'pytest', version: '8.3.1' }] },
       name: 'app',
       optionalDependencies: { speed: [{ name: 'orjson' }] },

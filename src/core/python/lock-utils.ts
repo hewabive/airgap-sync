@@ -24,6 +24,13 @@ export function parseLockedDependencies(value: unknown): PythonLockedDependency[
     const source = isRecord(item.source) ? JSON.stringify(item.source) : undefined;
     return [
       {
+        ...(Array.isArray(item.extra)
+          ? {
+              extras: item.extra
+                .filter((extra): extra is string => typeof extra === 'string')
+                .map(normalizePackageName),
+            }
+          : {}),
         name: normalizePackageName(item.name),
         ...(typeof item.version === 'string' ? { version: item.version } : {}),
         ...(typeof item.marker === 'string' ? { marker: item.marker } : {}),

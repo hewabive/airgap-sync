@@ -37,6 +37,7 @@ export interface PythonLockedFile {
 }
 
 export interface PythonLockedDependency {
+  extras?: string[];
   marker?: string;
   name: string;
   source?: string;

@@ -469,19 +469,31 @@ function uvPackagesForEnvironment(
     return lock.packages.filter((pkg) => pkg.sourceKind === 'registry');
   }
   const selected = new Set<PythonLockedPackage>();
-  const queue = [...roots];
+  const activeExtras = new Map<PythonLockedPackage, Set<string>>();
+  const queue = roots.map((pkg) => ({ extras: lock.extras, pkg }));
   while (queue.length > 0) {
-    const pkg = queue.shift()!;
-    if (selected.has(pkg)) {
+    const { extras, pkg } = queue.shift()!;
+    const knownExtras = activeExtras.get(pkg) ?? new Set<string>();
+    const newExtras = extras.filter((extra) => !knownExtras.has(extra));
+    const firstVisit = !selected.has(pkg);
+    if (!firstVisit && newExtras.length === 0) {
       continue;
     }
     selected.add(pkg);
+    newExtras.forEach((extra) => knownExtras.add(extra));
+    activeExtras.set(pkg, knownExtras);
+    const optionalDependencies = newExtras.flatMap((extra) =>
+      Object.entries(pkg.optionalDependencies)
+        .filter(([group]) => normalizePackageName(group) === extra)
+        .flatMap(([, dependencies]) => dependencies)
+    );
     const dependencies = [
-      ...pkg.dependencies,
-      ...(includeDev ? Object.values(pkg.devDependencies).flat() : []),
+      ...(firstVisit ? pkg.dependencies : []),
+      ...(firstVisit && includeDev ? Object.values(pkg.devDependencies).flat() : []),
+      ...optionalDependencies,
     ];
     for (const dependency of dependencies) {
-      if (!markerApplies(dependency.marker, environment)) {
+      if (!markerApplies(dependency.marker, environment, [...knownExtras])) {
         continue;
       }
       const candidates = dependencyCandidates(lock, dependency);
@@ -490,7 +502,7 @@ function uvPackagesForEnvironment(
           `${lock.sourcePath} dependency ${dependency.name} resolves to ${String(candidates.length)} locked packages`
         );
       }
-      queue.push(candidates[0]!);
+      queue.push({ extras: dependency.extras ?? [], pkg: candidates[0]! });
     }
   }
   return [...selected].filter((pkg) => pkg.sourceKind === 'registry');

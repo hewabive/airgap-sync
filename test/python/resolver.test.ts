@@ -171,7 +171,7 @@ describe('resolvePython', () => {
     expect(rejected.errors[0]?.reason).toContain('No published wheel version');
   });
 
-  it('traverses uv production and development lock edges without re-resolving versions', async () => {
+  it('traverses uv production, extra, and development lock edges without re-resolving versions', async () => {
     const lock = parseUvLock(`
 version = 1
 revision = 3
@@ -179,7 +179,7 @@ revision = 3
 name = "app"
 version = "0.1.0"
 source = { virtual = "." }
-dependencies = [{ name = "requests" }]
+dependencies = [{ name = "requests", extra = ["socks"] }]
 [package.dev-dependencies]
 dev = [{ name = "pytest" }]
 
@@ -188,6 +188,21 @@ name = "requests"
 version = "2.32.3"
 source = { registry = "https://pypi.org/simple" }
 wheels = [{ url = "https://files.test/requests-2.32.3-py3-none-any.whl", hash = "sha256:${'aa'.repeat(32)}" }]
+[package.optional-dependencies]
+socks = [{ name = "pysocks" }]
+unused = [{ name = "unused" }]
+
+[[package]]
+name = "pysocks"
+version = "1.7.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://files.test/pysocks-1.7.1-py3-none-any.whl", hash = "sha256:${'cc'.repeat(32)}" }]
+
+[[package]]
+name = "unused"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://files.test/unused-1.0.0-py3-none-any.whl", hash = "sha256:${'dd'.repeat(32)}" }]
 
 [[package]]
 name = "pytest"
@@ -203,7 +218,11 @@ wheels = [{ url = "https://files.test/pytest-8.3.1-py3-none-any.whl", hash = "sh
       lockfiles: [lock],
     });
     expect(result.errors).toEqual([]);
-    expect(result.artifacts.map((artifact) => artifact.name)).toEqual(['requests', 'pytest']);
+    expect(result.artifacts.map((artifact) => artifact.name)).toEqual([
+      'requests',
+      'pytest',
+      'pysocks',
+    ]);
     expect(result.artifacts.every((artifact) => !artifact.approximate)).toBe(true);
   });
 });
