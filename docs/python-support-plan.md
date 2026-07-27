@@ -1,5 +1,9 @@
 # Python Support Implementation Plan
 
+This document is the implemented v1 package-transfer plan. The proposed
+application-first redesign is tracked separately in
+[python-application-publishing-refactor-plan.md](python-application-publishing-refactor-plan.md).
+
 Implementation status (2026-07-10): phases 0–7 are implemented on the
 `python-support` branch, including a Gitea 1.26.2 end-to-end run. The architectural
 decisions below are normative; operator instructions live in `workflows.md`, `cli.md`,
