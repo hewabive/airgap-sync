@@ -76,6 +76,10 @@ function createPlan(options: {
         status: 'supported',
       },
     ],
+    publication: {
+      applicationArtifactOwner: 'python-apps',
+      pythonPackageOwner: 'pypi',
+    },
     resolver: {
       engine: 'uv',
       policyVersion: 1,

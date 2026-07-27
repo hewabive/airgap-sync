@@ -195,6 +195,7 @@ export {
   setWorkspaceTargetPythonResolutionMode,
   workspaceConfigFileName,
   workspaceConfigPath,
+  workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceConfigV1BackupPath,
   workspaceLegacyPythonSettings,

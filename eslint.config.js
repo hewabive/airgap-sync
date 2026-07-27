@@ -3,7 +3,14 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'eslint.config.js'],
+    ignores: [
+      '.airgap-sync/**',
+      'airgap-bundle/**',
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'eslint.config.js',
+    ],
   },
   {
     files: ['**/*.ts'],

@@ -124,4 +124,13 @@ describe('Python consumer contract', () => {
       { args: ['-c', 'import demo'], command: 'python' },
     ]);
   });
+
+  it('rejects plans without publication coordinates', () => {
+    const value = plan();
+    delete value.publication;
+
+    expect(() => createPythonConsumerBundleDocuments(value)).toThrow(
+      'Python environment plan has no publication contract'
+    );
+  });
 });

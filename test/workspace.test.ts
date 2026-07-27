@@ -21,9 +21,10 @@ import {
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
-  workspaceSecretsFileName,
+  workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceLegacyPythonSettings,
+  workspaceSecretsFileName,
   writeWorkspaceConfig,
 } from '../src/core/workspace.js';
 
@@ -827,12 +828,17 @@ describe('workspace config', () => {
 
     const first = await migrateWorkspaceConfig(tempDir);
 
-    expect(first.appliedMigrationIds).toEqual(['0001-workspace-schema-v2']);
+    expect(first.appliedMigrationIds).toEqual([
+      '0001-workspace-schema-v2',
+      '0002-python-application-publication',
+    ]);
     expect(first.config).toMatchObject({
       python: {
+        applicationArtifactOwner: 'python-apps',
         legacySeed: {
           resolutionMode: 'locked-only',
         },
+        publishOwner: 'pypi',
         sourceIndex: 'https://packages.example/simple/',
       },
       schemaVersion: 2,
@@ -853,6 +859,33 @@ describe('workspace config', () => {
     expect(await fs.readFile(path.join(tempDir, workspaceConfigV1BackupFileName), 'utf8')).toBe(
       original
     );
+  });
+
+  it('adds missing Python publication defaults to schema v2 once', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    delete config.python!.applicationArtifactOwner;
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
+    const original = await fs.readFile(path.join(tempDir, 'airgap-sync.json'), 'utf8');
+
+    const first = await migrateWorkspaceConfig(tempDir);
+
+    expect(first.appliedMigrationIds).toEqual(['0002-python-application-publication']);
+    expect(first.backupPath).toBe(
+      path.join(tempDir, workspaceConfigPythonPublicationBackupFileName)
+    );
+    expect(first.config.python).toMatchObject({
+      applicationArtifactOwner: 'python-apps',
+      publishOwner: 'pypi',
+      sourceIndex: 'https://pypi.org/simple/',
+    });
+    expect(
+      await fs.readFile(path.join(tempDir, workspaceConfigPythonPublicationBackupFileName), 'utf8')
+    ).toBe(original);
+
+    const second = await migrateWorkspaceConfig(tempDir);
+
+    expect(second.appliedMigrationIds).toEqual([]);
+    expect(second.backupPath).toBeUndefined();
   });
 
   it('does not create a backup when legacy configuration is invalid', async () => {

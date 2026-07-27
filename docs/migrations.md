@@ -17,14 +17,19 @@ configuration before normal operations use it.
 
 ## Registered migrations
 
-| id                         | source              | destination         | backup                       |
-| -------------------------- | ------------------- | ------------------- | ---------------------------- |
-| `0001-workspace-schema-v2` | workspace schema v1 | workspace schema v2 | `airgap-sync.json.v1.backup` |
+| id                                    | source                   | destination                   | backup                                                   |
+| ------------------------------------- | ------------------------ | ----------------------------- | -------------------------------------------------------- |
+| `0001-workspace-schema-v2`            | workspace schema v1      | workspace schema v2           | `airgap-sync.json.v1.backup`                             |
+| `0002-python-application-publication` | schema v2 without owners | complete publication defaults | `airgap-sync.json.before-0002-python-publication.backup` |
 
 `0001` maps legacy Python configuration into `python.legacySeed`, preserves all
 targets and common settings, and installs maintained Python application recipes.
 Application coverage remains empty because exact legacy environments do not imply a
 broad Windows/Linux application policy.
+
+`0002` repairs early schema-v2 workspaces that could omit Python application
+publication coordinates. It preserves configured owners and supplies the same
+`pypi`/`python-apps` defaults used by a new workspace.
 
 ## Operator behavior
 

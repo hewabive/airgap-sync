@@ -57,8 +57,11 @@ export interface CreatePythonConsumerBundleDocumentsOptions {
 }
 
 function closedIndexUrl(plan: PythonEnvironmentPlan, giteaBaseUrl: string | undefined): string {
+  if (!plan.publication) {
+    throw new Error('Python environment plan has no publication contract');
+  }
   const base = giteaBaseUrl?.replace(/\/+$/u, '') ?? '${GITEA_BASE_URL}';
-  const owner = plan.publication?.pythonPackageOwner ?? '${PYTHON_PACKAGE_OWNER}';
+  const owner = plan.publication.pythonPackageOwner;
   return `${base}/api/packages/${encodeURIComponent(owner)}/pypi/simple`;
 }
 

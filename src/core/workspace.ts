@@ -36,10 +36,13 @@ export type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
+export const workspaceConfigPythonPublicationBackupFileName = `${workspaceConfigFileName}.before-0002-python-publication.backup`;
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
 const defaultWorkspacePythonSourceIndex = 'https://pypi.org/simple/';
+const defaultWorkspacePythonApplicationArtifactOwner = 'python-apps';
+const defaultWorkspacePythonPublishOwner = 'pypi';
 export const workspacePythonPlannerVersion = '0.11.16';
 
 export interface WorkspaceGitTarget {
@@ -290,12 +293,12 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
       gitOwnerStrategy: 'preserve',
       output: defaultWorkspaceOutputDir,
       python: {
-        applicationArtifactOwner: 'python-apps',
+        applicationArtifactOwner: defaultWorkspacePythonApplicationArtifactOwner,
         planner: {
           engine: 'uv',
           version: workspacePythonPlannerVersion,
         },
-        publishOwner: 'pypi',
+        publishOwner: defaultWorkspacePythonPublishOwner,
         sourceIndex: defaultWorkspacePythonSourceIndex,
       },
       schemaVersion: 2,
@@ -1130,15 +1133,45 @@ export function previewWorkspaceConfigMigration(config: WorkspaceConfig): Worksp
 
 interface WorkspaceConfigMigration {
   apply: (config: WorkspaceConfig) => WorkspaceConfig;
+  backupFileName: string;
   id: string;
   isApplied: (config: WorkspaceConfig) => boolean;
+}
+
+function addWorkspacePythonPublicationDefaults(config: WorkspaceConfig): WorkspaceConfig {
+  const normalized = normalizeWorkspaceConfig(config);
+  if (normalized.schemaVersion !== 2) {
+    return normalized;
+  }
+  return normalizeWorkspaceConfig({
+    ...normalized,
+    python: {
+      applicationArtifactOwner: defaultWorkspacePythonApplicationArtifactOwner,
+      planner: {
+        engine: 'uv',
+        version: workspacePythonPlannerVersion,
+      },
+      publishOwner: defaultWorkspacePythonPublishOwner,
+      sourceIndex: defaultWorkspacePythonSourceIndex,
+      ...normalized.python,
+    },
+  });
 }
 
 const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
   {
     apply: previewWorkspaceConfigMigration,
+    backupFileName: workspaceConfigV1BackupFileName,
     id: '0001-workspace-schema-v2',
     isApplied: (config) => config.schemaVersion === 2,
+  },
+  {
+    apply: addWorkspacePythonPublicationDefaults,
+    backupFileName: workspaceConfigPythonPublicationBackupFileName,
+    id: '0002-python-application-publication',
+    isApplied: (config) =>
+      config.schemaVersion !== 2 ||
+      Boolean(config.python?.applicationArtifactOwner && config.python.publishOwner),
   },
 ];
 
@@ -1158,11 +1191,13 @@ export async function migrateWorkspaceConfig(
   const configPath = workspaceConfigPath(workspaceDir);
   let config = await readWorkspaceConfigWithoutMigration(workspaceDir);
   const appliedMigrationIds: string[] = [];
+  let backupFileName: string | undefined;
 
   for (const migration of workspaceConfigMigrations) {
     if (migration.isApplied(config)) {
       continue;
     }
+    backupFileName ??= migration.backupFileName;
     config = migration.apply(config);
     appliedMigrationIds.push(migration.id);
   }
@@ -1171,7 +1206,7 @@ export async function migrateWorkspaceConfig(
     return { appliedMigrationIds, config };
   }
 
-  const backupPath = workspaceConfigV1BackupPath(workspaceDir);
+  const backupPath = path.join(path.resolve(workspaceDir), backupFileName!);
   if (!(await fs.pathExists(backupPath))) {
     await fs.writeFileAtomic(backupPath, await fs.readFile(configPath, 'utf8'));
   }

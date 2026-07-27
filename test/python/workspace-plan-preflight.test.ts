@@ -52,6 +52,14 @@ function activePlanFor(
     createdAt: '2026-07-27T00:00:00.000Z',
     intent: resolved.intent,
     platforms: [],
+    ...(workspaceConfig.python?.applicationArtifactOwner && workspaceConfig.python.publishOwner
+      ? {
+          publication: {
+            applicationArtifactOwner: workspaceConfig.python.applicationArtifactOwner,
+            pythonPackageOwner: workspaceConfig.python.publishOwner,
+          },
+        }
+      : {}),
     ...(recipe
       ? {
           recipe: {
@@ -148,6 +156,29 @@ describe('workspace Python application plan preflight', () => {
 
     expect(result.plannedTargetIndexes).toEqual([1]);
     expect(result.targets[0]?.activePlan.plan.intent.application.extras).toEqual(['server']);
+  });
+
+  it('replans when publication coordinates changed', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    let stored = activePlanFor(config, target);
+    config.python!.applicationArtifactOwner = 'other-python-apps';
+
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      planTargets: () => {
+        stored = activePlanFor(config, target);
+        return Promise.resolve();
+      },
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+
+    expect(result.plannedTargetIndexes).toEqual([1]);
+    expect(result.targets[0]?.activePlan.plan.publication).toEqual({
+      applicationArtifactOwner: 'other-python-apps',
+      pythonPackageOwner: 'pypi',
+    });
   });
 
   it('replans when a workspace recipe changed', async () => {
