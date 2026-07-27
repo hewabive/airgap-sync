@@ -18,6 +18,7 @@ import {
   collectBundle,
   compareMachineToPythonEnvironmentPlan,
   downloadPythonApplicationPlans,
+  ensureWorkspacePythonApplicationPlans,
   configureGitRewrites,
   createPythonEnvironmentPlan,
   createGitSourcesManifest,
@@ -48,7 +49,6 @@ import {
   packageVersion,
   parseRootSpecs,
   planPythonApplication,
-  platformCoveragePolicyDigest,
   pythonApplicationTargetId,
   PythonApplicationPlanningError,
   previewWorkspaceMigration,
@@ -60,7 +60,6 @@ import {
   readGitSourcesManifest,
   readManifestRequirements,
   readBundleManifest,
-  readActivePythonApplicationPlan,
   readDistTagsManifest,
   readRegistryMetadataCache,
   readStableTagResolutionIndex,
@@ -92,7 +91,6 @@ import {
   writeDownloadRunHistory,
   writePublishRunHistory,
   formatPythonPlanDiff,
-  semanticDigest,
   workspaceSecretsFileName,
   workspaceConfigFileName,
   workspaceLegacyPythonSettings,
@@ -103,7 +101,6 @@ import {
 import type { GiteaClient } from './index.js';
 import type {
   ApplyProgressEvent,
-  ActivePythonApplicationPlan,
   ApplyProgressPhase,
   ApplyBundleReport,
   BundleInfo,
@@ -940,6 +937,22 @@ function formatPythonPlanningError(error: PythonApplicationPlanningError): strin
   ].join('\n');
 }
 
+function printPythonPlanningError(error: PythonApplicationPlanningError, json = false): void {
+  console.error(
+    json
+      ? JSON.stringify(
+          {
+            error: error.message,
+            rejectedCandidates: error.rejectedCandidates,
+            status: 'unsupported-coverage',
+          },
+          null,
+          2
+        )
+      : formatPythonPlanningError(error)
+  );
+}
+
 async function readWorkspacePythonRecipe(
   workspaceDir: string,
   target: WorkspacePythonApplicationTarget
@@ -956,6 +969,90 @@ async function readWorkspacePythonRecipe(
     return normalizePythonApplicationRecipe(JSON.parse(await readFile(recipePath, 'utf8')));
   } catch (error) {
     throw new Error(`Invalid Python application recipe ${recipePath}: ${(error as Error).message}`);
+  }
+}
+
+interface PlanWorkspacePythonApplicationsOptions {
+  config: WorkspaceConfig;
+  cutoff?: string;
+  targetIndexes?: number[];
+  uvBin?: string;
+  workspaceDir: string;
+}
+
+async function planWorkspacePythonApplications(options: PlanWorkspacePythonApplicationsOptions) {
+  const selectedIndexes = options.targetIndexes ? new Set(options.targetIndexes) : undefined;
+  const targets = options.config.targets.flatMap((target, index) =>
+    target.type === 'python-app' && (!selectedIndexes || selectedIndexes.has(index + 1))
+      ? [{ index: index + 1, target }]
+      : []
+  );
+  if (targets.length === 0) {
+    throw new Error('No python-app targets are selected');
+  }
+  const cutoff = options.cutoff ?? new Date().toISOString();
+  if (!Number.isFinite(Date.parse(cutoff))) {
+    throw new Error(`Invalid planning cutoff: ${cutoff}`);
+  }
+  const createdAt = new Date().toISOString();
+  const configuredUv = options.uvBin ?? process.env.UV_BIN;
+  const uvPath = await acquireUv({
+    cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'tool-cache'),
+    ...(configuredUv ? { uvBin: configuredUv } : {}),
+  });
+  const plannerWorkDir = await mkdtemp(path.join(os.tmpdir(), 'airgap-sync-plan-'));
+  try {
+    const resolver = new UvApplicationResolver();
+    const results = [];
+    for (const { index, target } of targets) {
+      const application = resolveWorkspacePythonApplication(options.config, target);
+      const sourceIndex = application.intent.source.indexUrl ?? 'https://pypi.org/simple/';
+      const recipe = await readWorkspacePythonRecipe(options.workspaceDir, target);
+      const result = await planPythonApplication({
+        cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'uv-cache'),
+        coveragePolicy: application.coveragePolicy,
+        createdAt,
+        cutoff,
+        index: new HttpPythonIndexClient(sourceIndex),
+        intent: application.intent,
+        ...(recipe ? { recipe } : {}),
+        resolver,
+        uvPath,
+        workDir: path.join(plannerWorkDir, String(index)),
+      });
+      const plan = addPythonRuntimeContract(result.plan, {
+        ...(options.config.python?.applicationArtifactOwner
+          ? {
+              applicationArtifactOwner: options.config.python.applicationArtifactOwner,
+            }
+          : {}),
+        includeCpython: options.config.python?.artifactTransfer?.cpython === true,
+        includeUv: options.config.python?.artifactTransfer?.uv === true,
+        ...(options.config.python?.publishOwner
+          ? { pythonPackageOwner: options.config.python.publishOwner }
+          : {}),
+        ...(recipe ? { recipe } : {}),
+      });
+      const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
+      const stored = await writeActivePythonApplicationPlan({
+        evidence: result.evidence,
+        generatedAt: createdAt,
+        plan,
+        targetId,
+        targetIndex: index,
+        workspaceDir: options.workspaceDir,
+      });
+      results.push({
+        diff: stored.diff,
+        index,
+        plan,
+        rejectedCandidates: result.rejectedCandidates,
+        targetId,
+      });
+    }
+    return results;
+  } finally {
+    await rm(plannerWorkDir, { force: true, recursive: true });
   }
 }
 
@@ -2939,7 +3036,6 @@ program
   .option('--json', 'Print machine-readable environment plans')
   .action(async (workspace: string, options: PlanOptions) => {
     const workspaceDir = path.resolve(workspace);
-    let plannerWorkDir: string | undefined;
     try {
       const config = await readWorkspaceConfig(workspaceDir);
       const targets = config.targets.flatMap((target, index) =>
@@ -2957,65 +3053,13 @@ program
       if (selected.length === 0) {
         throw new Error(`No python-app target matches: ${options.update ?? ''}`);
       }
-      const cutoff = options.cutoff ?? new Date().toISOString();
-      if (!Number.isFinite(Date.parse(cutoff))) {
-        throw new Error(`Invalid planning cutoff: ${cutoff}`);
-      }
-      const createdAt = new Date().toISOString();
-      const configuredUv = options.uvBin ?? process.env.UV_BIN;
-      const uvPath = await acquireUv({
-        cacheDir: path.join(workspaceDir, '.airgap-sync', 'tool-cache'),
-        ...(configuredUv ? { uvBin: configuredUv } : {}),
+      const results = await planWorkspacePythonApplications({
+        config,
+        ...(options.cutoff ? { cutoff: options.cutoff } : {}),
+        targetIndexes: selected.map(({ index }) => index),
+        ...(options.uvBin ? { uvBin: options.uvBin } : {}),
+        workspaceDir,
       });
-      plannerWorkDir = await mkdtemp(path.join(os.tmpdir(), 'airgap-sync-plan-'));
-      const resolver = new UvApplicationResolver();
-      const results = [];
-      for (const { index, target } of selected) {
-        const application = resolveWorkspacePythonApplication(config, target);
-        const sourceIndex = application.intent.source.indexUrl ?? 'https://pypi.org/simple/';
-        const recipe = await readWorkspacePythonRecipe(workspaceDir, target);
-        const result = await planPythonApplication({
-          cacheDir: path.join(workspaceDir, '.airgap-sync', 'uv-cache'),
-          coveragePolicy: application.coveragePolicy,
-          createdAt,
-          cutoff,
-          index: new HttpPythonIndexClient(sourceIndex),
-          intent: application.intent,
-          ...(recipe ? { recipe } : {}),
-          resolver,
-          uvPath,
-          workDir: path.join(plannerWorkDir, String(index)),
-        });
-        const plan = addPythonRuntimeContract(result.plan, {
-          ...(config.python?.applicationArtifactOwner
-            ? {
-                applicationArtifactOwner: config.python.applicationArtifactOwner,
-              }
-            : {}),
-          includeCpython: config.python?.artifactTransfer?.cpython === true,
-          includeUv: config.python?.artifactTransfer?.uv === true,
-          ...(config.python?.publishOwner
-            ? { pythonPackageOwner: config.python.publishOwner }
-            : {}),
-          ...(recipe ? { recipe } : {}),
-        });
-        const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
-        const stored = await writeActivePythonApplicationPlan({
-          evidence: result.evidence,
-          generatedAt: createdAt,
-          plan,
-          targetId,
-          targetIndex: index,
-          workspaceDir,
-        });
-        results.push({
-          diff: stored.diff,
-          index,
-          plan,
-          rejectedCandidates: result.rejectedCandidates,
-          targetId,
-        });
-      }
       if (options.json) {
         console.log(JSON.stringify(results, null, 2));
       } else {
@@ -3030,27 +3074,11 @@ program
       }
     } catch (error) {
       if (error instanceof PythonApplicationPlanningError) {
-        console.error(
-          options.json
-            ? JSON.stringify(
-                {
-                  error: error.message,
-                  rejectedCandidates: error.rejectedCandidates,
-                  status: 'unsupported-coverage',
-                },
-                null,
-                2
-              )
-            : formatPythonPlanningError(error)
-        );
+        printPythonPlanningError(error, options.json === true);
       } else {
         console.error(`Error: ${(error as Error).message}`);
       }
       process.exitCode = 1;
-    } finally {
-      if (plannerWorkDir) {
-        await rm(plannerWorkDir, { force: true, recursive: true });
-      }
     }
   });
 
@@ -3558,42 +3586,42 @@ program
         const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
         const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
         const pythonRuntimes = createWorkspacePythonRuntimeArtifacts(activeConfig);
-        const pythonApplicationPlans: {
-          activePlan: ActivePythonApplicationPlan;
-          targetId: string;
-        }[] = [];
-        for (const target of activeConfig.targets) {
-          if (target.type !== 'python-app') {
-            continue;
-          }
-          const resolvedApplication = resolveWorkspacePythonApplication(activeConfig, target);
-          const targetId = pythonApplicationTargetId(
-            resolvedApplication.intent.application.name,
-            resolvedApplication.coveragePolicy.id
-          );
-          let activePlan: ActivePythonApplicationPlan;
-          try {
-            activePlan = await readActivePythonApplicationPlan(workspaceDir, targetId);
-          } catch (error) {
-            throw new Error(
-              `Python application ${targetId} has no usable active plan; run airgap-sync plan first: ${(error as Error).message}`
+        const pythonApplicationPreflight = await ensureWorkspacePythonApplicationPlans({
+          config,
+          onPlanRequired: (requirements) => {
+            console.error(
+              `[download] planning Python applications: ${requirements
+                .map(
+                  (requirement) =>
+                    `${requirement.targetId} (${requirement.reason === 'stale' ? 'configuration changed' : 'plan missing'})`
+                )
+                .join(', ')}`
             );
-          }
-          if (
-            semanticDigest(activePlan.plan.intent) !== semanticDigest(resolvedApplication.intent) ||
-            activePlan.plan.coverage.digest !==
-              platformCoveragePolicyDigest(resolvedApplication.coveragePolicy) ||
-            activePlan.plan.recipe?.digest !==
-              (target.application.recipe
-                ? semanticDigest(await readWorkspacePythonRecipe(workspaceDir, target))
-                : undefined)
-          ) {
-            throw new Error(
-              `Python application ${targetId} configuration changed after planning; run airgap-sync plan --update ${target.spec}`
-            );
-          }
-          pythonApplicationPlans.push({ activePlan, targetId });
-        }
+          },
+          planTargets: async (targetIndexes) => {
+            if (options.dryRun === true) {
+              throw new Error(
+                'Python application planning is required; rerun download without --dry-run or run airgap-sync plan first'
+              );
+            }
+            const results = await planWorkspacePythonApplications({
+              config,
+              targetIndexes,
+              workspaceDir,
+            });
+            for (const result of results) {
+              console.error(
+                `[download] planned Python application ${result.targetId}: ${result.plan.application.version}`
+              );
+            }
+          },
+          readRecipe: async (target) => await readWorkspacePythonRecipe(workspaceDir, target),
+          ...(targetSelection ? { targetIndexes: targetSelection.selectedIndexes } : {}),
+          workspaceDir,
+        });
+        const pythonApplicationPlans = pythonApplicationPreflight.targets.map(
+          ({ activePlan, targetId }) => ({ activePlan, targetId })
+        );
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
@@ -3772,7 +3800,11 @@ program
         process.exitCode = 1;
       }
     } catch (error) {
-      console.error(`Error: ${(error as Error).message}`);
+      if (error instanceof PythonApplicationPlanningError) {
+        printPythonPlanningError(error, options.json === true);
+      } else {
+        console.error(`Error: ${(error as Error).message}`);
+      }
       process.exitCode = 1;
     }
   });

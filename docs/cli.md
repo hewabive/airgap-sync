@@ -30,7 +30,7 @@ The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
 
-# Normal Python application workflow: Python is selected during planning.
+# Normal Python application workflow: Python is selected during download planning.
 airgap-sync target add python-app ktransformers \
   --coverage desktop-x64 \
   --feature accelerator=cuda
@@ -121,13 +121,15 @@ families are Windows x86-64 and glibc Linux x86-64. Linux distribution names are
 presentation hints; compatibility is derived from wheel tags and an inferred glibc
 floor.
 
-`plan` acquires the pinned collector-native `uv`, resolves every requested target
-platform with wheels-only policy, selects a compatible CPython minor, and stores an
-immutable active plan under `.airgap-sync/python-plans/`. A fixed `--cutoff` excludes
-newer index uploads and makes repeated semantic plans reproducible. Planning succeeds
-only when every requested platform is complete. Unsupported coverage is reported with
-suggestions to narrow the target, select another application version, or supply a
-reviewed recipe/wheel.
+The normal `download` workflow invokes planning automatically when a plan is missing or
+became stale after target, coverage, or recipe changes. The separate `plan` command is
+an advanced entry point for resolving in advance, forcing an update, or supplying a
+fixed `--cutoff`. Planning acquires the pinned collector-native `uv`, resolves every
+requested target platform with wheels-only policy, selects a compatible CPython minor,
+and stores an immutable active plan under `.airgap-sync/python-plans/`. Planning
+succeeds only when every requested platform is complete. Unsupported coverage is
+reported with suggestions to narrow the target, select another application version, or
+supply a reviewed recipe/wheel.
 
 `probe` is optional consumer diagnostics. It compares one machine to an existing plan
 and collects only plan-referenced OS, architecture, libc/Python, and explicitly
@@ -190,11 +192,14 @@ those mirrors, and repeats until no new npm or Git inputs are found. It also wri
 `workspace-snapshot.json` with the configured targets and their bundle-local mirror
 paths for later verification.
 
-Every selected `python-app` target must have a current active plan. If the target,
-coverage policy, or workspace-local recipe changed, `download` refuses the stale plan
-and asks for `plan --update`. Wheels are stored once by content hash even when multiple
-applications reference them. Platform locks, consumer configuration, runtime
-prerequisites, and plan diffs remain application-specific.
+For every selected `python-app` target, `download` creates a missing active plan or
+replans one made stale by target, coverage-policy, or workspace-local recipe changes.
+An existing current plan is reused, so download does not silently refresh application
+versions. Use `plan --update` to force that refresh. `download --dry-run` never writes a
+plan and asks for a normal download or an explicit `plan` when planning is required.
+Wheels are stored once by content hash even when multiple applications reference them.
+Platform locks, consumer configuration, runtime prerequisites, and plan diffs remain
+application-specific.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and

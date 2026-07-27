@@ -42,6 +42,7 @@ export {
   readActivePythonApplicationPlan,
   writeActivePythonApplicationPlan,
 } from './core/python/active-plan-store.js';
+export { ensureWorkspacePythonApplicationPlans } from './core/python/workspace-plan-preflight.js';
 export {
   downloadPythonApplicationPlans,
   readPythonApplicationBundleIndex,
@@ -347,6 +348,13 @@ export type {
   UvResolutionErrorKind,
   UvResolutionEvidence,
 } from './core/python/uv-adapter.js';
+export type {
+  CurrentWorkspacePythonApplicationPlan,
+  EnsureWorkspacePythonApplicationPlansOptions,
+  EnsureWorkspacePythonApplicationPlansResult,
+  WorkspacePythonPlanRequiredReason,
+  WorkspacePythonPlanRequirement,
+} from './core/python/workspace-plan-preflight.js';
 export type { AcquireUvOptions, UvToolAsset, UvToolManifest } from './core/python/uv-tool.js';
 export type {
   BuiltInPlatformFamilyId,

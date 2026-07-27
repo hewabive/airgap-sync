@@ -44,7 +44,6 @@ airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
 airgap-sync target add python-app orjson --coverage desktop-x64
-airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z
 airgap-sync target list
 ```
 
@@ -129,10 +128,12 @@ New workspaces use application-first schema v2:
 }
 ```
 
-Run `plan` after adding/changing a Python application, coverage policy, feature, or
-workspace-local recipe. Planning chooses an application version and compatible Python
-minor, resolves every requested platform with wheels only, and infers Linux's glibc
-floor. The plan becomes active only when coverage is complete.
+`download` automatically plans a newly added Python application and replans after its
+coverage, feature, version constraint, or workspace-local recipe changes. Planning
+chooses an application version and compatible Python minor, resolves every requested
+platform with wheels only, and infers Linux's glibc floor. A current plan is reused and
+becomes active only when coverage is complete. The separate `plan` command is available
+for advance review, a fixed cutoff, or an explicit refresh.
 
 Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
 `python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.

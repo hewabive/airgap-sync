@@ -592,7 +592,9 @@ alternate application version, or a supplied wheel.
 
 ### Replanning
 
-`download` does not silently change a valid application plan. The operator requests:
+`download` creates missing plans and replaces plans made stale by explicit target,
+coverage, or recipe changes. It does not silently change an otherwise valid application
+plan. To refresh versions without changing the intent, the operator requests:
 
 ```bash
 airgap-sync plan --update ktransformers

@@ -106,7 +106,6 @@ npm exec -- airgap-sync init
 npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
 npm exec -- airgap-sync target add npm eslint@latest
 npm exec -- airgap-sync target add python-app orjson --coverage desktop-x64
-npm exec -- airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z
 
 # Online machine.
 npm exec -- airgap-sync download --prune
@@ -141,12 +140,14 @@ distributions, manylinux tags, CPU/GPU inventory, or a resolver:
 npm exec -- airgap-sync target add python-app ktransformers \
   --coverage desktop-x64 \
   --feature accelerator=cuda
-npm exec -- airgap-sync plan
+npm exec -- airgap-sync download
 ```
 
-Planning uses a pinned, hash-verified `uv` executable but remains independent of the
-collector platform. Every requested branch must resolve with wheels only; otherwise no
-partial plan is activated. Narrowing the target is explicit:
+`download` automatically creates a missing plan or replaces one made stale by target,
+coverage, or recipe changes. A current plan is reused. Planning uses a pinned,
+hash-verified `uv` executable but remains independent of the collector platform. Every
+requested branch must resolve with wheels only; otherwise no partial plan is activated.
+Narrowing the target is explicit:
 
 ```bash
 npm exec -- airgap-sync target add python-app ktransformers \
@@ -159,6 +160,10 @@ complete Linux wheel closure with an inferred glibc 2.35 floor, while its `kt-ke
 dependency has no native Windows wheel. Broad coverage therefore reports Windows as
 unsupported instead of silently publishing Linux only. Model weights are separate
 application data and are not included as PyPI dependencies.
+
+The separate `plan` command is optional advanced workflow for reviewing resolution
+before downloading, using a fixed `--cutoff`, or explicitly refreshing an otherwise
+current plan.
 
 After `download` and closed-network `publish`, the bundle's consumer contract provides
 the exact standard pip/uv command. The compatible CPython runtime and system

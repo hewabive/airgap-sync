@@ -8,6 +8,8 @@
 - Added immutable Python application plans, content-addressed shared wheels,
   per-platform pylock/requirements locks, external runtime prerequisite contracts,
   plan diffs, reference-safe partial updates/pruning, and bundle verification.
+- Made workspace downloads create missing Python application plans automatically,
+  rebuild plans invalidated by explicit configuration changes, and reuse current plans.
 - Added Gitea Generic Package publication for application plans, consumer contracts,
   locks, and optional hash-verified CPython/uv transfers; production installation
   remains owned by consumer infrastructure using standard pip/uv commands.

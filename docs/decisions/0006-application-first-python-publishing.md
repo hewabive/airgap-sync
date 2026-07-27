@@ -6,6 +6,9 @@ Date: 2026-07-27
 
 Accepted
 
+Normal workflow orchestration is refined by
+[ADR 0009](0009-plan-python-applications-during-download.md).
+
 Supersedes the resolver and explicit-environment decisions in
 [ADR 0005](0005-python-package-transfer-without-python.md). ADR 0005 remains normative
 for publish-only operation, wheels-only collection, artifact integrity, Gitea PyPI
