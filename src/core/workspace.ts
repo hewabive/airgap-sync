@@ -232,6 +232,7 @@ export interface WorkspaceSnapshot {
 
 export interface InitWorkspaceOptions {
   force?: boolean;
+  legacy?: boolean;
   workspaceDir: string;
 }
 
@@ -250,7 +251,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function createDefaultWorkspaceConfig(): WorkspaceConfig {
+function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
+  if (!legacy) {
+    return {
+      coveragePolicies: [
+        {
+          id: 'desktop-x64',
+          platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+          version: 1,
+          wheelStrategy: 'all-compatible',
+        },
+      ],
+      defaults: {
+        download: {
+          includeDev: 'ask',
+          includePeer: false,
+          latestPolicy: 'bundled',
+          prune: false,
+          rangeResolutionPolicy: 'reuse-stable',
+          tagResolutionPolicy: 'reuse-stable',
+        },
+        publish: {
+          configureGitGlobal: 'ask',
+          publicRepositories: false,
+        },
+        verifyInstall: {
+          ignoreScripts: true,
+        },
+      },
+      gitOwnerStrategy: 'preserve',
+      output: defaultWorkspaceOutputDir,
+      python: {
+        applicationArtifactOwner: 'python-apps',
+        planner: {
+          engine: 'uv',
+          version: workspacePythonPlannerVersion,
+        },
+        publishOwner: 'pypi',
+        sourceIndex: defaultWorkspacePythonSourceIndex,
+      },
+      schemaVersion: 2,
+      sourceRegistry: defaultWorkspaceSourceRegistry,
+      targets: [],
+    };
+  }
   return {
     defaults: {
       download: {
@@ -409,7 +453,7 @@ function normalizePythonApplicationTarget(
     },
     coverage,
     python: normalizePythonRuntimePolicy(value.python),
-    spec: parsed.requirement.name,
+    spec: parsed.requirement.normalizedName,
     type: 'python-app',
   };
 }
@@ -899,7 +943,7 @@ export async function initWorkspace(options: InitWorkspaceOptions): Promise<Work
     throw new Error(`${workspaceConfigFileName} already exists in ${workspaceDir}`);
   }
 
-  const config = createDefaultWorkspaceConfig();
+  const config = createDefaultWorkspaceConfig(options.legacy === true);
   await fs.writeJson(configPath, config, { spaces: 2 });
   await fs.ensureDir(path.resolve(workspaceDir, config.output));
   return config;

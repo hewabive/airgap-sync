@@ -92,6 +92,7 @@ import {
   workspaceSecretsFileName,
   workspaceConfigFileName,
   workspaceLegacyPythonSettings,
+  workspacePythonPlannerVersion,
   withWorkspaceLegacyPythonSettings,
   provisionGiteaRepositories,
 } from './index.js';
@@ -123,6 +124,7 @@ import type {
   WorkspacePromptBoolean,
   PythonEnvironmentPlanInput,
   PythonApplicationRecipe,
+  PythonEnvironmentPlan,
   WorkspacePythonApplicationTarget,
 } from './index.js';
 import {
@@ -240,6 +242,16 @@ interface TargetPythonOptions {
   pythonResolutionMode?: PythonResolutionMode;
 }
 
+interface TargetPythonApplicationOptions {
+  coverage?: string;
+  extra?: string[];
+  feature?: string[];
+  platform?: string[];
+  python?: string;
+  recipe?: string;
+  version?: string;
+}
+
 interface GitSourcesOptions {
   write?: boolean;
 }
@@ -311,6 +323,23 @@ function parseCapabilities(values: string[]): Record<string, string> {
     capabilities[name] = capabilityValue;
   }
   return capabilities;
+}
+
+function parsePythonApplicationPlatforms(values: string[]): PlatformCoveragePolicy['platforms'] {
+  if (values.length === 0) {
+    throw new Error('At least one --platform value is required');
+  }
+  return [...new Set(values.map((value) => value.trim()))].map((value) => {
+    const family = getBuiltInPlatformFamily(value);
+    if (!family) {
+      throw new Error(
+        `Unsupported platform family: ${value}. Available: ${listBuiltInPlatformFamilies()
+          .map((candidate) => candidate.id)
+          .join(', ')}`
+      );
+    }
+    return family.id as PlatformCoveragePolicy['platforms'][number];
+  });
 }
 
 function parseLatestPolicy(value: string): LatestPolicy {
@@ -724,16 +753,40 @@ function formatPythonTargetEnvironmentList(
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
   const legacyPython = workspaceLegacyPythonSettings(config);
+  const defaultCoverage = config.coveragePolicies?.[0];
+  const pythonLines =
+    config.schemaVersion === 2
+      ? [
+          `Python application source: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`,
+          `Python wheel owner: ${config.python?.publishOwner ?? defaultPythonPublishOwner}`,
+          `Python application owner: ${config.python?.applicationArtifactOwner ?? 'python-apps'}`,
+          `Default application coverage: ${
+            defaultCoverage
+              ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
+              : '(not set)'
+          }`,
+          `Python planner: ${config.python?.planner.engine ?? 'uv'} ${config.python?.planner.version ?? '(not set)'}`,
+          ...(config.python?.legacySeed
+            ? [
+                `Legacy Python resolution mode: ${config.python.legacySeed.resolutionMode}`,
+                'Legacy Python target environments:',
+                formatPythonTargetEnvironmentList(config.python.legacySeed.targetEnvironments),
+              ]
+            : []),
+        ]
+      : [
+          `Python source index: ${legacyPython.sourceIndex ?? '(disabled)'}`,
+          `Python publish owner: ${legacyPython.publishOwner ?? '(not set)'}`,
+          `Default Python resolution mode: ${legacyPython.resolutionMode}`,
+          'Python target environments:',
+          formatPythonTargetEnvironmentList(legacyPython.targetEnvironments),
+        ];
   return [
     `Bundle directory: ${config.output}`,
     `Source registry: ${config.sourceRegistry}`,
     `Target registry: ${config.targetRegistry ?? '(not set)'}`,
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
-    `Python source index: ${legacyPython.sourceIndex ?? '(disabled)'}`,
-    `Python publish owner: ${legacyPython.publishOwner ?? '(not set)'}`,
-    `Default Python resolution mode: ${legacyPython.resolutionMode}`,
-    'Python target environments:',
-    formatPythonTargetEnvironmentList(legacyPython.targetEnvironments),
+    ...pythonLines,
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
@@ -810,26 +863,74 @@ function formatProbeComparison(
   ].join('\n');
 }
 
-function formatPythonApplicationPlan(plan: {
-  application: { name: string; version: string };
-  platforms: {
-    platformFamilyId: string;
-    pythonMinor: string;
-    status: string;
-    supportBoundary?: { glibc?: string };
-  }[];
-  wheels: unknown[];
-}): string {
+function formatPythonApplicationPlan(plan: PythonEnvironmentPlan): string {
+  const packageCount = new Set(
+    plan.platforms.flatMap((platform) =>
+      platform.packages.map((item) => `${item.name}==${item.version}`)
+    )
+  ).size;
+  const explanation = explainPlatformCoveragePolicy(plan.coverage.policy);
+  const platformLines = plan.platforms.flatMap((platform) => {
+    const baseHints = explanation.platforms.find(
+      (candidate) => candidate.family.id === platform.platformFamilyId
+    );
+    const inferredExplanation = platform.supportBoundary?.glibc
+      ? explainPlatformCoveragePolicy({
+          ...plan.coverage.policy,
+          linux: { oldestSupportedGlibc: platform.supportBoundary.glibc },
+        })
+      : undefined;
+    const hints =
+      inferredExplanation?.platforms.find(
+        (candidate) => candidate.family.id === platform.platformFamilyId
+      ) ?? baseHints;
+    const examples =
+      hints?.glibc?.source === 'advanced-constraint'
+        ? hints.glibc.knownCompatibleExamples
+            .slice(0, 2)
+            .map((hint) => `${hint.aliases[0] ?? hint.distributionId} ${hint.release}`)
+            .join(', ')
+        : undefined;
+    return [
+      `${platform.platformFamilyId}: ${platform.status}, CPython ${platform.pythonMinor}${
+        platform.supportBoundary?.glibc ? `, glibc >= ${platform.supportBoundary.glibc}` : ''
+      }`,
+      ...(examples ? [`  compatible distribution examples: ${examples}`] : []),
+    ];
+  });
   return [
     `Application: ${plan.application.name} ${plan.application.version}`,
-    ...plan.platforms.map(
-      (platform) =>
-        `${platform.platformFamilyId}: ${platform.status}, CPython ${platform.pythonMinor}${
-          platform.supportBoundary?.glibc ? `, glibc >= ${platform.supportBoundary.glibc}` : ''
-        }`
-    ),
+    `Runtime contract: externally provisioned CPython ${plan.preferredPythonMinor ?? 'per platform'}`,
+    ...platformLines,
+    `Locked packages: ${String(packageCount)}`,
     `Wheel variants: ${String(plan.wheels.length)}`,
+    ...(plan.publication
+      ? [
+          `Publication: PyPI owner ${plan.publication.pythonPackageOwner}; application artifacts owner ${plan.publication.applicationArtifactOwner}`,
+        ]
+      : []),
     'Status: ready to download',
+  ].join('\n');
+}
+
+function formatPythonPlanningError(error: PythonApplicationPlanningError): string {
+  const branches = error.rejectedCandidates.slice(0, 8).map((rejection) => {
+    const kind = rejection.reason.includes('no-wheel')
+      ? 'required binary wheels are unavailable'
+      : rejection.reason.includes('no-solution')
+        ? 'dependencies have no compatible solution'
+        : rejection.reason.includes('tool-failure')
+          ? 'the pinned planner failed'
+          : 'this application/runtime combination is unsupported';
+    return `- ${rejection.platformFamilyId ?? 'requested coverage'}, Python ${rejection.pythonMinor}, application ${rejection.applicationVersion}: ${kind}`;
+  });
+  return [
+    `Error: requested Python application coverage is incomplete. ${error.message}`,
+    ...branches,
+    ...(error.rejectedCandidates.length > branches.length
+      ? [`- ${String(error.rejectedCandidates.length - branches.length)} more rejected branches`]
+      : []),
+    'Try one of: remove an unsupported platform from this target, select an older application version, or supply a maintained recipe/wheel for the missing branch.',
   ].join('\n');
 }
 
@@ -1813,6 +1914,103 @@ async function configureInitialPythonSettings(
   return nextConfig;
 }
 
+function parseApplicationCoverageChoice(value: string): PlatformCoveragePolicy['platforms'] {
+  switch (value.trim().toLowerCase()) {
+    case 'both':
+      return ['windows-x86_64', 'linux-glibc-x86_64'];
+    case 'windows':
+      return ['windows-x86_64'];
+    case 'linux':
+      return ['linux-glibc-x86_64'];
+    default:
+      throw new Error('Python application platforms must be both, windows, or linux');
+  }
+}
+
+async function configureApplicationCoverage(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  if (config.schemaVersion !== 2) {
+    throw new Error('Python application coverage requires workspace schemaVersion 2');
+  }
+  const current = config.coveragePolicies?.[0];
+  const currentChoice =
+    current?.platforms.length === 1
+      ? current.platforms[0] === 'windows-x86_64'
+        ? 'windows'
+        : 'linux'
+      : 'both';
+  const platforms = parseApplicationCoverageChoice(
+    await ask(rl, 'Python application platforms (both/windows/linux)', currentChoice)
+  );
+  const policy: PlatformCoveragePolicy = {
+    id: current?.id ?? 'desktop-x64',
+    platforms,
+    version: 1,
+    wheelStrategy: 'all-compatible',
+  };
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    coveragePolicies: [policy, ...(config.coveragePolicies?.slice(1) ?? [])],
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configurePythonApplicationPublication(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  if (config.schemaVersion !== 2) {
+    throw new Error('Python application settings require workspace schemaVersion 2');
+  }
+  const sourceIndex = validatePythonIndexUrl(
+    await ask(
+      rl,
+      'Public Python source index',
+      config.python?.sourceIndex ?? defaultPythonSourceIndex
+    )
+  );
+  const publishOwner = (
+    await ask(
+      rl,
+      'Gitea PyPI owner for wheels',
+      config.python?.publishOwner ?? defaultPythonPublishOwner
+    )
+  ).trim();
+  const applicationArtifactOwner = (
+    await ask(
+      rl,
+      'Gitea Generic Packages owner for application contracts',
+      config.python?.applicationArtifactOwner ?? 'python-apps'
+    )
+  ).trim();
+  if (!publishOwner || !applicationArtifactOwner) {
+    throw new Error('Both Python publication owners are required');
+  }
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    python: {
+      ...(config.python?.artifactTransfer
+        ? { artifactTransfer: config.python.artifactTransfer }
+        : {}),
+      ...(config.python?.legacySeed ? { legacySeed: config.python.legacySeed } : {}),
+      applicationArtifactOwner,
+      planner: config.python?.planner ?? {
+        engine: 'uv',
+        version: workspacePythonPlannerVersion,
+      },
+      publishOwner,
+      sourceIndex,
+    },
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
 async function configureDownloadDefaults(
   workspaceDir: string,
   rl: ReadlineInterface,
@@ -1920,10 +2118,11 @@ async function configureInitialWorkspace(
   console.log('Configure workspace defaults.');
   const withBundle = await configureBundleDirectory(workspaceDir, rl, config);
   const withConnections = await configureConnectionSettings(workspaceDir, rl, withBundle);
-  console.log('Configure Python/PyPI support.');
-  const withPythonSettings = (await askYesNo(rl, 'Enable Python/PyPI support?', false))
-    ? await configureInitialPythonSettings(workspaceDir, rl, withConnections)
-    : withConnections;
+  console.log('Configure Python application coverage.');
+  const withPythonSettings =
+    withConnections.schemaVersion === 2
+      ? await configureApplicationCoverage(workspaceDir, rl, withConnections)
+      : withConnections;
   console.log('Configure download defaults.');
   const withDownloadDefaults = await configureDownloadDefaults(
     workspaceDir,
@@ -1970,10 +2169,10 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('1. Show targets');
     console.log('2. Add Git target');
     console.log('3. Add npm target');
-    console.log('4. Add PyPI target');
+    console.log('4. Add Python application');
     console.log('5. Remove target');
     console.log('6. Download selected target');
-    console.log('7. Set target Python resolution mode');
+    console.log('7. Advanced / legacy Python targets');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -1986,7 +2185,6 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
       case '2': {
         const url = await ask(rl, 'Git repository URL');
         const branch = await ask(rl, 'Branch (optional)');
-        const pythonResolutionMode = await askTargetPythonResolutionMode(rl, 'inherit');
         if (url) {
           await runSelfCommand(
             compactArgs([
@@ -1997,8 +2195,6 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
               workspaceDir,
               branch ? '--branch' : undefined,
               branch,
-              pythonResolutionMode ? '--python-resolution-mode' : undefined,
-              pythonResolutionMode,
             ]),
             workspaceDir
           );
@@ -2013,30 +2209,21 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         break;
       }
       case '4': {
-        let config = await readMenuWorkspace(workspaceDir, rl);
-        if (!workspaceLegacyPythonSettings(config).targetEnvironments?.length) {
-          console.log('A PyPI target requires at least one Python target environment.');
-          if (!(await askYesNo(rl, 'Configure Python/PyPI support now?', true))) {
-            break;
-          }
-          config = await configureInitialPythonSettings(workspaceDir, rl, config);
+        const config = await readMenuWorkspace(workspaceDir, rl);
+        if (config.schemaVersion !== 2) {
+          throw new Error(
+            'Python application targets require workspace schemaVersion 2; preview migration with airgap-sync migrate --dry-run'
+          );
         }
-        console.log(
-          'Direct PyPI targets need approximate resolution unless the whole download uses --allow-approximate-python.'
-        );
-        const pythonResolutionMode = await askTargetPythonResolutionMode(rl, 'approximate');
-        const spec = await ask(rl, 'PyPI package requirement');
+        const defaultCoverage = config.coveragePolicies?.[0]?.id;
+        if (!defaultCoverage) {
+          throw new Error('Configure a Python application coverage policy first');
+        }
+        const spec = await ask(rl, 'Python application package');
+        const coverage = await ask(rl, 'Platform coverage policy', defaultCoverage);
         if (spec) {
           await runSelfCommand(
-            compactArgs([
-              'target',
-              'add',
-              'pypi',
-              spec,
-              workspaceDir,
-              pythonResolutionMode ? '--python-resolution-mode' : undefined,
-              pythonResolutionMode,
-            ]),
+            ['target', 'add', 'python-app', spec, workspaceDir, '--coverage', coverage],
             workspaceDir
           );
         }
@@ -2058,44 +2245,91 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '7': {
-        const config = await readMenuWorkspace(workspaceDir, rl);
-        console.log(formatTargetList(config.targets));
-        const indexValue = await ask(rl, 'Target index to configure');
-        if (!indexValue) {
-          break;
-        }
-        const index = parsePositiveInteger(indexValue);
-        const target = config.targets[index - 1];
-        if (!target) {
-          throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
-        }
-        if (target.type !== 'git' && target.type !== 'pypi' && target.type !== 'python-wheel') {
-          throw new Error(`${target.type} targets do not resolve Python dependencies`);
-        }
-        const pythonResolutionMode = await askTargetPythonResolutionMode(
-          rl,
-          target.pythonResolutionMode ?? 'inherit'
-        );
-        await runSelfCommand(
-          [
-            'target',
-            'set-python-resolution',
-            indexValue,
-            pythonResolutionMode ?? 'inherit',
-            workspaceDir,
-          ],
-          workspaceDir
-        );
+      case '7':
+        await configureLegacyPythonTargetsMenu(workspaceDir, rl);
         break;
-      }
       default:
         console.log('Unknown menu item.');
     }
   }
 }
 
-async function configurePythonSettingsMenu(
+async function configureLegacyPythonTargetsMenu(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<void> {
+  for (;;) {
+    console.log('\nAdvanced / legacy Python targets');
+    console.log('1. Add raw PyPI requirement target');
+    console.log('2. Set legacy target resolution mode');
+    console.log('0. Back');
+    const choice = await ask(rl, 'Choose an action', '0');
+    if (choice === '0') {
+      return;
+    }
+    if (choice === '1') {
+      let config = await readMenuWorkspace(workspaceDir, rl);
+      if (!workspaceLegacyPythonSettings(config).targetEnvironments?.length) {
+        console.log('A raw PyPI target requires at least one exact Python target environment.');
+        if (!(await askYesNo(rl, 'Configure legacy Python seeding now?', true))) {
+          continue;
+        }
+        config = await configureInitialPythonSettings(workspaceDir, rl, config);
+      }
+      const pythonResolutionMode = await askTargetPythonResolutionMode(rl, 'approximate');
+      const spec = await ask(rl, 'PyPI package requirement');
+      if (spec) {
+        await runSelfCommand(
+          compactArgs([
+            'target',
+            'add',
+            'pypi',
+            spec,
+            workspaceDir,
+            pythonResolutionMode ? '--python-resolution-mode' : undefined,
+            pythonResolutionMode,
+          ]),
+          workspaceDir
+        );
+      }
+      continue;
+    }
+    if (choice === '2') {
+      const config = await readMenuWorkspace(workspaceDir, rl);
+      console.log(formatTargetList(config.targets));
+      const indexValue = await ask(rl, 'Target index to configure');
+      if (!indexValue) {
+        continue;
+      }
+      const index = parsePositiveInteger(indexValue);
+      const target = config.targets[index - 1];
+      if (!target) {
+        throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+      }
+      if (target.type !== 'git' && target.type !== 'pypi' && target.type !== 'python-wheel') {
+        throw new Error(`${target.type} targets do not use legacy Python resolution`);
+      }
+      const pythonResolutionMode = await askTargetPythonResolutionMode(
+        rl,
+        target.pythonResolutionMode ?? 'inherit'
+      );
+      await runSelfCommand(
+        [
+          'target',
+          'set-python-resolution',
+          indexValue,
+          pythonResolutionMode ?? 'inherit',
+          workspaceDir,
+        ],
+        workspaceDir
+      );
+      continue;
+    }
+    console.log('Unknown menu item.');
+  }
+}
+
+async function configureLegacyPythonSettingsMenu(
   workspaceDir: string,
   rl: ReadlineInterface
 ): Promise<void> {
@@ -2134,6 +2368,59 @@ async function configurePythonSettingsMenu(
       case '4':
         await removePythonTargetEnvironment(workspaceDir, rl, config);
         console.log('Updated Python target environments.');
+        break;
+      default:
+        console.log('Unknown menu item.');
+        break;
+    }
+  }
+}
+
+async function configurePythonSettingsMenu(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<void> {
+  for (;;) {
+    const config = await readMenuWorkspace(workspaceDir, rl);
+    if (config.schemaVersion !== 2) {
+      console.log('This schema-v1 workspace uses legacy Python package seeding.');
+      await configureLegacyPythonSettingsMenu(workspaceDir, rl);
+      return;
+    }
+    const defaultCoverage = config.coveragePolicies?.[0];
+    console.log('\nPython applications');
+    console.log(`Source index: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`);
+    console.log(`Wheel owner: ${config.python?.publishOwner ?? defaultPythonPublishOwner}`);
+    console.log(
+      `Application artifacts owner: ${config.python?.applicationArtifactOwner ?? 'python-apps'}`
+    );
+    console.log(
+      `Default coverage: ${
+        defaultCoverage
+          ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
+          : '(not set)'
+      }`
+    );
+    console.log('Actions:');
+    console.log('1. Configure source and publication');
+    console.log('2. Configure default platform coverage');
+    console.log('3. Advanced / legacy package seeding');
+    console.log('0. Back');
+
+    const choice = await ask(rl, 'Choose an action', '0');
+    switch (choice) {
+      case '0':
+        return;
+      case '1':
+        await configurePythonApplicationPublication(workspaceDir, rl, config);
+        console.log('Saved Python application publication settings.');
+        break;
+      case '2':
+        await configureApplicationCoverage(workspaceDir, rl, config);
+        console.log('Saved Python application coverage.');
+        break;
+      case '3':
+        await configureLegacyPythonSettingsMenu(workspaceDir, rl);
         break;
       default:
         console.log('Unknown menu item.');
@@ -2488,7 +2775,7 @@ const program = new Command();
 
 program
   .name(packageName)
-  .description('Sync Git and npm dependencies for airgapped environments')
+  .description('Sync Git, npm, and Python applications for airgapped environments')
   .version(packageVersion);
 
 program
@@ -2738,14 +3025,17 @@ program
     } catch (error) {
       if (error instanceof PythonApplicationPlanningError) {
         console.error(
-          `Error: ${error.message}\n${error.rejectedCandidates
-            .map(
-              (rejection) =>
-                `- ${rejection.applicationVersion} / Python ${rejection.pythonMinor}${
-                  rejection.platformFamilyId ? ` / ${rejection.platformFamilyId}` : ''
-                }: ${rejection.reason}`
-            )
-            .join('\n')}`
+          options.json
+            ? JSON.stringify(
+                {
+                  error: error.message,
+                  rejectedCandidates: error.rejectedCandidates,
+                  status: 'unsupported-coverage',
+                },
+                null,
+                2
+              )
+            : formatPythonPlanningError(error)
         );
       } else {
         console.error(`Error: ${(error as Error).message}`);
@@ -2846,8 +3136,78 @@ targetAddCommand
   });
 
 targetAddCommand
+  .command('python-app')
+  .description('Add a Python application with broad platform coverage')
+  .argument('<spec>', 'Python application package requirement')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--coverage <id>', 'Workspace coverage policy (defaults to the first policy)')
+  .option(
+    '--platform <family>',
+    'Inline platform family; repeat for additional families',
+    collectStrings,
+    []
+  )
+  .option('--version <specifier>', 'Application version constraint')
+  .option('--extra <name>', 'Application extra; repeat for additional extras', collectStrings, [])
+  .option(
+    '--feature <name=value>',
+    'Explicit application feature; repeat for additional features',
+    collectStrings,
+    []
+  )
+  .option('--recipe <path>', 'Maintained application recipe inside the workspace')
+  .option('--python <specifier>', 'Advanced Python version constraint')
+  .action(async (spec: string, workspace: string, options: TargetPythonApplicationOptions) => {
+    try {
+      const config = await readWorkspaceConfig(workspace);
+      if (config.schemaVersion !== 2) {
+        throw new Error('python-app targets require workspace schemaVersion 2');
+      }
+      if (options.coverage && (options.platform?.length ?? 0) > 0) {
+        throw new Error('Use either --coverage or --platform, not both');
+      }
+      const coverage =
+        (options.platform?.length ?? 0) > 0
+          ? {
+              platforms: parsePythonApplicationPlatforms(options.platform ?? []),
+              version: 1 as const,
+              wheelStrategy: 'all-compatible' as const,
+            }
+          : (options.coverage ?? config.coveragePolicies?.[0]?.id);
+      if (!coverage) {
+        throw new Error(
+          'No Python application coverage is configured; use --platform or add a coverage policy'
+        );
+      }
+      const target: WorkspacePythonApplicationTarget = {
+        application: {
+          extras: options.extra ?? [],
+          features: parseCapabilities(options.feature ?? []),
+          ...(options.recipe ? { recipe: options.recipe } : {}),
+          ...(options.version ? { version: options.version } : {}),
+        },
+        coverage,
+        python: options.python
+          ? { policy: 'constrained', version: options.python }
+          : { policy: 'auto' },
+        spec,
+        type: 'python-app',
+      };
+      const result = await addWorkspaceTarget(workspace, target);
+      console.log(
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nCoverage: ${
+          typeof coverage === 'string' ? coverage : coverage.platforms.join(', ')
+        }\nPython runtime: ${options.python ?? 'selected automatically during planning'}\nTotal targets: ${String(result.config.targets.length)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetAddCommand
   .command('pypi')
-  .description('Add a Python package requirement target')
+  .description('Add a legacy raw Python package requirement target')
   .argument('<spec>', 'PEP 508 requirement, e.g. requests[socks]>=2.31')
   .argument('[workspace]', 'Workspace directory', '.')
   .option(

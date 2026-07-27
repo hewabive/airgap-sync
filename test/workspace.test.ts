@@ -56,10 +56,26 @@ describe('workspace config', () => {
           ignoreScripts: true,
         },
       },
+      coveragePolicies: [
+        {
+          id: 'desktop-x64',
+          platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+          version: 1,
+          wheelStrategy: 'all-compatible',
+        },
+      ],
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
-      pythonResolutionMode: 'locked-only',
-      schemaVersion: 1,
+      python: {
+        applicationArtifactOwner: 'python-apps',
+        planner: {
+          engine: 'uv',
+          version: '0.11.16',
+        },
+        publishOwner: 'pypi',
+        sourceIndex: 'https://pypi.org/simple/',
+      },
+      schemaVersion: 2,
       sourceRegistry: 'https://registry.npmjs.org',
       targets: [],
     });
@@ -108,6 +124,46 @@ describe('workspace config', () => {
       {
         spec: 'eslint@latest',
         type: 'npm',
+      },
+    ]);
+  });
+
+  it('adds a Python application with automatic runtime and default broad coverage', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    const coverage = config.coveragePolicies?.[0]?.id;
+    expect(coverage).toBe('desktop-x64');
+
+    await addWorkspaceTarget(tempDir, {
+      application: {
+        extras: ['cuda'],
+        features: {
+          accelerator: 'cuda',
+        },
+        version: '>=0.4,<0.5',
+      },
+      coverage: coverage!,
+      python: {
+        policy: 'auto',
+      },
+      spec: 'KTransformers',
+      type: 'python-app',
+    });
+
+    expect((await readWorkspaceConfig(tempDir)).targets).toEqual([
+      {
+        application: {
+          extras: ['cuda'],
+          features: {
+            accelerator: 'cuda',
+          },
+          version: '>=0.4,<0.5',
+        },
+        coverage: 'desktop-x64',
+        python: {
+          policy: 'auto',
+        },
+        spec: 'ktransformers',
+        type: 'python-app',
       },
     ]);
   });
@@ -308,7 +364,7 @@ describe('workspace config', () => {
   });
 
   it('sets and clears a target-specific Python resolution override', async () => {
-    const config = await initWorkspace({ workspaceDir: tempDir });
+    const config = await initWorkspace({ legacy: true, workspaceDir: tempDir });
     config.pythonTargetEnvironments = [
       {
         arch: 'x86_64',
@@ -512,7 +568,7 @@ describe('workspace config', () => {
   });
 
   it('creates a portable workspace snapshot for later verification', async () => {
-    const config = await initWorkspace({ workspaceDir: tempDir });
+    const config = await initWorkspace({ legacy: true, workspaceDir: tempDir });
     config.targets.push(
       {
         branch: 'main',
@@ -662,7 +718,7 @@ describe('workspace config', () => {
   });
 
   it('previews schema-v1 migration without changing the workspace', async () => {
-    const config = await initWorkspace({ workspaceDir: tempDir });
+    const config = await initWorkspace({ legacy: true, workspaceDir: tempDir });
     config.pythonPublishOwner = 'pypi';
     config.pythonSourceIndex = 'https://pypi.org/simple/';
     config.pythonTargetEnvironments = [
