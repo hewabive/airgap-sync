@@ -35,6 +35,7 @@
     "lint": "eslint .",
     "e2e:local": "node ./scripts/e2e-local.mjs",
     "registry:start": "verdaccio --config ./verdaccio/config.yaml",
+    "spike:python-planner": "node ./scripts/python-planner-spike.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
