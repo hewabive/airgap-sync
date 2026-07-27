@@ -568,6 +568,10 @@ describe('workspace config', () => {
         output: './airgap-bundle',
         python: {
           applicationArtifactOwner: ' python-apps ',
+          artifactTransfer: {
+            cpython: true,
+            uv: true,
+          },
           planner: {
             engine: 'uv',
             version: 'pinned-by-airgap-sync',
@@ -600,6 +604,10 @@ describe('workspace config', () => {
       ],
       python: {
         applicationArtifactOwner: 'python-apps',
+        artifactTransfer: {
+          cpython: true,
+          uv: true,
+        },
         planner: {
           engine: 'uv',
           version: '0.11.16',

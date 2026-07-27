@@ -119,6 +119,10 @@ export interface WorkspacePythonLegacySeedConfig {
 
 export interface WorkspacePythonConfig {
   applicationArtifactOwner?: string;
+  artifactTransfer?: {
+    cpython: boolean;
+    uv: boolean;
+  };
   legacySeed?: WorkspacePythonLegacySeedConfig;
   planner: {
     engine: 'uv';
@@ -703,6 +707,19 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
   );
   const publishOwner = optionalString(value.publishOwner);
   const applicationArtifactOwner = optionalString(value.applicationArtifactOwner);
+  let artifactTransfer: WorkspacePythonConfig['artifactTransfer'];
+  if (value.artifactTransfer !== undefined) {
+    if (!isRecord(value.artifactTransfer)) {
+      throw new Error('python.artifactTransfer must be an object');
+    }
+    artifactTransfer = {
+      cpython: value.artifactTransfer.cpython === true,
+      uv: value.artifactTransfer.uv === true,
+    };
+    if ((artifactTransfer.cpython || artifactTransfer.uv) && !applicationArtifactOwner) {
+      throw new Error('python.artifactTransfer requires python.applicationArtifactOwner');
+    }
+  }
   const planner = isRecord(value.planner) ? value.planner : {};
   if (planner.engine !== undefined && planner.engine !== 'uv') {
     throw new Error('python.planner.engine must be uv');
@@ -735,6 +752,7 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
 
   return {
     ...(applicationArtifactOwner ? { applicationArtifactOwner } : {}),
+    ...(artifactTransfer ? { artifactTransfer } : {}),
     ...(legacySeed ? { legacySeed } : {}),
     planner: {
       engine: 'uv',
@@ -938,6 +956,9 @@ export function withWorkspaceLegacyPythonSettings(
     python: {
       ...(config.python?.applicationArtifactOwner
         ? { applicationArtifactOwner: config.python.applicationArtifactOwner }
+        : {}),
+      ...(config.python?.artifactTransfer
+        ? { artifactTransfer: config.python.artifactTransfer }
         : {}),
       legacySeed: {
         resolutionMode: settings.resolutionMode,

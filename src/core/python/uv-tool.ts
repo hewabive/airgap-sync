@@ -16,6 +16,11 @@ export interface UvToolAsset {
 export interface UvToolManifest {
   assets: Record<string, UvToolAsset>;
   license: string;
+  licenseFiles: {
+    name: string;
+    sha256: string;
+    url: string;
+  }[];
   name: 'uv';
   schemaVersion: 1;
   version: string;
@@ -40,6 +45,7 @@ function normalizeUvToolManifest(value: unknown): UvToolManifest {
     value.name !== 'uv' ||
     typeof value.version !== 'string' ||
     typeof value.license !== 'string' ||
+    !Array.isArray(value.licenseFiles) ||
     !isRecord(value.assets)
   ) {
     throw new Error('Invalid checked-in uv tool manifest');
@@ -65,9 +71,27 @@ function normalizeUvToolManifest(value: unknown): UvToolManifest {
       url: new URL(asset.url).toString(),
     };
   }
+  const licenseFiles = value.licenseFiles.map((licenseFile) => {
+    if (
+      !isRecord(licenseFile) ||
+      typeof licenseFile.name !== 'string' ||
+      !licenseFile.name ||
+      typeof licenseFile.sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(licenseFile.sha256) ||
+      typeof licenseFile.url !== 'string'
+    ) {
+      throw new Error('Invalid uv tool license file');
+    }
+    return {
+      name: licenseFile.name,
+      sha256: licenseFile.sha256,
+      url: new URL(licenseFile.url).toString(),
+    };
+  });
   return {
     assets,
     license: value.license,
+    licenseFiles,
     name: 'uv',
     schemaVersion: 1,
     version: value.version,

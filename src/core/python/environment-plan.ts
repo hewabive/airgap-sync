@@ -38,6 +38,36 @@ export interface PythonEnvironmentPlanPresentation {
   warnings?: string[];
 }
 
+export interface PythonPlanTransferArtifact {
+  filename: string;
+  kind: 'cpython' | 'license' | 'uv';
+  license: {
+    spdx: string;
+    url: string;
+  };
+  platforms: string[];
+  publication: {
+    owner: string;
+    package: string;
+    version: string;
+  };
+  sha256: string;
+  size?: number;
+  sourceUrl: string;
+  version: string;
+}
+
+export interface PythonRuntimeContract {
+  platforms: {
+    implementation: 'CPython';
+    platformFamilyId: string;
+    provisionedExternally: true;
+    pythonMinor: string;
+    requiresPython: string;
+    systemPrerequisites: string[];
+  }[];
+}
+
 export interface PythonEnvironmentPlan {
   application: {
     name: string;
@@ -64,6 +94,8 @@ export interface PythonEnvironmentPlan {
     policyVersion: number;
     version: string;
   };
+  runtimeArtifacts?: PythonPlanTransferArtifact[];
+  runtimeContract?: PythonRuntimeContract;
   schemaVersion: 1;
   wheels: PythonPlanWheel[];
 }
@@ -83,6 +115,8 @@ export function pythonEnvironmentPlanSemanticContent(
     ...(plan.preferredPythonMinor ? { preferredPythonMinor: plan.preferredPythonMinor } : {}),
     ...(plan.publication ? { publication: plan.publication } : {}),
     resolver: plan.resolver,
+    ...(plan.runtimeArtifacts ? { runtimeArtifacts: plan.runtimeArtifacts } : {}),
+    ...(plan.runtimeContract ? { runtimeContract: plan.runtimeContract } : {}),
     schemaVersion: plan.schemaVersion,
     wheels: plan.wheels,
   };

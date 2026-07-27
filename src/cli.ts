@@ -8,6 +8,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import { Command } from 'commander';
 import {
   addWorkspaceTarget,
+  addPythonRuntimeContract,
   acquireUv,
   applyBundle,
   applyGitSources,
@@ -2645,9 +2646,19 @@ program
           uvPath,
           workDir: path.join(plannerWorkDir, String(index)),
         });
+        const plan = addPythonRuntimeContract(result.plan, {
+          ...(config.python?.applicationArtifactOwner
+            ? {
+                applicationArtifactOwner: config.python.applicationArtifactOwner,
+              }
+            : {}),
+          includeCpython: config.python?.artifactTransfer?.cpython === true,
+          includeUv: config.python?.artifactTransfer?.uv === true,
+          ...(recipe ? { recipe } : {}),
+        });
         results.push({
           index,
-          plan: result.plan,
+          plan,
           rejectedCandidates: result.rejectedCandidates,
         });
       }

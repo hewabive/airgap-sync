@@ -44,6 +44,19 @@ export {
   PythonApplicationPlanningError,
 } from './core/python/application-planner.js';
 export {
+  addPythonRuntimeContract,
+  createPythonPrerequisiteReport,
+} from './core/python/runtime-contract.js';
+export {
+  managedPythonRuntimeCatalog,
+  normalizeManagedPythonRuntimeCatalog,
+  selectManagedPythonRuntimeAsset,
+} from './core/python/runtime-catalog.js';
+export {
+  transferPythonPlanArtifacts,
+  verifyPythonPlanArtifactManifest,
+} from './core/python/plan-artifact-transfer.js';
+export {
   classifyUvResolutionFailure,
   createUvCompileInvocation,
   defaultUvCommandRunner,
@@ -274,6 +287,19 @@ export type {
   PythonPlannerRejection,
 } from './core/python/application-planner.js';
 export type {
+  AddPythonRuntimeContractOptions,
+  PythonPrerequisiteReport,
+} from './core/python/runtime-contract.js';
+export type {
+  ManagedPythonRuntimeAsset,
+  ManagedPythonRuntimeCatalog,
+} from './core/python/runtime-catalog.js';
+export type {
+  PythonPlanArtifactManifest,
+  PythonPlanArtifactManifestEntry,
+  TransferPythonPlanArtifactsOptions,
+} from './core/python/plan-artifact-transfer.js';
+export type {
   PythonApplicationResolver,
   UvCommandInvocation,
   UvCommandResult,
@@ -331,7 +357,9 @@ export type {
   PythonEnvironmentPlanPresentation,
   PythonLockedPackagePlan,
   PythonPlanWheel,
+  PythonPlanTransferArtifact,
   PythonPlatformPlan,
+  PythonRuntimeContract,
 } from './core/python/environment-plan.js';
 
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
