@@ -129,6 +129,7 @@ export async function preparePythonRootWheels(options: {
         constraint: false,
         hashes: [{ algorithm: 'sha256', digest: input.sha256.toLowerCase() }],
         line: input.line,
+        ...(input.pythonResolutionMode ? { pythonResolutionMode: input.pythonResolutionMode } : {}),
         requiredBy: input.requiredBy,
         requirement: parsed.requirement,
         sourcePath: input.sourcePath,
@@ -156,10 +157,7 @@ export class RootWheelPythonIndex implements PythonIndexClient {
       : this.#delegate.getProject(name);
   }
 
-  getMetadata(
-    file: PythonIndexFile,
-    cache: PythonMetadataCache
-  ): Promise<PythonMetadataResult> {
+  getMetadata(file: PythonIndexFile, cache: PythonMetadataCache): Promise<PythonMetadataResult> {
     const root = [...this.#roots.values()].find(
       (candidate) => candidate.file.url === file.url && candidate.file.filename === file.filename
     );

@@ -54,6 +54,9 @@ Python dependency semantics differ from npm in two ways that matter for collecti
      as approximate; install verification is the safety net. Other entries in a
      requirements input provide constraints, and `--hash` values constrain acceptable
      files.
+   - The workspace mode is the default. Git, PyPI, and exact root-wheel targets can
+     override it independently, while `--allow-approximate-python` remains a run-wide
+     override with highest priority.
 4. Target environments are explicit configuration: a list of (full Python version,
    OS, architecture, libc/manylinux level) entries. Dependency resolution and wheel
    selection run independently for every configured environment and their results are

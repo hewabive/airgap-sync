@@ -21,6 +21,9 @@
   default no-argument CLI entrypoint.
 - Added Python/PyPI configuration to the interactive workspace initializer and settings
   menu, including target environment add, edit, and remove actions.
+- Added per-target Python resolution modes for Git, PyPI, and exact root-wheel targets,
+  with workspace-default inheritance and a run-wide CLI override.
+- Fixed concise download summaries to count and display Python resolution errors.
 - Added recursive npm package collection from package specs, manifests, and lockfiles.
 - Added Git target/dependency discovery, mirror fetch, Gitea repository creation, and
   mirror push.

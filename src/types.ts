@@ -1,5 +1,6 @@
 import type { PythonFetchReport } from './core/python/bundle.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
+import type { PythonResolutionMode } from './core/python/resolution-policy.js';
 
 export interface PackageIdentity {
   name: string;
@@ -59,6 +60,7 @@ export interface GitSource {
   id: string;
   localMirrorPath: string;
   owner: string;
+  pythonResolutionMode?: PythonResolutionMode;
   publishOwner?: string;
   publishOwnerKind?: 'organization' | 'user';
   publishRepo?: string;

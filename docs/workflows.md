@@ -43,8 +43,8 @@ airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
-airgap-sync target add pypi 'requests==2.32.4'
-airgap-sync target add python-wheel 'https://example/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' --sha256 <digest>
+airgap-sync target add pypi 'requests==2.32.4' --python-resolution-mode approximate
+airgap-sync target add python-wheel 'https://example/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' --sha256 <digest> --python-resolution-mode approximate
 airgap-sync target add python-runtime 3.12.13 'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' --sha256 <digest>
 airgap-sync target list
 ```
@@ -91,6 +91,17 @@ selection never guesses the consumer platform:
   "pythonSourceIndex": "https://pypi.org/simple/",
   "pythonPublishOwner": "pypi",
   "pythonResolutionMode": "locked-only",
+  "targets": [
+    {
+      "type": "git",
+      "url": "https://github.com/acme/app.git"
+    },
+    {
+      "type": "pypi",
+      "spec": "ktransformers",
+      "pythonResolutionMode": "approximate"
+    }
+  ],
   "pythonTargetEnvironments": [
     {
       "name": "prod-linux",
@@ -107,9 +118,17 @@ selection never guesses the consumer platform:
 repositories and mirrored Git dependencies. `--include-dev` also includes development
 requirements files and lock dependency groups. Direct URL, VCS, editable, path, sdist,
 and extra-index inputs are intentionally reported as unsupported in this version.
-Unlocked requirements and direct PyPI targets fail by default. Set
-`pythonResolutionMode` to `approximate`, or pass `--allow-approximate-python` for one
-run, to explicitly accept the simplified resolver without dependency backtracking.
+Unlocked requirements and direct PyPI targets fail under the `locked-only` mode. The
+top-level `pythonResolutionMode` is the workspace default; Git, PyPI, and exact
+root-wheel targets can override it with their own `pythonResolutionMode`. This allows,
+for example, locked Git applications and one approximate direct PyPI target to share a
+workspace. Use `target set-python-resolution <index> approximate` to change an existing
+target, or `inherit` to return it to the workspace default. The run-wide
+`--allow-approximate-python` flag has highest priority and enables approximate
+resolution for every target for that one download.
+
+Choose `approximate` only to explicitly accept the simplified resolver without
+dependency backtracking.
 An exact `python-wheel` target also needs this opt-in for its transitive metadata
 closure, but the root itself is always pinned and verified by SHA-256. All resolved
 wheels are published through the same Gitea PyPI owner during the offline phase.

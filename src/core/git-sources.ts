@@ -6,6 +6,7 @@ import type {
   GitSourcesManifest,
   SkippedGitRequirement,
 } from '../types.js';
+import type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export interface GitSourcesOptions {
   createdAt?: string;
@@ -147,11 +148,19 @@ function mergeSource(target: GitSource, source: GitSource): void {
   if (source.target === true) {
     target.target = true;
   }
+
+  if (source.pythonResolutionMode) {
+    target.pythonResolutionMode =
+      target.pythonResolutionMode === 'locked-only' || source.pythonResolutionMode === 'locked-only'
+        ? 'locked-only'
+        : 'approximate';
+  }
 }
 
 export function createGitSourceFromUrl(options: {
   committish?: string;
   mirrorRoot?: string;
+  pythonResolutionMode?: PythonResolutionMode;
   target?: boolean;
   url: string;
 }): GitSource {
@@ -168,6 +177,7 @@ export function createGitSourceFromUrl(options: {
     id: identity.id,
     localMirrorPath: toLocalMirrorPath(identity, mirrorRoot),
     owner: identity.owner,
+    ...(options.pythonResolutionMode ? { pythonResolutionMode: options.pythonResolutionMode } : {}),
     repo: identity.repo,
     requirements: [],
     sourceUrl: identity.sourceUrl,

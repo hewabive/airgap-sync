@@ -26,14 +26,18 @@ The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 ```bash
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
-airgap-sync target add pypi 'requests==2.32.4'
+airgap-sync target add pypi 'requests==2.32.4' \
+  --python-resolution-mode approximate
 airgap-sync target add python-wheel \
   'https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' \
-  --sha256 <64-hex-digest>
+  --sha256 <64-hex-digest> \
+  --python-resolution-mode approximate
 airgap-sync target add python-runtime 3.12.13 \
   'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' \
   --sha256 <64-hex-digest>
 airgap-sync target list
+airgap-sync target set-python-resolution 1 approximate
+airgap-sync target set-python-resolution 1 inherit
 airgap-sync target remove 1
 ```
 
@@ -41,7 +45,10 @@ Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirror
 `airgap-bundle/git-mirrors/` during `download`. npm targets are treated as explicit root
 package specs.
 PyPI targets use PEP 508 requirement syntax and require `pythonTargetEnvironments` in
-`airgap-sync.json`.
+`airgap-sync.json`. Git, PyPI, and exact root-wheel targets may set
+`--python-resolution-mode locked-only|approximate`. With no target override they inherit
+the workspace default. `target set-python-resolution <index> inherit` removes an
+existing override.
 
 ## menu
 
@@ -63,9 +70,10 @@ The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry`, `giteaUrl`, bundle output, Python/PyPI settings, and default answers
 in `airgap-sync.json`. When the menu initializes a new workspace, it offers to enable
 Python/PyPI support and asks for at least one target environment when enabled.
-Existing workspaces can manage the source index, Gitea package owner, resolution mode,
-and target environments under `Settings` → `Python / PyPI`. Adding a PyPI target with
-no environment configured offers to open the same setup flow.
+Existing workspaces can manage the source index, Gitea package owner, default resolution
+mode, and target environments under `Settings` → `Python / PyPI`. Target-specific
+resolution modes are managed under `Targets`. Adding a PyPI target with no environment
+configured offers to open the same setup flow.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
@@ -141,12 +149,20 @@ With an explicit root argument, keeps the lower-level behavior and scans that di
 directly.
 
 Python resolution is strict and lock-first by default. `uv.lock` and `pylock.toml` are
-consumed exactly; a `requirements*.txt` beside a lock is treated as covered and is not
-resolved a second time. An uncovered requirements file or direct PyPI target is reported
-as an error before its dependency closure is guessed. Use
-`--allow-approximate-python`, or set `"pythonResolutionMode": "approximate"`, only when
-the simplified highest-compatible/no-backtracking resolver is an accepted tradeoff.
-The resulting fetch report remains marked `approximate: true`.
+consumed exactly; a `requirements*.txt` beside a lock from the same project is treated
+as covered and is not resolved a second time. An uncovered requirements file or direct
+PyPI target is reported as an error before its dependency closure is guessed.
+
+The effective mode is selected in this order:
+
+1. `download --allow-approximate-python` overrides the whole run.
+2. A Git, PyPI, or exact root-wheel target's `pythonResolutionMode` overrides that
+   target.
+3. The top-level `pythonResolutionMode` in `airgap-sync.json` is the workspace default.
+
+Use `approximate` only when the simplified highest-compatible/no-backtracking resolver
+is an accepted tradeoff. The resulting fetch report remains marked
+`approximate: true`.
 
 `target add python-wheel` handles an exact root wheel that is not listed by the source
 index, such as a vLLM CPU release asset. SHA-256 is mandatory. During download the wheel
@@ -155,6 +171,7 @@ the filename. That exact root is overlaid on the configured Python index; its
 `Requires-Dist` edges are then resolved and the realized package/file/hash closure is
 written to `python-seed-manifest.json`. Because dependency selection still uses the
 no-backtracking resolver, this target requires the same explicit approximate opt-in.
+Set it on the wheel target when other targets should remain lock-only.
 
 `target add python-runtime` transfers a python-build-standalone archive into
 `python-runtime-mirror/<build>/<archive>` and writes a checksum manifest. Point

@@ -59,6 +59,7 @@ import {
   transferPythonRuntimeArtifacts,
   type PythonRuntimeArtifactInput,
 } from './python/runtime-artifacts.js';
+import type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export interface CollectBundleOptions {
   allowApproximatePython?: boolean;
@@ -79,6 +80,7 @@ export interface CollectBundleOptions {
   initialPythonRootWheels?: PythonRootWheelInput[];
   initialPythonRuntimes?: PythonRuntimeArtifactInput[];
   pythonIndex?: PythonIndexClient;
+  pythonResolutionMode?: PythonResolutionMode;
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   pythonTimeoutMs?: number;
@@ -165,6 +167,7 @@ function pythonRequirementKey(input: PythonRequirementInput): string {
     input.requirement.marker ?? '',
     input.sourcePath,
     String(input.line),
+    input.pythonResolutionMode ?? '',
   ].join('\0');
 }
 
@@ -195,6 +198,32 @@ function mergePythonInputs(
   target.pyprojectWithoutLock = [
     ...new Set([...target.pyprojectWithoutLock, ...source.pyprojectWithoutLock]),
   ].sort();
+}
+
+function scopeGitPythonInputs(
+  inputs: PythonDiscoveredInputs,
+  source: GitSource
+): PythonDiscoveredInputs {
+  const scopePath = (sourcePath: string): string =>
+    path.posix.join('git-sources', source.id, sourcePath.replace(/\\/g, '/'));
+  return {
+    lockfiles: inputs.lockfiles.map((lockfile) => ({
+      ...lockfile,
+      sourcePath: scopePath(lockfile.sourcePath),
+    })),
+    lockfilePaths: inputs.lockfilePaths.map(scopePath),
+    pyprojectWithoutLock: inputs.pyprojectWithoutLock.map(scopePath),
+    requirements: inputs.requirements.map((requirement) => ({
+      ...requirement,
+      ...(source.pythonResolutionMode ? { pythonResolutionMode: source.pythonResolutionMode } : {}),
+      sourcePath: scopePath(requirement.sourcePath),
+    })),
+    requirementPaths: inputs.requirementPaths.map(scopePath),
+    unsupported: inputs.unsupported.map((unsupported) => ({
+      ...unsupported,
+      sourcePath: scopePath(unsupported.sourcePath),
+    })),
+  };
 }
 
 function addUnique<T>(
@@ -377,7 +406,7 @@ async function scanGitSourceManifests(options: {
       state.requirements.push(...result.requirements);
       state.gitRequirements.push(...result.gitRequirements);
       state.unsupported.push(...result.unsupported);
-      mergePythonInputs(python, result.python, seenPython);
+      mergePythonInputs(python, scopeGitPythonInputs(result.python, source), seenPython);
     } catch (error) {
       errors.push({
         error: (error as Error).message,
@@ -772,12 +801,17 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       status: 'start',
     });
     pythonMetadataCache = await readPythonMetadataCache(outputDir, options.pythonSourceIndex);
-    if (
-      (options.initialPythonRootWheels?.length ?? 0) > 0 &&
-      options.allowApproximatePython !== true
-    ) {
+    const disallowedRootWheel = options.initialPythonRootWheels?.find(
+      (input) =>
+        options.allowApproximatePython !== true &&
+        (input.pythonResolutionMode ?? options.pythonResolutionMode ?? 'locked-only') !==
+          'approximate'
+    );
+    if (disallowedRootWheel) {
       throw new Error(
-        'Python root wheel targets require --allow-approximate-python for transitive dependency resolution'
+        `Python root wheel target ${disallowedRootWheel.sourcePath}:${String(
+          disallowedRootWheel.line
+        )} requires approximate resolution for transitive dependencies`
       );
     }
     const preparedRootWheels = await preparePythonRootWheels({
@@ -796,6 +830,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     const pythonResolution = await resolvePython({
       allowApproximate: options.allowApproximatePython === true,
       cache: pythonMetadataCache,
+      defaultResolutionMode: options.pythonResolutionMode ?? 'locked-only',
       environments: options.pythonTargetEnvironments,
       includeDev,
       index: pythonIndex,

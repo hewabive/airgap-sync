@@ -16,6 +16,7 @@ import {
   removeWorkspaceTarget,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
+  setWorkspaceTargetPythonResolutionMode,
   workspaceSecretsFileName,
 } from '../src/core/workspace.js';
 
@@ -164,7 +165,13 @@ describe('workspace config', () => {
         ],
         schemaVersion: 1,
         sourceRegistry: 'https://registry.npmjs.org',
-        targets: [{ spec: 'requests[socks]>=2.31', type: 'pypi' }],
+        targets: [
+          {
+            pythonResolutionMode: 'approximate',
+            spec: 'requests[socks]>=2.31',
+            type: 'pypi',
+          },
+        ],
       },
       { spaces: 2 }
     );
@@ -181,7 +188,13 @@ describe('workspace config', () => {
           pythonVersion: '3.11.9',
         },
       ],
-      targets: [{ spec: 'requests[socks]>=2.31', type: 'pypi' }],
+      targets: [
+        {
+          pythonResolutionMode: 'approximate',
+          spec: 'requests[socks]>=2.31',
+          type: 'pypi',
+        },
+      ],
     });
   });
 
@@ -190,7 +203,7 @@ describe('workspace config', () => {
       path.join(tempDir, 'airgap-sync.json'),
       {
         output: './airgap-bundle',
-        pythonResolutionMode: 'approximate',
+        pythonResolutionMode: 'locked-only',
         pythonTargetEnvironments: [
           {
             arch: 'x86_64',
@@ -204,6 +217,7 @@ describe('workspace config', () => {
         sourceRegistry: 'https://registry.npmjs.org',
         targets: [
           {
+            pythonResolutionMode: 'approximate',
             sha256: 'A'.repeat(64),
             type: 'python-wheel',
             url: 'https://example.test/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl',
@@ -215,10 +229,12 @@ describe('workspace config', () => {
 
     const config = await readWorkspaceConfig(tempDir);
     expect(config.targets[0]).toMatchObject({
+      pythonResolutionMode: 'approximate',
       sha256: 'a'.repeat(64),
       type: 'python-wheel',
     });
     expect(createWorkspacePythonRootWheels(config)[0]).toMatchObject({
+      pythonResolutionMode: 'approximate',
       requiredBy: 'root',
       sha256: 'a'.repeat(64),
       sourcePath: 'workspace-wheel-targets',
@@ -263,12 +279,17 @@ describe('workspace config', () => {
 
   it('creates Python requirements for configured PyPI targets', async () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
-    config.targets.push({ spec: 'requests[socks]>=2.31', type: 'pypi' });
+    config.targets.push({
+      pythonResolutionMode: 'approximate',
+      spec: 'requests[socks]>=2.31',
+      type: 'pypi',
+    });
     expect(createWorkspacePythonRequirements(config)).toEqual([
       {
         constraint: false,
         hashes: [],
         line: 1,
+        pythonResolutionMode: 'approximate',
         requiredBy: 'root',
         requirement: {
           extras: ['socks'],
@@ -280,6 +301,50 @@ describe('workspace config', () => {
         sourcePath: 'workspace-targets',
       },
     ]);
+  });
+
+  it('sets and clears a target-specific Python resolution override', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.pythonTargetEnvironments = [
+      {
+        arch: 'x86_64',
+        manylinux: 'manylinux_2_17',
+        name: 'prod-linux',
+        os: 'linux',
+        pythonVersion: '3.11.9',
+      },
+    ];
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
+    await addWorkspaceTarget(tempDir, {
+      spec: 'requests>=2.31',
+      type: 'pypi',
+    });
+
+    const updated = await setWorkspaceTargetPythonResolutionMode(tempDir, 1, 'approximate');
+    expect(updated.target).toMatchObject({
+      pythonResolutionMode: 'approximate',
+      spec: 'requests>=2.31',
+      type: 'pypi',
+    });
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).toHaveProperty(
+      'pythonResolutionMode',
+      'approximate'
+    );
+
+    await setWorkspaceTargetPythonResolutionMode(tempDir, 1, undefined);
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).not.toHaveProperty(
+      'pythonResolutionMode'
+    );
+  });
+
+  it('rejects Python resolution overrides for target types without Python inputs', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.targets.push({ spec: 'eslint@latest', type: 'npm' });
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
+
+    await expect(setWorkspaceTargetPythonResolutionMode(tempDir, 1, 'approximate')).rejects.toThrow(
+      'npm targets do not resolve Python dependencies'
+    );
   });
 
   it('normalizes workspace menu defaults', async () => {
@@ -358,6 +423,7 @@ describe('workspace config', () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     config.targets.push({
       branch: 'main',
+      pythonResolutionMode: 'approximate',
       type: 'git',
       url: 'https://github.com/acme/app.git',
     });
@@ -369,6 +435,7 @@ describe('workspace config', () => {
         id: 'github.com/acme/app',
         localMirrorPath: 'git-mirrors/github.com/acme/app.git',
         owner: 'acme',
+        pythonResolutionMode: 'approximate',
         repo: 'app',
         requirements: [],
         sourceUrl: 'https://github.com/acme/app.git',
@@ -382,6 +449,7 @@ describe('workspace config', () => {
     config.targets.push(
       {
         branch: 'main',
+        pythonResolutionMode: 'approximate',
         type: 'git',
         url: 'https://github.com/acme/app.git',
       },
@@ -405,6 +473,7 @@ describe('workspace config', () => {
           },
           {
             branch: 'main',
+            pythonResolutionMode: 'approximate',
             type: 'git',
             url: 'https://github.com/acme/app.git',
           },
@@ -418,6 +487,7 @@ describe('workspace config', () => {
         },
         {
           branch: 'main',
+          pythonResolutionMode: 'approximate',
           type: 'git',
           url: 'https://github.com/acme/app.git',
         },
@@ -442,6 +512,7 @@ describe('workspace config', () => {
     config.targets.push(
       {
         branch: 'main',
+        pythonResolutionMode: 'approximate',
         type: 'git',
         url: 'https://github.com/acme/app.git',
       },
@@ -466,6 +537,7 @@ describe('workspace config', () => {
         {
           branch: 'main',
           localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+          pythonResolutionMode: 'approximate',
           sourceId: 'github.com/acme/app',
           type: 'git',
           url: 'https://github.com/acme/app.git',

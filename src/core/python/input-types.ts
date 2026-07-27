@@ -1,4 +1,5 @@
 import type { ParsedRequirement } from './requirements.js';
+import type { PythonResolutionMode } from './resolution-policy.js';
 
 export interface PythonRequirementHash {
   algorithm: string;
@@ -9,6 +10,7 @@ export interface PythonRequirementInput {
   constraint: boolean;
   hashes: PythonRequirementHash[];
   line: number;
+  pythonResolutionMode?: PythonResolutionMode;
   requiredBy: string;
   requirement: ParsedRequirement;
   sourcePath: string;
@@ -16,6 +18,7 @@ export interface PythonRequirementInput {
 
 export interface PythonRootWheelInput {
   line: number;
+  pythonResolutionMode?: PythonResolutionMode;
   requiredBy: string;
   sha256: string;
   sourcePath: string;

@@ -86,8 +86,8 @@ collection entirely, keeping existing workspaces unaffected):
 Target specs:
 
 ```bash
-airgap-sync target add pypi numpy==1.26.4
-airgap-sync target add pypi "requests[socks]>=2.31"
+airgap-sync target add pypi numpy==1.26.4 --python-resolution-mode approximate
+airgap-sync target add pypi "requests[socks]>=2.31" --python-resolution-mode approximate
 ```
 
 ## Bundle Format Additions

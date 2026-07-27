@@ -48,6 +48,7 @@ import {
   removeWorkspaceTarget,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
+  setWorkspaceTargetPythonResolutionMode,
   updateRepositories,
   verifyBundle,
   verifyInstall,
@@ -83,6 +84,7 @@ import type {
   GitOwnerStrategy,
   GitPublishOwnerKind,
   LatestPolicy,
+  PythonResolutionMode,
   PublishProgressEvent,
   PublishProgressPhase,
   RangeResolutionPolicy,
@@ -201,6 +203,11 @@ interface InitOptions {
 
 interface TargetGitOptions {
   branch?: string;
+  pythonResolutionMode?: PythonResolutionMode;
+}
+
+interface TargetPythonOptions {
+  pythonResolutionMode?: PythonResolutionMode;
 }
 
 interface GitSourcesOptions {
@@ -263,6 +270,12 @@ function parseRangeResolutionPolicy(value: string): RangeResolutionPolicy {
   throw new Error(
     `Expected range resolution policy to be "refresh" or "reuse-stable"; got: ${value}`
   );
+}
+
+function parseTargetPythonResolutionMode(value: string): PythonResolutionMode | undefined {
+  return value.trim().toLowerCase() === 'inherit'
+    ? undefined
+    : parsePythonResolutionMode(value.trim().toLowerCase());
 }
 
 function addNpmPublishOptions(command: Command): Command {
@@ -360,11 +373,12 @@ function formatDownloadSummary(report: CollectReport): string {
   const gitSkipped = report.gitSources.skipped.length;
   const unsupported = report.fetch.unsupported.length;
   const npmErrors = report.fetch.errors.length;
+  const pythonErrors = report.python?.errors.length ?? 0;
   const gitErrors =
     report.repositoryUpdate.errors.length +
     report.gitFetch.errors.length +
     report.gitManifestScanErrors.length;
-  const totalErrors = npmErrors + gitErrors;
+  const totalErrors = npmErrors + gitErrors + pythonErrors;
   const status = failed
     ? red(
         `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
@@ -407,6 +421,15 @@ function formatDownloadSummary(report: CollectReport): string {
     ...(pythonLine ? [pythonLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
+
+  if (report.python?.errors.length) {
+    lines.push(
+      ...report.python.errors.map((error) => {
+        const subject = [error.environment, error.name].filter(Boolean).join(' / ');
+        return red(`Python error${subject ? ` [${subject}]` : ''}: ${error.reason}`);
+      })
+    );
+  }
 
   if (unsupported > 0 || gitSkipped > 0 || report.maxIterationsReached) {
     lines.push(
@@ -557,13 +580,19 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
 }
 
 function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
-  return target.type === 'git'
-    ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
-    : target.type === 'python-wheel'
-      ? `python-wheel ${target.url}#sha256=${target.sha256}`
-    : target.type === 'python-runtime'
-      ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
-      : `${target.type} ${target.spec}`;
+  const value =
+    target.type === 'git'
+      ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
+      : target.type === 'python-wheel'
+        ? `python-wheel ${target.url}#sha256=${target.sha256}`
+        : target.type === 'python-runtime'
+          ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
+          : `${target.type} ${target.spec}`;
+  const pythonResolutionMode =
+    target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
+      ? target.pythonResolutionMode
+      : undefined;
+  return `${value}${pythonResolutionMode ? ` [python resolution: ${pythonResolutionMode}]` : ''}`;
 }
 
 function formatPythonTargetEnvironment(environment: PythonTargetEnvironmentConfig): string {
@@ -599,7 +628,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
     `Python source index: ${config.pythonSourceIndex ?? '(disabled)'}`,
     `Python publish owner: ${config.pythonPublishOwner ?? '(not set)'}`,
-    `Python resolution mode: ${config.pythonResolutionMode}`,
+    `Default Python resolution mode: ${config.pythonResolutionMode}`,
     'Python target environments:',
     formatPythonTargetEnvironmentList(config.pythonTargetEnvironments),
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
@@ -1098,6 +1127,19 @@ async function askRangeResolutionPolicy(
   return parseRangeResolutionPolicy(answer || current);
 }
 
+async function askTargetPythonResolutionMode(
+  rl: ReadlineInterface,
+  defaultValue: PythonResolutionMode | 'inherit'
+): Promise<PythonResolutionMode | undefined> {
+  return parseTargetPythonResolutionMode(
+    await ask(
+      rl,
+      'Python resolution mode for this target (inherit/locked-only/approximate)',
+      defaultValue
+    )
+  );
+}
+
 async function resolvePromptBoolean(
   rl: ReadlineInterface,
   question: string,
@@ -1177,9 +1219,7 @@ async function resolvePublishWorkspaceDefaults(options: {
     options.gitOwnerStrategy !== undefined &&
     !['preserve', 'authenticated-user', 'fixed-owner'].includes(options.gitOwnerStrategy)
   ) {
-    throw new Error(
-      '--git-owner-strategy must be preserve, authenticated-user, or fixed-owner'
-    );
+    throw new Error('--git-owner-strategy must be preserve, authenticated-user, or fixed-owner');
   }
   if (
     options.gitPublishOwnerKind !== undefined &&
@@ -1190,11 +1230,7 @@ async function resolvePublishWorkspaceDefaults(options: {
   const workspaceDir = process.cwd();
   const needsConfig = !options.bundle || !options.gitea || !options.registry;
   let config: WorkspaceConfig | undefined;
-  if (
-    needsConfig ||
-    options.pythonOwner === undefined ||
-    options.gitOwnerStrategy === undefined
-  ) {
+  if (needsConfig || options.pythonOwner === undefined || options.gitOwnerStrategy === undefined) {
     try {
       config = await readWorkspaceConfig(workspaceDir);
     } catch (error) {
@@ -1422,10 +1458,14 @@ async function configurePythonPackageSettings(
     throw new Error('Gitea Python package owner is required');
   }
   console.log(
-    'locked-only accepts locked Python inputs; direct PyPI targets require approximate resolution.'
+    'This is the default for Python inputs whose target does not override the resolution mode.'
   );
   const pythonResolutionMode = parsePythonResolutionMode(
-    await ask(rl, 'Python resolution mode (locked-only/approximate)', config.pythonResolutionMode)
+    await ask(
+      rl,
+      'Default Python resolution mode (locked-only/approximate)',
+      config.pythonResolutionMode
+    )
   );
   const nextConfig: WorkspaceConfig = {
     ...config,
@@ -1706,6 +1746,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('4. Add PyPI target');
     console.log('5. Remove target');
     console.log('6. Download selected target');
+    console.log('7. Set target Python resolution mode');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -1718,6 +1759,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
       case '2': {
         const url = await ask(rl, 'Git repository URL');
         const branch = await ask(rl, 'Branch (optional)');
+        const pythonResolutionMode = await askTargetPythonResolutionMode(rl, 'inherit');
         if (url) {
           await runSelfCommand(
             compactArgs([
@@ -1728,6 +1770,8 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
               workspaceDir,
               branch ? '--branch' : undefined,
               branch,
+              pythonResolutionMode ? '--python-resolution-mode' : undefined,
+              pythonResolutionMode,
             ]),
             workspaceDir
           );
@@ -1750,14 +1794,24 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
           }
           config = await configureInitialPythonSettings(workspaceDir, rl, config);
         }
-        if (config.pythonResolutionMode === 'locked-only') {
-          console.log(
-            'Note: downloading a direct PyPI target requires approximate resolution or the --allow-approximate-python option.'
-          );
-        }
+        console.log(
+          'Direct PyPI targets need approximate resolution unless the whole download uses --allow-approximate-python.'
+        );
+        const pythonResolutionMode = await askTargetPythonResolutionMode(rl, 'approximate');
         const spec = await ask(rl, 'PyPI package requirement');
         if (spec) {
-          await runSelfCommand(['target', 'add', 'pypi', spec, workspaceDir], workspaceDir);
+          await runSelfCommand(
+            compactArgs([
+              'target',
+              'add',
+              'pypi',
+              spec,
+              workspaceDir,
+              pythonResolutionMode ? '--python-resolution-mode' : undefined,
+              pythonResolutionMode,
+            ]),
+            workspaceDir
+          );
         }
         break;
       }
@@ -1777,6 +1831,37 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
+      case '7': {
+        const config = await readMenuWorkspace(workspaceDir, rl);
+        console.log(formatTargetList(config.targets));
+        const indexValue = await ask(rl, 'Target index to configure');
+        if (!indexValue) {
+          break;
+        }
+        const index = parsePositiveInteger(indexValue);
+        const target = config.targets[index - 1];
+        if (!target) {
+          throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+        }
+        if (target.type !== 'git' && target.type !== 'pypi' && target.type !== 'python-wheel') {
+          throw new Error(`${target.type} targets do not resolve Python dependencies`);
+        }
+        const pythonResolutionMode = await askTargetPythonResolutionMode(
+          rl,
+          target.pythonResolutionMode ?? 'inherit'
+        );
+        await runSelfCommand(
+          [
+            'target',
+            'set-python-resolution',
+            indexValue,
+            pythonResolutionMode ?? 'inherit',
+            workspaceDir,
+          ],
+          workspaceDir
+        );
+        break;
+      }
       default:
         console.log('Unknown menu item.');
     }
@@ -1792,7 +1877,7 @@ async function configurePythonSettingsMenu(
     console.log('\nPython / PyPI settings');
     console.log(`Source index: ${config.pythonSourceIndex ?? '(disabled)'}`);
     console.log(`Publish owner: ${config.pythonPublishOwner ?? '(not set)'}`);
-    console.log(`Resolution mode: ${config.pythonResolutionMode}`);
+    console.log(`Default resolution mode: ${config.pythonResolutionMode}`);
     console.log('Target environments:');
     console.log(formatPythonTargetEnvironmentList(config.pythonTargetEnvironments));
     console.log('Actions:');
@@ -2243,19 +2328,24 @@ targetAddCommand
   .argument('<url>', 'Git repository URL')
   .argument('[workspace]', 'Workspace directory', '.')
   .option('--branch <name>', 'Branch to clone on first materialization')
+  .option(
+    '--python-resolution-mode <mode>',
+    'Override the workspace Python resolution mode: locked-only or approximate',
+    parsePythonResolutionMode
+  )
   .action(async (url: string, workspace: string, options: TargetGitOptions) => {
     try {
-      const result = await addWorkspaceTarget(workspace, {
+      const target = {
         ...(options.branch ? { branch: options.branch } : {}),
-        type: 'git',
+        ...(options.pythonResolutionMode
+          ? { pythonResolutionMode: options.pythonResolutionMode }
+          : {}),
+        type: 'git' as const,
         url,
-      });
+      };
+      const result = await addWorkspaceTarget(workspace, target);
       console.log(
-        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue({
-          ...(options.branch ? { branch: options.branch } : {}),
-          type: 'git',
-          url,
-        })}\nTotal targets: ${String(result.config.targets.length)}`
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -2268,17 +2358,23 @@ targetAddCommand
   .description('Add a Python package requirement target')
   .argument('<spec>', 'PEP 508 requirement, e.g. requests[socks]>=2.31')
   .argument('[workspace]', 'Workspace directory', '.')
-  .action(async (spec: string, workspace: string) => {
+  .option(
+    '--python-resolution-mode <mode>',
+    'Override the workspace Python resolution mode: locked-only or approximate',
+    parsePythonResolutionMode
+  )
+  .action(async (spec: string, workspace: string, options: TargetPythonOptions) => {
     try {
-      const result = await addWorkspaceTarget(workspace, {
+      const target = {
+        ...(options.pythonResolutionMode
+          ? { pythonResolutionMode: options.pythonResolutionMode }
+          : {}),
         spec,
-        type: 'pypi',
-      });
+        type: 'pypi' as const,
+      };
+      const result = await addWorkspaceTarget(workspace, target);
       console.log(
-        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue({
-          spec,
-          type: 'pypi',
-        })}\nTotal targets: ${String(result.config.targets.length)}`
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -2292,18 +2388,32 @@ targetAddCommand
   .argument('<url>', 'HTTP(S) or file URL to the wheel')
   .requiredOption('--sha256 <digest>', 'Expected wheel SHA-256')
   .argument('[workspace]', 'Workspace directory', '.')
-  .action(async (url: string, workspace: string, options: { sha256: string }) => {
-    try {
-      const target = { sha256: options.sha256, type: 'python-wheel' as const, url };
-      const result = await addWorkspaceTarget(workspace, target);
-      console.log(
-        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
-      );
-    } catch (error) {
-      console.error(`Error: ${(error as Error).message}`);
-      process.exitCode = 1;
+  .option(
+    '--python-resolution-mode <mode>',
+    'Override the workspace Python resolution mode: locked-only or approximate',
+    parsePythonResolutionMode
+  )
+  .action(
+    async (url: string, workspace: string, options: TargetPythonOptions & { sha256: string }) => {
+      try {
+        const target = {
+          ...(options.pythonResolutionMode
+            ? { pythonResolutionMode: options.pythonResolutionMode }
+            : {}),
+          sha256: options.sha256,
+          type: 'python-wheel' as const,
+          url,
+        };
+        const result = await addWorkspaceTarget(workspace, target);
+        console.log(
+          `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
+        );
+      } catch (error) {
+        console.error(`Error: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
     }
-  });
+  );
 
 targetAddCommand
   .command('python-runtime')
@@ -2313,12 +2423,7 @@ targetAddCommand
   .requiredOption('--sha256 <digest>', 'Expected archive SHA-256')
   .argument('[workspace]', 'Workspace directory', '.')
   .action(
-    async (
-      pythonVersion: string,
-      url: string,
-      workspace: string,
-      options: { sha256: string }
-    ) => {
+    async (pythonVersion: string, url: string, workspace: string, options: { sha256: string }) => {
       try {
         const target = {
           pythonVersion,
@@ -2464,6 +2569,31 @@ secretsCommand
   });
 
 targetCommand
+  .command('set-python-resolution')
+  .description('Override or inherit the Python resolution mode for a target')
+  .argument('<index>', 'Target index from target list')
+  .argument('<mode>', 'locked-only, approximate, or inherit')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (index: string, mode: string, workspace: string) => {
+    try {
+      const pythonResolutionMode = parseTargetPythonResolutionMode(mode);
+      const result = await setWorkspaceTargetPythonResolutionMode(
+        workspace,
+        parsePositiveInteger(index),
+        pythonResolutionMode
+      );
+      console.log(
+        `Updated target: ${formatTargetValue(result.target)}\nPython resolution mode: ${
+          pythonResolutionMode ?? `inherit (${result.config.pythonResolutionMode})`
+        }`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetCommand
   .command('remove')
   .description('Remove a target by its one-based list index')
   .argument('<index>', 'Target index from target list')
@@ -2572,9 +2702,7 @@ program
           options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
         const prune =
           !targetSelection && (options.prune === true || config.defaults.download.prune === true);
-        const allowApproximatePython =
-          options.allowApproximatePython === true ||
-          activeConfig.pythonResolutionMode === 'approximate';
+        const allowApproximatePython = options.allowApproximatePython === true;
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -2615,6 +2743,7 @@ program
           ...(activeConfig.pythonSourceIndex
             ? { pythonSourceIndex: activeConfig.pythonSourceIndex }
             : {}),
+          pythonResolutionMode: activeConfig.pythonResolutionMode,
           ...(activeConfig.pythonTargetEnvironments
             ? { pythonTargetEnvironments: activeConfig.pythonTargetEnvironments }
             : {}),
@@ -3292,9 +3421,7 @@ addNpmPublishOptions(
         gitea: options.gitea,
         registry: options.registry,
         ...(options.pythonOwner ? { pythonOwner: options.pythonOwner } : {}),
-        ...(options.gitOwnerStrategy
-          ? { gitOwnerStrategy: options.gitOwnerStrategy }
-          : {}),
+        ...(options.gitOwnerStrategy ? { gitOwnerStrategy: options.gitOwnerStrategy } : {}),
         ...(options.gitPublishOwner ? { gitPublishOwner: options.gitPublishOwner } : {}),
         ...(options.gitPublishOwnerKind
           ? { gitPublishOwnerKind: options.gitPublishOwnerKind }
@@ -3310,16 +3437,14 @@ addNpmPublishOptions(
         options.configureGitGlobal === true || resolved.configureGitGlobal === true;
       const needsAuthenticatedGitOwner =
         resolved.gitOwnerStrategy === 'authenticated-user' ||
-        (resolved.gitOwnerStrategy === 'fixed-owner' &&
-          resolved.gitPublishOwnerKind === 'user');
-      const token =
-        needsAuthenticatedGitOwner
-          ? await requireGiteaToken({
-              cliToken: options.giteaToken,
-              optionName: '--gitea-token <token>',
-              workspaceDir: resolved.workspaceDir,
-            })
-          : options.dryRun === true
+        (resolved.gitOwnerStrategy === 'fixed-owner' && resolved.gitPublishOwnerKind === 'user');
+      const token = needsAuthenticatedGitOwner
+        ? await requireGiteaToken({
+            cliToken: options.giteaToken,
+            optionName: '--gitea-token <token>',
+            workspaceDir: resolved.workspaceDir,
+          })
+        : options.dryRun === true
           ? undefined
           : options.skipGitProvision === true || providedGitAuth
             ? await resolveGiteaToken({
@@ -3348,9 +3473,7 @@ addNpmPublishOptions(
         ...(gitAuth ? { gitAuth } : {}),
         ...(login ? { gitAuthenticatedUser: login } : {}),
         gitOwnerStrategy: resolved.gitOwnerStrategy,
-        ...(resolved.gitPublishOwner
-          ? { gitPublishOwner: resolved.gitPublishOwner }
-          : {}),
+        ...(resolved.gitPublishOwner ? { gitPublishOwner: resolved.gitPublishOwner } : {}),
         ...(resolved.gitPublishOwnerKind
           ? { gitPublishOwnerKind: resolved.gitPublishOwnerKind }
           : {}),

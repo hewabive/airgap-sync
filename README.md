@@ -77,7 +77,7 @@ Running `airgap-sync` without a subcommand opens the interactive menu. Use
 
 The menu covers the normal workflow:
 
-- **Targets**: add, remove, or download one Git/npm/PyPI target.
+- **Targets**: add, remove, configure, or download one Git/npm/PyPI target.
 - **Download updates**: run the online collection phase.
 - **Publish updates**: publish the bundle into the closed-network registry and Git host.
 - **Verify installs**: run package-manager installs for configured Git targets.
@@ -92,8 +92,8 @@ The same workflow can be scripted:
 npm exec -- airgap-sync init
 npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
 npm exec -- airgap-sync target add npm eslint@latest
-npm exec -- airgap-sync target add pypi 'requests==2.32.4'
-npm exec -- airgap-sync target add python-wheel 'https://example/vllm.whl' --sha256 <digest>
+npm exec -- airgap-sync target add pypi 'requests==2.32.4' --python-resolution-mode approximate
+npm exec -- airgap-sync target add python-wheel 'https://example/vllm.whl' --sha256 <digest> --python-resolution-mode approximate
 npm exec -- airgap-sync target add python-runtime 3.12.13 'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' --sha256 <digest>
 
 # Online machine.

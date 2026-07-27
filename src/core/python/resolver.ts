@@ -25,6 +25,7 @@ import type {
   PythonResolutionResult,
   ResolvedPythonArtifact,
 } from './resolution-types.js';
+import type { PythonResolutionMode } from './resolution-policy.js';
 
 interface RequirementEdge {
   constraint: boolean;
@@ -45,6 +46,7 @@ interface SelectedPackage {
 export interface ResolvePythonOptions {
   allowApproximate?: boolean;
   cache: PythonMetadataCache;
+  defaultResolutionMode?: PythonResolutionMode;
   environments: PythonTargetEnvironmentConfig[];
   includeDev?: boolean;
   index: PythonIndexClient;
@@ -62,11 +64,8 @@ function unlockedRequirements(
   return requirements.filter((input) => {
     const sourcePath = input.sourcePath.replace(/\\/g, '/');
     const basename = path.posix.basename(sourcePath);
-    const isRequirementsFile =
-      basename.startsWith('requirements') && basename.endsWith('.txt');
-    return !(
-      isRequirementsFile && lockedDirectories.has(path.posix.dirname(sourcePath))
-    );
+    const isRequirementsFile = basename.startsWith('requirements') && basename.endsWith('.txt');
+    return !(isRequirementsFile && lockedDirectories.has(path.posix.dirname(sourcePath)));
   });
 }
 
@@ -82,8 +81,8 @@ function lockedOnlyErrors(
       raw: input.requirement.raw,
       reason:
         `Unlocked Python input ${input.sourcePath}:${String(input.line)} requires approximate ` +
-        'resolution; add uv.lock/pylock.toml beside it or opt in with ' +
-        '--allow-approximate-python',
+        'resolution; add uv.lock/pylock.toml beside it, set the target or workspace ' +
+        'pythonResolutionMode to approximate, or opt in with --allow-approximate-python',
       requiredBy: input.requiredBy,
     }));
 }
@@ -220,7 +219,7 @@ async function selectUnlockedPackage(options: {
   for (;;) {
     const version = maxSatisfyingVersion(remaining, specifier);
     if (!version) {
-      throw new Error(`No published wheel version satisfies ${specifier || 'any version'}`);
+      throw new Error(`No compatible published wheel satisfies ${specifier || 'any version'}`);
     }
     const file = selectWheel(
       versions.get(version) ?? [],
@@ -632,20 +631,27 @@ export async function resolvePython(
   const lockfiles = options.lockfiles ?? [];
   const requirements = unlockedRequirements(options.requirements ?? [], lockfiles);
   for (const environment of environments) {
-    const locked = resolveLockedEnvironment(
-      lockfiles,
-      environment,
-      options.includeDev === true
-    );
+    const locked = resolveLockedEnvironment(lockfiles, environment, options.includeDev === true);
     errors.push(...locked.errors);
-    const unlocked = options.allowApproximate
+    const allowsApproximate = (input: PythonRequirementInput): boolean =>
+      options.allowApproximate === true ||
+      (input.pythonResolutionMode ?? options.defaultResolutionMode ?? 'locked-only') ===
+        'approximate';
+    const lockedOnlyRequirements = requirements.filter(
+      (input) => !input.constraint && !allowsApproximate(input)
+    );
+    const approximateRequirements = requirements.filter(
+      (input) => input.constraint || allowsApproximate(input)
+    );
+    const unlocked = approximateRequirements.some((input) => !input.constraint)
       ? await resolveUnlockedEnvironment({
           cache: options.cache,
           environment,
           index: options.index,
-          requirements,
+          requirements: approximateRequirements,
         })
-      : { artifacts: [], errors: lockedOnlyErrors(requirements, environment) };
+      : { artifacts: [], errors: [] };
+    errors.push(...lockedOnlyErrors(lockedOnlyRequirements, environment));
     errors.push(...unlocked.errors);
     const environmentArtifacts = [...locked.artifacts, ...unlocked.artifacts];
     const versionsByName = new Map<string, Set<string>>();

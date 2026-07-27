@@ -17,7 +17,10 @@ import { parseRequirement } from './python/requirements.js';
 import type { PythonRequirementInput } from './python/input-types.js';
 import type { PythonRootWheelInput } from './python/input-types.js';
 import type { PythonRuntimeArtifactInput } from './python/runtime-artifacts.js';
+import { isPythonResolutionMode, type PythonResolutionMode } from './python/resolution-policy.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
+
+export type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
@@ -27,6 +30,7 @@ const defaultWorkspacePythonSourceIndex = 'https://pypi.org/simple/';
 
 export interface WorkspaceGitTarget {
   branch?: string;
+  pythonResolutionMode?: PythonResolutionMode;
   type: 'git';
   url: string;
 }
@@ -36,12 +40,14 @@ export interface WorkspaceNpmTarget {
   type: 'npm';
 }
 
-interface WorkspacePypiTarget {
+export interface WorkspacePypiTarget {
+  pythonResolutionMode?: PythonResolutionMode;
   spec: string;
   type: 'pypi';
 }
 
 export interface WorkspacePythonWheelTarget {
+  pythonResolutionMode?: PythonResolutionMode;
   sha256: string;
   type: 'python-wheel';
   url: string;
@@ -61,7 +67,6 @@ export type WorkspaceTarget =
   | WorkspacePythonWheelTarget
   | WorkspacePythonRuntimeTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
-export type PythonResolutionMode = 'approximate' | 'locked-only';
 
 export interface WorkspaceDefaults {
   download: {
@@ -106,6 +111,7 @@ export interface WorkspaceSecrets {
 interface WorkspaceGitTargetSnapshot {
   branch?: string;
   localMirrorPath: string;
+  pythonResolutionMode?: PythonResolutionMode;
   sourceId: string;
   type: 'git';
   url: string;
@@ -117,11 +123,13 @@ interface WorkspaceNpmTargetSnapshot {
 }
 
 interface WorkspacePypiTargetSnapshot {
+  pythonResolutionMode?: PythonResolutionMode;
   spec: string;
   type: 'pypi';
 }
 
 interface WorkspacePythonWheelTargetSnapshot {
+  pythonResolutionMode?: PythonResolutionMode;
   sha256: string;
   type: 'python-wheel';
   url: string;
@@ -210,6 +218,19 @@ function createDefaultWorkspaceSecrets(): WorkspaceSecrets {
   };
 }
 
+function normalizeTargetPythonResolutionMode(
+  value: unknown,
+  targetType: 'git' | 'pypi' | 'python-wheel'
+): PythonResolutionMode | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isPythonResolutionMode(value)) {
+    throw new Error(`${targetType} target pythonResolutionMode must be locked-only or approximate`);
+  }
+  return value;
+}
+
 export function workspaceConfigPath(workspaceDir: string): string {
   return path.join(path.resolve(workspaceDir), workspaceConfigFileName);
 }
@@ -228,10 +249,15 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
       throw new Error('Git target must include a non-empty url');
     }
 
+    const pythonResolutionMode = normalizeTargetPythonResolutionMode(
+      value.pythonResolutionMode,
+      'git'
+    );
     return {
       ...(typeof value.branch === 'string' && value.branch.trim().length > 0
         ? { branch: value.branch.trim() }
         : {}),
+      ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
       type: 'git',
       url: value.url.trim(),
     };
@@ -250,10 +276,18 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
         );
       }
     }
-    return {
-      spec: value.spec.trim(),
-      type: value.type,
-    };
+    if (value.type === 'pypi') {
+      const pythonResolutionMode = normalizeTargetPythonResolutionMode(
+        value.pythonResolutionMode,
+        'pypi'
+      );
+      return {
+        ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
+        spec: value.spec.trim(),
+        type: 'pypi',
+      };
+    }
+    return { spec: value.spec.trim(), type: 'npm' };
   }
 
   if (value.type === 'python-wheel') {
@@ -270,7 +304,12 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(value.sha256.trim())) {
       throw new Error('python-wheel target must include a 64-character SHA-256');
     }
+    const pythonResolutionMode = normalizeTargetPythonResolutionMode(
+      value.pythonResolutionMode,
+      'python-wheel'
+    );
     return {
+      ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
       sha256: value.sha256.trim().toLowerCase(),
       type: 'python-wheel',
       url: url.toString(),
@@ -662,6 +701,31 @@ export async function removeWorkspaceTarget(
   return { config, removed };
 }
 
+export async function setWorkspaceTargetPythonResolutionMode(
+  workspaceDir: string,
+  index: number,
+  pythonResolutionMode: PythonResolutionMode | undefined
+): Promise<{ config: WorkspaceConfig; target: WorkspaceTarget }> {
+  const config = await readWorkspaceConfig(workspaceDir);
+  if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+  const target = config.targets[index - 1];
+  if (!target) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+  if (target.type !== 'git' && target.type !== 'pypi' && target.type !== 'python-wheel') {
+    throw new Error(`${target.type} targets do not resolve Python dependencies`);
+  }
+  if (pythonResolutionMode) {
+    target.pythonResolutionMode = pythonResolutionMode;
+  } else {
+    delete target.pythonResolutionMode;
+  }
+  await writeWorkspaceConfig(workspaceDir, config);
+  return { config, target };
+}
+
 export function selectWorkspaceTargets(
   config: WorkspaceConfig,
   indexes: number[]
@@ -701,6 +765,9 @@ export function createWorkspaceGitSources(config: WorkspaceConfig): GitSource[] 
     .map((target) =>
       createGitSourceFromUrl({
         ...(target.branch ? { committish: target.branch } : {}),
+        ...(target.pythonResolutionMode
+          ? { pythonResolutionMode: target.pythonResolutionMode }
+          : {}),
         target: true,
         url: target.url,
       })
@@ -723,6 +790,9 @@ export function createWorkspacePythonRequirements(
         constraint: false,
         hashes: [],
         line: index + 1,
+        ...(target.pythonResolutionMode
+          ? { pythonResolutionMode: target.pythonResolutionMode }
+          : {}),
         requiredBy: 'root',
         requirement: parsed.requirement,
         sourcePath: 'workspace-targets',
@@ -731,14 +801,15 @@ export function createWorkspacePythonRequirements(
   });
 }
 
-export function createWorkspacePythonRootWheels(
-  config: WorkspaceConfig
-): PythonRootWheelInput[] {
+export function createWorkspacePythonRootWheels(config: WorkspaceConfig): PythonRootWheelInput[] {
   return config.targets.flatMap((target, index) =>
     target.type === 'python-wheel'
       ? [
           {
             line: index + 1,
+            ...(target.pythonResolutionMode
+              ? { pythonResolutionMode: target.pythonResolutionMode }
+              : {}),
             requiredBy: 'root',
             sha256: target.sha256,
             sourcePath: 'workspace-wheel-targets',
@@ -775,9 +846,7 @@ export function createWorkspaceSnapshot(
   return {
     createdAt: options.createdAt ?? new Date().toISOString(),
     gitOwnerStrategy: options.config.gitOwnerStrategy,
-    ...(options.config.gitPublishOwner
-      ? { gitPublishOwner: options.config.gitPublishOwner }
-      : {}),
+    ...(options.config.gitPublishOwner ? { gitPublishOwner: options.config.gitPublishOwner } : {}),
     ...(options.config.gitPublishOwnerKind
       ? { gitPublishOwnerKind: options.config.gitPublishOwnerKind }
       : {}),
@@ -795,15 +864,32 @@ export function createWorkspaceSnapshot(
     schemaVersion: 1,
     sourceRegistry: options.config.sourceRegistry,
     targets: options.config.targets.map((target) => {
-      if (target.type === 'npm' || target.type === 'pypi') {
+      if (target.type === 'npm') {
         return {
           spec: target.spec,
           type: target.type,
         };
       }
 
+      if (target.type === 'pypi') {
+        return {
+          ...(target.pythonResolutionMode
+            ? { pythonResolutionMode: target.pythonResolutionMode }
+            : {}),
+          spec: target.spec,
+          type: target.type,
+        };
+      }
+
       if (target.type === 'python-wheel') {
-        return { sha256: target.sha256, type: target.type, url: target.url };
+        return {
+          ...(target.pythonResolutionMode
+            ? { pythonResolutionMode: target.pythonResolutionMode }
+            : {}),
+          sha256: target.sha256,
+          type: target.type,
+          url: target.url,
+        };
       }
 
       if (target.type === 'python-runtime') {
@@ -823,6 +909,9 @@ export function createWorkspaceSnapshot(
       return {
         ...(target.branch ? { branch: target.branch } : {}),
         localMirrorPath: source.localMirrorPath,
+        ...(target.pythonResolutionMode
+          ? { pythonResolutionMode: target.pythonResolutionMode }
+          : {}),
         sourceId: source.id,
         type: 'git',
         url: target.url,

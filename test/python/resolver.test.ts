@@ -10,6 +10,7 @@ import { parseRequirement } from '../../src/core/python/requirements.js';
 import { resolvePython } from '../../src/core/python/resolver.js';
 import { parseUvLock } from '../../src/core/python/uv-lock.js';
 import type { PythonRequirementInput } from '../../src/core/python/input-types.js';
+import type { PythonResolutionMode } from '../../src/core/python/resolution-policy.js';
 
 function metadata(name: string, version: string, requiresDist: string[] = []): PythonCoreMetadata {
   return {
@@ -66,7 +67,12 @@ class FakeIndex implements PythonIndexClient {
 
 function requirement(
   raw: string,
-  options: { constraint?: boolean; hash?: string; sourcePath?: string } = {}
+  options: {
+    constraint?: boolean;
+    hash?: string;
+    pythonResolutionMode?: PythonResolutionMode;
+    sourcePath?: string;
+  } = {}
 ): PythonRequirementInput {
   const parsed = parseRequirement(raw);
   if (!parsed.ok) {
@@ -76,6 +82,7 @@ function requirement(
     constraint: options.constraint === true,
     hashes: options.hash ? [{ algorithm: 'sha256', digest: options.hash }] : [],
     line: 1,
+    ...(options.pythonResolutionMode ? { pythonResolutionMode: options.pythonResolutionMode } : {}),
     requiredBy: 'root',
     requirement: parsed.requirement,
     sourcePath: options.sourcePath ?? 'requirements.txt',
@@ -117,19 +124,14 @@ describe('resolvePython', () => {
   });
 
   it('does not re-resolve requirements covered by a lockfile in the same directory', async () => {
-    const lock = parseUvLock(
-      'version = 1\nrevision = 3\npackage = []',
-      'services/api/uv.lock'
-    );
+    const lock = parseUvLock('version = 1\nrevision = 3\npackage = []', 'services/api/uv.lock');
 
     const result = await resolvePython({
       cache: new PythonMetadataCache(),
       environments: [environments[0]!],
       index: new FakeIndex(),
       lockfiles: [lock],
-      requirements: [
-        requirement('app==1.0', { sourcePath: 'services/api/requirements.txt' }),
-      ],
+      requirements: [requirement('app==1.0', { sourcePath: 'services/api/requirements.txt' })],
     });
 
     expect(result).toMatchObject({ approximate: false, artifacts: [], errors: [] });
@@ -146,6 +148,77 @@ describe('resolvePython', () => {
     });
 
     expect(result.errors[0]?.reason).toContain('workspace-targets');
+  });
+
+  it('uses target overrides before the workspace default', async () => {
+    const index = new FakeIndex();
+    index.add('approximate-target', '1.0');
+    index.add('locked-target', '1.0');
+
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      defaultResolutionMode: 'approximate',
+      environments: [environments[0]!],
+      index,
+      requirements: [
+        requirement('approximate-target==1.0'),
+        requirement('locked-target==1.0', {
+          pythonResolutionMode: 'locked-only',
+          sourcePath: 'git-sources/example.test/acme/locked/requirements.txt',
+        }),
+      ],
+    });
+
+    expect(result.artifacts.map((artifact) => artifact.name)).toEqual(['approximate-target']);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({
+      name: 'locked-target',
+      raw: 'locked-target==1.0',
+    });
+  });
+
+  it('allows a target to opt into approximate resolution under a locked workspace default', async () => {
+    const index = new FakeIndex();
+    index.add('target-only', '1.0');
+
+    const result = await resolvePython({
+      cache: new PythonMetadataCache(),
+      defaultResolutionMode: 'locked-only',
+      environments: [environments[0]!],
+      index,
+      requirements: [
+        requirement('target-only==1.0', {
+          pythonResolutionMode: 'approximate',
+          sourcePath: 'workspace-targets',
+        }),
+      ],
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.approximate).toBe(true);
+  });
+
+  it('uses the run-wide CLI override before target and workspace modes', async () => {
+    const index = new FakeIndex();
+    index.add('locked-target', '1.0');
+
+    const result = await resolvePython({
+      allowApproximate: true,
+      cache: new PythonMetadataCache(),
+      defaultResolutionMode: 'locked-only',
+      environments: [environments[0]!],
+      index,
+      requirements: [
+        requirement('locked-target==1.0', {
+          pythonResolutionMode: 'locked-only',
+        }),
+      ],
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.approximate).toBe(true);
   });
 
   it('resolves each environment independently with constraints, markers, and extras', async () => {
@@ -197,7 +270,7 @@ describe('resolvePython', () => {
     });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatchObject({ environment: 'linux', name: 'native' });
-    expect(result.errors[0]?.reason).toContain('No published wheel version');
+    expect(result.errors[0]?.reason).toContain('No compatible published wheel');
   });
 
   it('only selects a wheel admitted by requirement hashes', async () => {
@@ -221,7 +294,7 @@ describe('resolvePython', () => {
     expect(matching.errors).toEqual([]);
     expect(matching.artifacts).toHaveLength(1);
     expect(rejected.artifacts).toEqual([]);
-    expect(rejected.errors[0]?.reason).toContain('No published wheel version');
+    expect(rejected.errors[0]?.reason).toContain('No compatible published wheel');
   });
 
   it('traverses uv production, extra, and development lock edges without re-resolving versions', async () => {
