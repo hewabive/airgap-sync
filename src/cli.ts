@@ -2217,12 +2217,17 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
           console.log('Configure platform coverage for Python applications.');
           config = await configureApplicationCoverage(workspaceDir, rl, config);
         }
-        const defaultCoverage = config.coveragePolicies?.[0]?.id;
+        const coveragePolicyIds = config.coveragePolicies?.map((policy) => policy.id) ?? [];
+        const defaultCoverage = coveragePolicyIds[0];
         if (!defaultCoverage) {
           throw new Error('Python application coverage was not configured');
         }
         const spec = await ask(rl, 'Python application package');
-        const coverage = await ask(rl, 'Platform coverage policy', defaultCoverage);
+        const coverage = await ask(
+          rl,
+          `Platform coverage policy (${coveragePolicyIds.join('/')})`,
+          defaultCoverage
+        );
         if (spec) {
           await runSelfCommand(
             ['target', 'add', 'python-app', spec, workspaceDir, '--coverage', coverage],
