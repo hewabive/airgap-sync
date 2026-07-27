@@ -17,6 +17,11 @@ import type {
 import type { WorkspaceSnapshot } from './workspace.js';
 import type { PythonFetchReport, PythonSeedManifest } from './python/bundle.js';
 import { verifyPythonBundle } from './python/verify.js';
+import {
+  verifyPythonApplicationBundle,
+  type PythonApplicationDownloadReport,
+} from './python/application-bundle.js';
+import { pythonApplicationIndexPath } from './python/application-paths.js';
 
 export interface VerifyBundleOptions {
   bundleDir: string;
@@ -295,6 +300,80 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
         'python-seed-manifest',
         'error',
         'Python target environments are configured but python-seed-manifest.json is missing'
+      )
+    );
+  }
+
+  const hasPythonApplicationIndex = await fs.pathExists(
+    path.join(bundleDir, pythonApplicationIndexPath)
+  );
+  if (hasPythonApplicationIndex) {
+    try {
+      const result = await verifyPythonApplicationBundle(bundleDir);
+      checks.push(
+        result.errors.length === 0
+          ? check(
+              'python-applications',
+              'ok',
+              `${String(result.applications)} Python application plans and ${String(result.artifacts)} artifacts are valid`
+            )
+          : check(
+              'python-applications',
+              'error',
+              `${String(result.errors.length)} Python application bundle errors`,
+              { errors: result.errors }
+            )
+      );
+      try {
+        const applicationFetchReport = await readOptionalJson<PythonApplicationDownloadReport>(
+          path.join(bundleDir, 'python-application-fetch-report.json')
+        );
+        checks.push(
+          !applicationFetchReport
+            ? check(
+                'python-application-fetch-report',
+                'warning',
+                'python-application-fetch-report.json is missing'
+              )
+            : applicationFetchReport.errors.length > 0
+              ? check(
+                  'python-application-fetch-report',
+                  'error',
+                  `${String(applicationFetchReport.errors.length)} Python application fetch errors`,
+                  { errors: applicationFetchReport.errors }
+                )
+              : check(
+                  'python-application-fetch-report',
+                  'ok',
+                  'python-application-fetch-report.json has no errors'
+                )
+        );
+      } catch (error) {
+        checks.push(
+          check(
+            'python-application-fetch-report',
+            'error',
+            'python-application-fetch-report.json is unreadable',
+            { error: (error as Error).message }
+          )
+        );
+      }
+    } catch (error) {
+      checks.push(
+        check('python-applications', 'error', 'Python application bundle index is unreadable', {
+          error: (error as Error).message,
+        })
+      );
+    }
+  } else if (
+    workspaceSnapshot?.targets.some((target) => target.type === 'python-app') ||
+    (await fs.pathExists(path.join(bundleDir, 'python-application-fetch-report.json')))
+  ) {
+    checks.push(
+      check(
+        'python-applications',
+        'error',
+        `${pythonApplicationIndexPath} is missing for configured Python applications`
       )
     );
   }

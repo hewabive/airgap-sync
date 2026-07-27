@@ -17,6 +17,7 @@ import {
   clearWorkspaceGiteaToken,
   collectBundle,
   compareMachineToPythonEnvironmentPlan,
+  downloadPythonApplicationPlans,
   configureGitRewrites,
   createPythonEnvironmentPlan,
   createGitSourcesManifest,
@@ -43,6 +44,8 @@ import {
   packageVersion,
   parseRootSpecs,
   planPythonApplication,
+  platformCoveragePolicyDigest,
+  pythonApplicationTargetId,
   PythonApplicationPlanningError,
   previewWorkspaceConfigMigration,
   probeMachine,
@@ -53,6 +56,7 @@ import {
   readGitSourcesManifest,
   readManifestRequirements,
   readBundleManifest,
+  readActivePythonApplicationPlan,
   readDistTagsManifest,
   readRegistryMetadataCache,
   readStableTagResolutionIndex,
@@ -68,6 +72,8 @@ import {
   verifyBundle,
   verifyInstall,
   writeBundleDocuments,
+  writeActivePythonApplicationPlan,
+  writeCollectReport,
   writeFetchReport,
   writeGiteaRepositoryProvisionReport,
   writeGitApplyReport,
@@ -81,6 +87,8 @@ import {
   writeWorkspaceConfig,
   writeDownloadRunHistory,
   writePublishRunHistory,
+  formatPythonPlanDiff,
+  semanticDigest,
   workspaceSecretsFileName,
   workspaceConfigFileName,
   workspaceLegacyPythonSettings,
@@ -90,6 +98,7 @@ import {
 import type { GiteaClient } from './index.js';
 import type {
   ApplyProgressEvent,
+  ActivePythonApplicationPlan,
   ApplyProgressPhase,
   ApplyBundleReport,
   BundleInfo,
@@ -399,12 +408,14 @@ function collectShouldFail(report: {
   gitSources: { skipped: unknown[] };
   maxIterationsReached: boolean;
   python?: { errors: unknown[] };
+  pythonApplications?: { errors: unknown[] };
   repositoryUpdate: { errors: unknown[] };
 }): boolean {
   return (
     report.repositoryUpdate.errors.length > 0 ||
     report.fetch.errors.length > 0 ||
     (report.python?.errors.length ?? 0) > 0 ||
+    (report.pythonApplications?.errors.length ?? 0) > 0 ||
     report.gitSources.skipped.length > 0 ||
     report.gitFetch.errors.length > 0 ||
     report.gitManifestScanErrors.length > 0 ||
@@ -434,11 +445,12 @@ function formatDownloadSummary(report: CollectReport): string {
   const unsupported = report.fetch.unsupported.length;
   const npmErrors = report.fetch.errors.length;
   const pythonErrors = report.python?.errors.length ?? 0;
+  const pythonApplicationErrors = report.pythonApplications?.errors.length ?? 0;
   const gitErrors =
     report.repositoryUpdate.errors.length +
     report.gitFetch.errors.length +
     report.gitManifestScanErrors.length;
-  const totalErrors = npmErrors + gitErrors + pythonErrors;
+  const totalErrors = npmErrors + gitErrors + pythonErrors + pythonApplicationErrors;
   const status = failed
     ? red(
         `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
@@ -472,6 +484,11 @@ function formatDownloadSummary(report: CollectReport): string {
       ? `Python wheels: ${String(report.python.resolvedFiles)} resolved, ${String(report.python.planned)} planned, ${String(report.python.errors.length)} errors.`
       : `Python wheels: ${String(report.python.resolvedFiles)} resolved (${String(report.python.downloaded)} downloaded, ${String(report.python.skipped)} already on disk), ${String(report.python.errors.length)} errors.`
     : undefined;
+  const pythonApplicationsLine = report.pythonApplications
+    ? report.dryRun
+      ? `Python applications: ${String(report.pythonApplications.applications.length)} planned, ${String(report.pythonApplications.planned)} artifacts / ${String(report.pythonApplications.incrementalBytes)} incremental bytes, ${String(report.pythonApplications.errors.length)} errors.`
+      : `Python applications: ${String(report.pythonApplications.applications.length)} bundled (${String(report.pythonApplications.downloaded)} artifacts downloaded, ${String(report.pythonApplications.reused)} reused from legacy storage, ${String(report.pythonApplications.existing)} already on disk, ${String(report.pythonApplications.totalBytes)} total bytes / ${String(report.pythonApplications.incrementalBytes)} incremental), ${String(report.pythonApplications.errors.length)} errors.`
+    : undefined;
   const reportsWritten = report.dryRun ? 'no' : 'yes';
   const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
@@ -479,6 +496,7 @@ function formatDownloadSummary(report: CollectReport): string {
     npmLine,
     gitLine,
     ...(pythonLine ? [pythonLine] : []),
+    ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
 
@@ -488,6 +506,13 @@ function formatDownloadSummary(report: CollectReport): string {
         const subject = [error.environment, error.name].filter(Boolean).join(' / ');
         return red(`Python error${subject ? ` [${subject}]` : ''}: ${error.reason}`);
       })
+    );
+  }
+  if (report.pythonApplications?.errors.length) {
+    lines.push(
+      ...report.pythonApplications.errors.map((error) =>
+        red(`Python application artifact error [${error.file}]: ${error.error ?? 'unknown error'}`)
+      )
     );
   }
 
@@ -606,6 +631,16 @@ function formatPruneSummary(report: BundlePruneReport): string {
     `Python wheels: ${String(report.pythonPackages.total)} total, ${String(
       report.pythonPackages.stale
     )} stale, ${String(report.pythonPackages.removed)} removed.`,
+    ...(report.pythonApplicationArtifacts
+      ? [
+          `Python application artifacts: ${String(report.pythonApplicationArtifacts.total)} total, ${String(report.pythonApplicationArtifacts.stale)} stale, ${String(report.pythonApplicationArtifacts.removed)} removed.`,
+        ]
+      : []),
+    ...(report.pythonApplicationPlans
+      ? [
+          `Python application plans: ${String(report.pythonApplicationPlans.total)} total, ${String(report.pythonApplicationPlans.stale)} stale, ${String(report.pythonApplicationPlans.removed)} removed.`,
+        ]
+      : []),
     `Git mirrors: ${String(report.gitMirrors.total)} total, ${String(
       report.gitMirrors.stale
     )} stale, ${String(report.gitMirrors.removed)} removed.`,
@@ -1188,10 +1223,12 @@ function formatBundleInfo(info: BundleInfo): string {
     `Source registry: ${info.sourceRegistry}`,
     `Packages: ${String(info.packageCount)} versions, ${String(info.packageNameCount)} names`,
     `Dist-tags: ${String(info.tagCount)}`,
+    `Python applications: ${String(info.pythonApplications.applications.length)}, ${String(info.pythonApplications.artifactCount)} shared artifacts, ${String(info.pythonApplications.artifactBytes)} bytes`,
     `Missing tarballs: ${String(info.missingTarballs.length)}`,
     `Validation: ${info.valid ? 'ok' : `${String(info.validationIssues.length)} issues`}`,
     formatReportStatus('Fetch report', info.fetchReport),
     formatReportStatus('Publish report', info.publishReport),
+    formatReportStatus('Python application fetch report', info.pythonApplications.fetchReport),
   ];
 
   if (info.missingTarballs.length > 0) {
@@ -2656,10 +2693,21 @@ program
           includeUv: config.python?.artifactTransfer?.uv === true,
           ...(recipe ? { recipe } : {}),
         });
+        const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
+        const stored = await writeActivePythonApplicationPlan({
+          evidence: result.evidence,
+          generatedAt: createdAt,
+          plan,
+          targetId,
+          targetIndex: index,
+          workspaceDir,
+        });
         results.push({
+          diff: stored.diff,
           index,
           plan,
           rejectedCandidates: result.rejectedCandidates,
+          targetId,
         });
       }
       if (options.json) {
@@ -2669,7 +2717,7 @@ program
           results
             .map(
               (result) =>
-                `Target ${String(result.index)}\n${formatPythonApplicationPlan(result.plan)}`
+                `Target ${String(result.index)} (${result.targetId})\n${formatPythonApplicationPlan(result.plan)}\n${formatPythonPlanDiff(result.diff)}`
             )
             .join('\n\n')
         );
@@ -3122,6 +3170,38 @@ program
         const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
         const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
         const pythonRuntimes = createWorkspacePythonRuntimeArtifacts(activeConfig);
+        const pythonApplicationPlans: {
+          activePlan: ActivePythonApplicationPlan;
+          targetId: string;
+        }[] = [];
+        for (const target of activeConfig.targets) {
+          if (target.type !== 'python-app') {
+            continue;
+          }
+          const resolvedApplication = resolveWorkspacePythonApplication(activeConfig, target);
+          const targetId = pythonApplicationTargetId(
+            resolvedApplication.intent.application.name,
+            resolvedApplication.coveragePolicy.id
+          );
+          let activePlan: ActivePythonApplicationPlan;
+          try {
+            activePlan = await readActivePythonApplicationPlan(workspaceDir, targetId);
+          } catch (error) {
+            throw new Error(
+              `Python application ${targetId} has no usable active plan; run airgap-sync plan first: ${(error as Error).message}`
+            );
+          }
+          if (
+            semanticDigest(activePlan.plan.intent) !== semanticDigest(resolvedApplication.intent) ||
+            activePlan.plan.coverage.digest !==
+              platformCoveragePolicyDigest(resolvedApplication.coveragePolicy)
+          ) {
+            throw new Error(
+              `Python application ${targetId} configuration changed after planning; run airgap-sync plan --update ${target.spec}`
+            );
+          }
+          pythonApplicationPlans.push({ activePlan, targetId });
+        }
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
@@ -3181,6 +3261,18 @@ program
           registry,
           registryUrl,
         });
+        if (pythonApplicationPlans.length > 0) {
+          report.pythonApplications = await downloadPythonApplicationPlans({
+            bundleDir: outputDir,
+            dryRun: options.dryRun === true,
+            generatedAt: report.generatedAt,
+            partial: targetSelection !== undefined,
+            targets: pythonApplicationPlans,
+          });
+          if (options.dryRun !== true) {
+            await writeCollectReport(outputDir, report);
+          }
+        }
         const workspaceSnapshot = createWorkspaceSnapshot({
           config: {
             ...activeConfig,

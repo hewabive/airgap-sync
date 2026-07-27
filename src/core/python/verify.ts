@@ -18,9 +18,11 @@ function check(
 
 function safeBundleFile(bundleDir: string, relativeFile: string): string | undefined {
   const normalized = path.posix.normalize(relativeFile.replace(/\\/g, '/'));
+  const isLegacyFile = normalized.startsWith('python-packages/');
+  const v2Match = /^python\/artifacts\/wheels\/([a-f0-9]{64})\/([^/]+\.whl)$/u.exec(normalized);
   if (
     normalized !== relativeFile ||
-    !normalized.startsWith('python-packages/') ||
+    (!isLegacyFile && !v2Match) ||
     path.posix.isAbsolute(normalized) ||
     normalized.includes('\0')
   ) {
@@ -64,6 +66,13 @@ export async function verifyPythonBundle(options: {
       if (!filePath || path.posix.basename(file.file) !== file.filename) {
         issues.push({ error: 'Unsafe or inconsistent Python bundle file path', file: file.file });
         continue;
+      }
+      const v2Digest = /^python\/artifacts\/wheels\/([a-f0-9]{64})\//u.exec(file.file)?.[1];
+      if (v2Digest && v2Digest !== file.sha256.toLowerCase()) {
+        issues.push({
+          error: 'Python v2 artifact directory does not match its sha256',
+          file: file.file,
+        });
       }
       if (!(await fs.pathExists(filePath))) {
         missing.push(file.file);
@@ -128,11 +137,13 @@ export async function verifyPythonBundle(options: {
   ];
 
   const coverage = options.manifest.packages.flatMap((pkg) =>
-    options.manifest.targetEnvironments.flatMap((environment) =>
-      pkg.files.some((file) => file.environments.includes(environment.name))
-        ? []
-        : [{ environment: environment.name, package: `${pkg.name}@${pkg.version}` }]
-    )
+    pkg.files.some((file) => file.file.startsWith('python/artifacts/wheels/'))
+      ? []
+      : options.manifest.targetEnvironments.flatMap((environment) =>
+          pkg.files.some((file) => file.environments.includes(environment.name))
+            ? []
+            : [{ environment: environment.name, package: `${pkg.name}@${pkg.version}` }]
+        )
   );
   checks.push(
     coverage.length === 0

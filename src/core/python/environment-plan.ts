@@ -23,6 +23,7 @@ export interface PythonLockedPackagePlan {
 export interface PythonPlatformPlan {
   packages: PythonLockedPackagePlan[];
   platformFamilyId: string;
+  pylockPath?: string;
   pythonMinor: string;
   rejectedReasons: string[];
   requirementsLockPath?: string;

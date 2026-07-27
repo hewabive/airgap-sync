@@ -10,11 +10,21 @@ import type {
   RangeResolutionPolicy,
 } from '../types.js';
 import * as fs from './fs.js';
+import {
+  readPythonApplicationBundleIndex,
+  type PythonApplicationBundleIndex,
+} from './python/application-bundle.js';
+import { pythonApplicationIndexPath } from './python/application-paths.js';
 
 export interface BundleStateSnapshot {
   distTags?: DistTagsManifest;
   manifest?: BundleManifest;
   packageFiles: Set<string>;
+  pythonApplicationDocuments: {
+    content: string;
+    file: string;
+  }[];
+  pythonApplicationIndex?: PythonApplicationBundleIndex;
 }
 
 export interface WriteDownloadRunHistoryOptions {
@@ -113,6 +123,44 @@ async function readPackageFiles(bundleDir: string): Promise<Set<string>> {
     }
     throw error;
   }
+}
+
+function pythonApplicationDocumentPaths(index: PythonApplicationBundleIndex): string[] {
+  const files = new Set<string>();
+  for (const application of index.applications) {
+    const expectedDirectory = `python/applications/${application.targetId}/`;
+    for (const file of [
+      application.planPath,
+      application.planDiffPath,
+      application.prerequisiteReportPath,
+      ...application.locks.map((lock) => lock.file),
+    ]) {
+      if (
+        path.posix.isAbsolute(file) ||
+        file.includes('\\') ||
+        file.split('/').includes('..') ||
+        !file.startsWith(expectedDirectory)
+      ) {
+        throw new Error(`Unsafe Python application history path: ${file}`);
+      }
+      files.add(file);
+    }
+  }
+  return [...files].sort();
+}
+
+async function readPythonApplicationDocuments(
+  bundleDir: string,
+  index: PythonApplicationBundleIndex | undefined
+): Promise<BundleStateSnapshot['pythonApplicationDocuments']> {
+  const documents: BundleStateSnapshot['pythonApplicationDocuments'] = [];
+  for (const file of index ? pythonApplicationDocumentPaths(index) : []) {
+    const filePath = path.join(bundleDir, file);
+    if (await fs.pathExists(filePath)) {
+      documents.push({ content: await fs.readFile(filePath, 'utf8'), file });
+    }
+  }
+  return documents;
 }
 
 function packageId(name: string, version: string): string {
@@ -317,16 +365,23 @@ function createResolutionChanges(
 }
 
 export async function captureBundleState(bundleDir: string): Promise<BundleStateSnapshot> {
-  const [manifest, distTags, packageFiles] = await Promise.all([
+  const [manifest, distTags, packageFiles, pythonApplicationIndex] = await Promise.all([
     readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
     readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
     readPackageFiles(bundleDir),
+    readPythonApplicationBundleIndex(bundleDir),
   ]);
+  const pythonApplicationDocuments = await readPythonApplicationDocuments(
+    bundleDir,
+    pythonApplicationIndex
+  );
 
   return {
     ...(distTags ? { distTags } : {}),
     ...(manifest ? { manifest } : {}),
     packageFiles,
+    pythonApplicationDocuments,
+    ...(pythonApplicationIndex ? { pythonApplicationIndex } : {}),
   };
 }
 
@@ -369,6 +424,21 @@ export async function writeDownloadRunHistory(
       spaces: 2,
     });
   }
+  if (options.before.pythonApplicationIndex) {
+    await fs.writeJson(
+      path.join(targetDir, 'python-application-index.before.json'),
+      options.before.pythonApplicationIndex,
+      { spaces: 2 }
+    );
+  }
+  await Promise.all(
+    options.before.pythonApplicationDocuments.map((document) =>
+      fs.writeFileAtomic(
+        path.join(targetDir, 'python-applications.before', document.file),
+        document.content
+      )
+    )
+  );
   if (options.workspaceSnapshot) {
     await fs.writeJson(path.join(targetDir, 'workspace-snapshot.json'), options.workspaceSnapshot, {
       spaces: 2,
@@ -404,6 +474,14 @@ export async function writeDownloadRunHistory(
       path.join(options.bundleDir, 'python-fetch-report.json'),
       path.join(targetDir, 'python-fetch-report.json')
     ),
+    copyIfExists(
+      path.join(options.bundleDir, pythonApplicationIndexPath),
+      path.join(targetDir, 'python-application-index.after.json')
+    ),
+    copyIfExists(
+      path.join(options.bundleDir, 'python-application-fetch-report.json'),
+      path.join(targetDir, 'python-application-fetch-report.json')
+    ),
   ];
 
   if (options.pruneReport) {
@@ -416,6 +494,18 @@ export async function writeDownloadRunHistory(
   }
 
   await Promise.all(reportCopies);
+  const afterPythonApplicationIndex = await readPythonApplicationBundleIndex(options.bundleDir);
+  await Promise.all(
+    (afterPythonApplicationIndex
+      ? pythonApplicationDocumentPaths(afterPythonApplicationIndex)
+      : []
+    ).map((file) =>
+      copyIfExists(
+        path.join(options.bundleDir, file),
+        path.join(targetDir, 'python-applications.after', file)
+      )
+    )
+  );
   await fs.writeJson(path.join(targetDir, 'package-changes.json'), packageChanges, { spaces: 2 });
   await fs.writeJson(path.join(targetDir, 'resolution-changes.json'), changes, { spaces: 2 });
 

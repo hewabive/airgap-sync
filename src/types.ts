@@ -1,4 +1,5 @@
 import type { PythonFetchReport } from './core/python/bundle.js';
+import type { PythonApplicationDownloadReport } from './core/python/application-bundle.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
 import type { PythonResolutionMode } from './core/python/resolution-policy.js';
 
@@ -124,6 +125,7 @@ export interface CollectReport {
   maxIterationsReached: boolean;
   outputDir: string;
   python?: PythonFetchReport;
+  pythonApplications?: PythonApplicationDownloadReport;
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
   root: string;
@@ -468,7 +470,12 @@ export interface ApplyBundleReport {
   succeeded: boolean;
 }
 
-export type BundlePruneObjectType = 'git-mirror' | 'npm-package' | 'python-package';
+export type BundlePruneObjectType =
+  | 'git-mirror'
+  | 'npm-package'
+  | 'python-application-artifact'
+  | 'python-application-plan'
+  | 'python-package';
 export type BundlePruneActionStatus = 'planned' | 'removed' | 'error';
 
 export interface BundlePruneActionResult {
@@ -493,6 +500,8 @@ export interface BundlePruneReport {
   generatedAt: string;
   gitMirrors: BundlePruneObjectSummary;
   npmPackages: BundlePruneObjectSummary;
+  pythonApplicationArtifacts?: BundlePruneObjectSummary;
+  pythonApplicationPlans?: BundlePruneObjectSummary;
   pythonPackages: BundlePruneObjectSummary;
   planned: number;
   removed: number;

@@ -26,11 +26,28 @@ export { HttpPythonIndexClient } from './core/python/index-client.js';
 export { publishPythonBundle } from './core/python/publisher.js';
 export { canonicalizeJson, canonicalJson, semanticDigest } from './core/canonical-json.js';
 export {
+  pythonApplicationIndexPath,
   pythonApplicationPlanDirectory,
   pythonApplicationPlanPath,
   pythonApplicationTargetId,
   pythonApplicationsDirectory,
+  pythonOptionalArtifactsDirectory,
+  pythonPlatformLockBase,
+  pythonPlatformPylockPath,
+  pythonPlatformRequirementsLockPath,
+  pythonWheelArtifactsDirectory,
 } from './core/python/application-paths.js';
+export {
+  activePythonApplicationPlanDirectory,
+  readActivePythonApplicationPlan,
+  writeActivePythonApplicationPlan,
+} from './core/python/active-plan-store.js';
+export {
+  downloadPythonApplicationPlans,
+  readPythonApplicationBundleIndex,
+  verifyPythonApplicationBundle,
+} from './core/python/application-bundle.js';
+export { comparePythonEnvironmentPlans, formatPythonPlanDiff } from './core/python/plan-diff.js';
 export {
   createPythonEnvironmentPlan,
   pythonEnvironmentPlanId,
@@ -361,6 +378,26 @@ export type {
   PythonPlatformPlan,
   PythonRuntimeContract,
 } from './core/python/environment-plan.js';
+export type {
+  ActivePythonApplicationPlan,
+  StoredPythonApplicationPlanManifest,
+  StoredPythonPlanEvidence,
+  WriteActivePythonApplicationPlanOptions,
+} from './core/python/active-plan-store.js';
+export type {
+  DownloadPythonApplicationPlansOptions,
+  PythonApplicationArtifactKind,
+  PythonApplicationArtifactReference,
+  PythonApplicationBundleArtifact,
+  PythonApplicationBundleBranchSize,
+  PythonApplicationBundleEntry,
+  PythonApplicationBundleIndex,
+  PythonApplicationDownloadAction,
+  PythonApplicationDownloadReport,
+  PythonApplicationDownloadStatus,
+  VerifyPythonApplicationBundleResult,
+} from './core/python/application-bundle.js';
+export type { PythonPlanDiffReport } from './core/python/plan-diff.js';
 
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
 export type {

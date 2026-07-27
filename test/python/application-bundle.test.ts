@@ -1,0 +1,373 @@
+import { createHash } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { semanticDigest } from '../../src/core/canonical-json.js';
+import * as fs from '../../src/core/fs.js';
+import type { ActivePythonApplicationPlan } from '../../src/core/python/active-plan-store.js';
+import {
+  downloadPythonApplicationPlans,
+  readPythonApplicationBundleIndex,
+  verifyPythonApplicationBundle,
+} from '../../src/core/python/application-bundle.js';
+import { pythonApplicationTargetId } from '../../src/core/python/application-paths.js';
+import { normalizePlatformCoveragePolicy } from '../../src/core/python/coverage-policy.js';
+import {
+  createPythonEnvironmentPlan,
+  type PythonEnvironmentPlan,
+} from '../../src/core/python/environment-plan.js';
+import { comparePythonEnvironmentPlans } from '../../src/core/python/plan-diff.js';
+import type { PythonSeedManifest } from '../../src/core/python/bundle.js';
+
+let tempDir: string;
+
+function createPlan(options: {
+  application: string;
+  filename: string;
+  sha256: string;
+  size: number;
+  sourceUrl: string;
+  version?: string;
+  wheelVersion?: string;
+}): PythonEnvironmentPlan {
+  const policy = normalizePlatformCoveragePolicy({
+    id: 'linux-x64',
+    platforms: ['linux-glibc-x86_64'],
+  });
+  return createPythonEnvironmentPlan({
+    application: {
+      name: options.application,
+      version: options.version ?? '1.0.0',
+    },
+    coverage: {
+      digest: 'a'.repeat(64),
+      families: [],
+      policy,
+    },
+    createdAt: '2026-07-27T00:00:00.000Z',
+    intent: {
+      application: {
+        extras: [],
+        features: {},
+        name: options.application,
+      },
+      coverage: { policyId: policy.id },
+      python: { policy: 'auto' },
+      source: { type: 'pypi' },
+      updatePolicy: 'manual',
+    },
+    platforms: [
+      {
+        packages: [
+          {
+            dependencies: [],
+            name: 'shared',
+            version: options.wheelVersion ?? '1.0.0',
+            wheels: [options.filename],
+          },
+        ],
+        platformFamilyId: 'linux-glibc-x86_64',
+        pylockPath: 'lock/linux-glibc-x86_64--py311.pylock.toml',
+        pythonMinor: '3.11',
+        rejectedReasons: [],
+        requirementsLockPath: 'lock/linux-glibc-x86_64--py311.requirements.lock',
+        requiresPython: '>=3.11,<3.12',
+        status: 'supported',
+      },
+    ],
+    resolver: {
+      engine: 'uv',
+      policyVersion: 1,
+      version: '0.11.16',
+    },
+    runtimeContract: {
+      platforms: [
+        {
+          implementation: 'CPython',
+          platformFamilyId: 'linux-glibc-x86_64',
+          provisionedExternally: true,
+          pythonMinor: '3.11',
+          requiresPython: '>=3.11,<3.12',
+          systemPrerequisites: [],
+        },
+      ],
+    },
+    schemaVersion: 1,
+    wheels: [
+      {
+        filename: options.filename,
+        package: 'shared',
+        platforms: ['linux-glibc-x86_64'],
+        sha256: options.sha256,
+        size: options.size,
+        url: options.sourceUrl,
+        version: options.wheelVersion ?? '1.0.0',
+      },
+    ],
+  });
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function wheelBuffer(version: string): Buffer {
+  const filename = Buffer.from(`shared-${version}.dist-info/METADATA`);
+  const content = Buffer.from(
+    `Metadata-Version: 2.3\nName: shared\nVersion: ${version}\nRequires-Python: >=3.11\n\n`
+  );
+  const checksum = crc32(content);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt32LE(checksum, 14);
+  local.writeUInt32LE(content.byteLength, 18);
+  local.writeUInt32LE(content.byteLength, 22);
+  local.writeUInt16LE(filename.byteLength, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt32LE(checksum, 16);
+  central.writeUInt32LE(content.byteLength, 20);
+  central.writeUInt32LE(content.byteLength, 24);
+  central.writeUInt16LE(filename.byteLength, 28);
+  const localRecord = Buffer.concat([local, filename, content]);
+  const centralRecord = Buffer.concat([central, filename]);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(centralRecord.byteLength, 12);
+  end.writeUInt32LE(localRecord.byteLength, 16);
+  return Buffer.concat([localRecord, centralRecord, end]);
+}
+
+function activePlan(plan: PythonEnvironmentPlan): ActivePythonApplicationPlan {
+  const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
+  const content = [
+    'lock-version = "1.0"',
+    'created-by = "uv 0.11.16"',
+    '',
+    '[[packages]]',
+    'name = "shared"',
+    'version = "1.0.0"',
+    'wheels = []',
+    '',
+  ].join('\n');
+  const digest = semanticDigest(content);
+  return {
+    diff: comparePythonEnvironmentPlans(undefined, plan, '2026-07-27T00:00:00.000Z'),
+    evidence: [
+      {
+        platformFamilyId: 'linux-glibc-x86_64',
+        pylock: {
+          content,
+          digest,
+          lock: {
+            createdBy: 'uv 0.11.16',
+            defaultGroups: [],
+            dependencyGroups: [],
+            environments: [],
+            extras: [],
+            format: 'pylock',
+            packages: [],
+            sourcePath: 'fixture',
+            version: '1.0',
+          },
+          platformTarget: 'x86_64-manylinux_2_17',
+        },
+        pythonMinor: '3.11',
+      },
+    ],
+    manifest: {
+      diffPath: 'plan-diff.json',
+      evidence: [
+        {
+          digest,
+          path: 'lock/linux-glibc-x86_64--py311.pylock.toml',
+          platformFamilyId: 'linux-glibc-x86_64',
+          platformTarget: 'x86_64-manylinux_2_17',
+          pythonMinor: '3.11',
+        },
+      ],
+      planId: plan.planId,
+      planPath: 'environment-plan.json',
+      schemaVersion: 1,
+      targetId,
+      targetIndex: 1,
+    },
+    plan,
+  };
+}
+
+describe('Python application bundle', () => {
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-python-app-bundle-'));
+  });
+
+  afterEach(async () => {
+    await fs.remove(tempDir);
+  });
+
+  it('deduplicates shared wheels while retaining independent plans and locks', async () => {
+    const content = wheelBuffer('1.0.0');
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    const source = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    await fs.writeFile(source, content);
+    const bundleDir = path.join(tempDir, 'bundle');
+    const sourceUrl = pathToFileURL(source).toString();
+    const first = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(source),
+        sha256,
+        size: content.byteLength,
+        sourceUrl,
+      })
+    );
+    const second = activePlan(
+      createPlan({
+        application: 'second-app',
+        filename: path.basename(source),
+        sha256,
+        size: content.byteLength,
+        sourceUrl,
+      })
+    );
+
+    const report = await downloadPythonApplicationPlans({
+      bundleDir,
+      generatedAt: '2026-07-27T00:00:00.000Z',
+      targets: [
+        { activePlan: first, targetId: first.manifest.targetId },
+        { activePlan: second, targetId: second.manifest.targetId },
+      ],
+    });
+
+    expect(report).toMatchObject({
+      downloaded: 1,
+      errors: [],
+      incrementalBytes: content.byteLength,
+      totalBytes: content.byteLength,
+    });
+    const index = await readPythonApplicationBundleIndex(bundleDir);
+    expect(index).toMatchObject({
+      summary: {
+        applications: 2,
+        artifacts: 1,
+        totalBytes: content.byteLength,
+      },
+    });
+    expect(index?.artifacts[0]?.references).toHaveLength(2);
+    expect(index?.applications.map((application) => application.locks[0]?.file)).toEqual([
+      expect.stringContaining('first-app--linux-x64/lock/'),
+      expect.stringContaining('second-app--linux-x64/lock/'),
+    ]);
+    const compatibilityManifest = await fs.readJson<PythonSeedManifest>(
+      path.join(bundleDir, 'python-seed-manifest.json')
+    );
+    expect(compatibilityManifest).toMatchObject({
+      packages: [
+        {
+          files: [
+            {
+              coreMetadata: {
+                name: 'shared',
+                version: '1.0.0',
+              },
+            },
+          ],
+          name: 'shared',
+          version: '1.0.0',
+        },
+      ],
+    });
+    expect(compatibilityManifest.packages[0]?.files[0]?.file).toContain('python/artifacts/wheels/');
+    expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
+
+    const repeated = await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [
+        { activePlan: first, targetId: first.manifest.targetId },
+        { activePlan: second, targetId: second.manifest.targetId },
+      ],
+    });
+    expect(repeated).toMatchObject({
+      downloaded: 0,
+      existing: 1,
+      incrementalBytes: 0,
+    });
+  });
+
+  it('preserves unselected references during a partial target update', async () => {
+    const oldContent = wheelBuffer('1.0.0');
+    const oldSha = createHash('sha256').update(oldContent).digest('hex');
+    const oldSource = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    await fs.writeFile(oldSource, oldContent);
+    const bundleDir = path.join(tempDir, 'bundle');
+    const first = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(oldSource),
+        sha256: oldSha,
+        size: oldContent.byteLength,
+        sourceUrl: pathToFileURL(oldSource).toString(),
+      })
+    );
+    const second = activePlan(
+      createPlan({
+        application: 'second-app',
+        filename: path.basename(oldSource),
+        sha256: oldSha,
+        size: oldContent.byteLength,
+        sourceUrl: pathToFileURL(oldSource).toString(),
+      })
+    );
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [
+        { activePlan: first, targetId: first.manifest.targetId },
+        { activePlan: second, targetId: second.manifest.targetId },
+      ],
+    });
+
+    const newContent = wheelBuffer('2.0.0');
+    const newSha = createHash('sha256').update(newContent).digest('hex');
+    const newSource = path.join(tempDir, 'shared-2.0.0-py3-none-any.whl');
+    await fs.writeFile(newSource, newContent);
+    const updatedFirst = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(newSource),
+        sha256: newSha,
+        size: newContent.byteLength,
+        sourceUrl: pathToFileURL(newSource).toString(),
+        version: '2.0.0',
+        wheelVersion: '2.0.0',
+      })
+    );
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      partial: true,
+      targets: [{ activePlan: updatedFirst, targetId: updatedFirst.manifest.targetId }],
+    });
+
+    const index = await readPythonApplicationBundleIndex(bundleDir);
+    expect(index?.applications).toHaveLength(2);
+    expect(index?.artifacts).toHaveLength(2);
+    expect(index?.artifacts.find((artifact) => artifact.sha256 === oldSha)?.references).toEqual([
+      expect.objectContaining({
+        targetId: second.manifest.targetId,
+      }),
+    ]);
+  });
+});

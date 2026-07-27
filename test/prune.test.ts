@@ -228,6 +228,78 @@ describe('pruneBundle', () => {
     ).resolves.toBe(false);
   });
 
+  it('keeps artifacts referenced by any active Python application plan', async () => {
+    await writeBundleFiles();
+    const keptArtifact =
+      'python/artifacts/wheels/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/shared.whl';
+    const staleArtifact =
+      'python/artifacts/wheels/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/stale.whl';
+    await fs.ensureDir(path.join(bundleDir, path.dirname(keptArtifact)));
+    await fs.ensureDir(path.join(bundleDir, path.dirname(staleArtifact)));
+    await fs.writeFile(path.join(bundleDir, keptArtifact), 'kept');
+    await fs.writeFile(path.join(bundleDir, staleArtifact), 'stale');
+    await fs.ensureDir(path.join(bundleDir, 'python/applications/kept--linux'));
+    await fs.ensureDir(path.join(bundleDir, 'python/applications/stale--linux'));
+    await fs.writeJson(
+      path.join(bundleDir, 'python/application-index.json'),
+      {
+        applications: [
+          {
+            application: { name: 'kept', version: '1.0.0' },
+            artifactIds: ['a'.repeat(64) + ':shared.whl'],
+            branchSizes: [],
+            locks: [],
+            planDiffPath: 'python/applications/kept--linux/plan-diff.json',
+            planId: 'c'.repeat(64),
+            planPath: 'python/applications/kept--linux/environment-plan.json',
+            prerequisiteReportPath: 'python/applications/kept--linux/prerequisites.json',
+            targetId: 'kept--linux',
+          },
+        ],
+        artifacts: [
+          {
+            file: keptArtifact,
+            filename: 'shared.whl',
+            id: 'a'.repeat(64) + ':shared.whl',
+            kind: 'wheel',
+            references: [{ platforms: ['linux-glibc-x86_64'], targetId: 'kept--linux' }],
+            sha256: 'a'.repeat(64),
+            size: 4,
+            sourceUrl: 'https://example.test/shared.whl',
+            version: '1.0.0',
+          },
+        ],
+        createdAt: generatedAt,
+        schemaVersion: 1,
+        summary: { applications: 1, artifacts: 1, totalBytes: 4 },
+      },
+      { spaces: 2 }
+    );
+
+    const report = await pruneBundle({ bundleDir });
+
+    expect(report.pythonApplicationArtifacts).toEqual({
+      kept: 1,
+      removed: 1,
+      stale: 1,
+      total: 2,
+    });
+    expect(report.pythonApplicationPlans).toEqual({
+      kept: 1,
+      removed: 1,
+      stale: 1,
+      total: 2,
+    });
+    await expect(fs.pathExists(path.join(bundleDir, keptArtifact))).resolves.toBe(true);
+    await expect(fs.pathExists(path.join(bundleDir, staleArtifact))).resolves.toBe(false);
+    await expect(
+      fs.pathExists(path.join(bundleDir, 'python/applications/kept--linux'))
+    ).resolves.toBe(true);
+    await expect(
+      fs.pathExists(path.join(bundleDir, 'python/applications/stale--linux'))
+    ).resolves.toBe(false);
+  });
+
   it('refuses to prune after an incomplete download', async () => {
     await writeBundleFiles(collectReport({ fixedPoint: false, wroteBundle: false }));
 

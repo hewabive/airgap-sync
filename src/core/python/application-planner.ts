@@ -17,6 +17,10 @@ import { parseWheelFilename, type WheelFilename } from './wheels.js';
 import type { PythonApplicationResolver, UvResolutionEvidence } from './uv-adapter.js';
 import { UvResolutionError } from './uv-adapter.js';
 import { uvToolManifest } from './uv-tool.js';
+import {
+  pythonPlatformPylockPath,
+  pythonPlatformRequirementsLockPath,
+} from './application-paths.js';
 
 export interface PythonPlannerPolicy {
   glibcBaselines: string[];
@@ -549,8 +553,13 @@ export async function planPythonApplication(
       platforms: resolved.branches.map((branch) => ({
         packages: branch.artifacts.packages,
         platformFamilyId: branch.platformFamilyId,
+        pylockPath: pythonPlatformPylockPath(branch.platformFamilyId, candidate.pythonMinor),
         pythonMinor: candidate.pythonMinor,
         rejectedReasons: [],
+        requirementsLockPath: pythonPlatformRequirementsLockPath(
+          branch.platformFamilyId,
+          candidate.pythonMinor
+        ),
         requiresPython: `>=${candidate.pythonMinor},<3.${String(Number(candidate.pythonMinor.split('.')[1]) + 1)}`,
         status: 'supported',
         ...(branch.artifacts.supportBoundary

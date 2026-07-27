@@ -28,3 +28,14 @@ retaining any host inventory:
 ```text
 airgap-sync probe --compare environment-plan.json --facts probe-facts.json
 ```
+
+Application planning writes an active immutable plan under
+`.airgap-sync/python-plans/`. `download` consumes that exact plan and writes the v2
+bundle index at `python/application-index.json`. Wheels use content-addressed paths
+under `python/artifacts/wheels/<sha256>/`; application plans and raw per-platform
+`pylock.toml` evidence remain separate under `python/applications/<target-id>/`.
+
+The generated `python-seed-manifest.json` also references v2 wheel paths so the
+existing Gitea PyPI publisher can publish the shared artifacts during migration.
+Partial downloads preserve references owned by unselected applications, and prune
+removes an artifact only after no active application plan references it.

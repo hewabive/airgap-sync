@@ -2,6 +2,9 @@ import path from 'node:path';
 import { normalizePackageName } from './names.js';
 
 export const pythonApplicationsDirectory = 'python/applications';
+export const pythonApplicationIndexPath = 'python/application-index.json';
+export const pythonWheelArtifactsDirectory = 'python/artifacts/wheels';
+export const pythonOptionalArtifactsDirectory = 'python/artifacts/optional';
 
 export function pythonApplicationTargetId(
   applicationName: string,
@@ -28,4 +31,31 @@ export function pythonApplicationPlanDirectory(targetId: string): string {
 
 export function pythonApplicationPlanPath(targetId: string): string {
   return path.posix.join(pythonApplicationPlanDirectory(targetId), 'environment-plan.json');
+}
+
+export function pythonPlatformLockBase(platformFamilyId: string, pythonMinor: string): string {
+  if (!/^[a-z0-9][a-z0-9._-]*$/u.test(platformFamilyId)) {
+    throw new Error(`Invalid Python platform family id: ${platformFamilyId}`);
+  }
+  if (!/^3\.\d+$/u.test(pythonMinor)) {
+    throw new Error(`Invalid Python minor: ${pythonMinor}`);
+  }
+  return `${platformFamilyId}--py${pythonMinor.replace('.', '')}`;
+}
+
+export function pythonPlatformPylockPath(platformFamilyId: string, pythonMinor: string): string {
+  return path.posix.join(
+    'lock',
+    `${pythonPlatformLockBase(platformFamilyId, pythonMinor)}.pylock.toml`
+  );
+}
+
+export function pythonPlatformRequirementsLockPath(
+  platformFamilyId: string,
+  pythonMinor: string
+): string {
+  return path.posix.join(
+    'lock',
+    `${pythonPlatformLockBase(platformFamilyId, pythonMinor)}.requirements.lock`
+  );
 }

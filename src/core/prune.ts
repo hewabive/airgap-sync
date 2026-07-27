@@ -10,6 +10,14 @@ import type {
   GitSourcesManifest,
 } from '../types.js';
 import { readPythonSeedManifest } from './python/bundle.js';
+import {
+  readPythonApplicationBundleIndex,
+  type PythonApplicationBundleIndex,
+} from './python/application-bundle.js';
+import {
+  pythonApplicationPlanDirectory,
+  pythonApplicationsDirectory,
+} from './python/application-paths.js';
 
 export interface PruneBundleOptions {
   bundleDir: string;
@@ -34,6 +42,7 @@ function successfulCollectReport(report: CollectReport): boolean {
     report.repositoryUpdate.errors.length === 0 &&
     report.fetch.errors.length === 0 &&
     (report.python?.errors.length ?? 0) === 0 &&
+    (report.pythonApplications?.errors.length ?? 0) === 0 &&
     report.gitSources.skipped.length === 0 &&
     report.gitFetch.errors.length === 0 &&
     report.gitManifestScanErrors.length === 0
@@ -79,6 +88,52 @@ async function listPythonPackageFiles(bundleDir: string): Promise<string[]> {
     return entries
       .filter((entry) => entry.isFile() && entry.name.endsWith('.whl'))
       .map((entry) => path.posix.join('python-packages', entry.name))
+      .sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function listFilesRecursively(
+  bundleDir: string,
+  relativeDirectory: string
+): Promise<string[]> {
+  const files: string[] = [];
+  async function walk(directory: string): Promise<void> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.readdir(path.join(bundleDir, directory), { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+    for (const entry of entries) {
+      const relativePath = path.posix.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(relativePath);
+      } else if (entry.isFile()) {
+        files.push(relativePath);
+      }
+    }
+  }
+  await walk(relativeDirectory);
+  return files.sort();
+}
+
+async function listPythonApplicationPlanDirectories(bundleDir: string): Promise<string[]> {
+  try {
+    return (
+      await fs.readdir(path.join(bundleDir, pythonApplicationsDirectory), {
+        withFileTypes: true,
+      })
+    )
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.posix.join(pythonApplicationsDirectory, entry.name))
       .sort();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -187,6 +242,12 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
         );
       })
     : undefined;
+  let pythonApplicationIndex: PythonApplicationBundleIndex | undefined;
+  try {
+    pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
+  } catch (error) {
+    throw new Error(`python/application-index.json is unreadable: ${(error as Error).message}`);
+  }
 
   if (!successfulCollectReport(collectReport)) {
     throw new Error('Refusing to prune: the last download did not complete successfully');
@@ -202,6 +263,12 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   );
   const packageFiles = await listPackageFiles(bundleDir);
   const pythonPackageFiles = pythonManifest ? await listPythonPackageFiles(bundleDir) : [];
+  const pythonApplicationArtifactFiles = pythonApplicationIndex
+    ? await listFilesRecursively(bundleDir, 'python/artifacts')
+    : [];
+  const pythonApplicationPlanDirectories = pythonApplicationIndex
+    ? await listPythonApplicationPlanDirectories(bundleDir)
+    : [];
   const gitMirrors = await listGitMirrorDirs(bundleDir);
   const stalePackageFiles = packageFiles.filter((file) => !livePackageFiles.has(file));
   const livePythonPackageFiles = new Set(
@@ -211,6 +278,22 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   );
   const stalePythonPackageFiles = pythonPackageFiles.filter(
     (file) => !livePythonPackageFiles.has(file)
+  );
+  const livePythonApplicationArtifacts = new Set(
+    pythonApplicationIndex?.artifacts.map((artifact) =>
+      ensureRelativePath(artifact.file, 'Python application artifact file')
+    ) ?? []
+  );
+  const stalePythonApplicationArtifacts = pythonApplicationArtifactFiles.filter(
+    (file) => !livePythonApplicationArtifacts.has(file)
+  );
+  const livePythonApplicationPlans = new Set(
+    pythonApplicationIndex?.applications.map((application) =>
+      pythonApplicationPlanDirectory(application.targetId)
+    ) ?? []
+  );
+  const stalePythonApplicationPlans = pythonApplicationPlanDirectories.filter(
+    (directory) => !livePythonApplicationPlans.has(directory)
   );
   const staleGitMirrors = gitMirrors.filter((mirror) => !liveGitMirrors.has(mirror));
   const actions: BundlePruneActionResult[] = [];
@@ -263,6 +346,40 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     }
   }
 
+  for (const staleArtifact of stalePythonApplicationArtifacts) {
+    try {
+      actions.push(
+        await removeStaleObject(bundleDir, 'python-application-artifact', staleArtifact, dryRun)
+      );
+    } catch (error) {
+      const action: BundlePruneActionResult = {
+        error: (error as Error).message,
+        path: staleArtifact,
+        status: 'error',
+        type: 'python-application-artifact',
+      };
+      actions.push(action);
+      errors.push(action);
+    }
+  }
+
+  for (const stalePlan of stalePythonApplicationPlans) {
+    try {
+      actions.push(
+        await removeStaleObject(bundleDir, 'python-application-plan', stalePlan, dryRun)
+      );
+    } catch (error) {
+      const action: BundlePruneActionResult = {
+        error: (error as Error).message,
+        path: stalePlan,
+        status: 'error',
+        type: 'python-application-plan',
+      };
+      actions.push(action);
+      errors.push(action);
+    }
+  }
+
   return {
     actions,
     bundleDir,
@@ -282,6 +399,22 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
       dryRun
         ? 0
         : stalePackageFiles.length - errors.filter((error) => error.type === 'npm-package').length
+    ),
+    pythonApplicationArtifacts: summary(
+      pythonApplicationArtifactFiles.length,
+      stalePythonApplicationArtifacts.length,
+      dryRun
+        ? 0
+        : stalePythonApplicationArtifacts.length -
+            errors.filter((error) => error.type === 'python-application-artifact').length
+    ),
+    pythonApplicationPlans: summary(
+      pythonApplicationPlanDirectories.length,
+      stalePythonApplicationPlans.length,
+      dryRun
+        ? 0
+        : stalePythonApplicationPlans.length -
+            errors.filter((error) => error.type === 'python-application-plan').length
     ),
     pythonPackages: summary(
       pythonPackageFiles.length,

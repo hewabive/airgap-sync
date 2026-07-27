@@ -3,6 +3,10 @@ import * as fs from './fs.js';
 import type { BundleManifest, DistTagsManifest, FetchReport, PublishReport } from '../types.js';
 import { readBundleManifest, readDistTagsManifest } from './bundle.js';
 import { validateBundle, type BundleValidationIssue } from './validation.js';
+import {
+  readPythonApplicationBundleIndex,
+  type PythonApplicationDownloadReport,
+} from './python/application-bundle.js';
 
 export interface BundleInfoPackage {
   file: string;
@@ -31,6 +35,17 @@ export interface BundleInfo {
   packageCount: number;
   packageNameCount: number;
   packages: BundleInfoPackage[];
+  pythonApplications: {
+    applications: {
+      name: string;
+      planId: string;
+      targetId: string;
+      version: string;
+    }[];
+    artifactBytes: number;
+    artifactCount: number;
+    fetchReport: BundleInfoReportStatus;
+  };
   publishReport: BundleInfoReportStatus;
   sourceRegistry: string;
   tagCount: number;
@@ -47,7 +62,9 @@ async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
   return fs.readJson<T>(filePath);
 }
 
-function reportStatus(report: FetchReport | PublishReport | undefined): BundleInfoReportStatus {
+function reportStatus(
+  report: FetchReport | PublishReport | PythonApplicationDownloadReport | undefined
+): BundleInfoReportStatus {
   if (!report) {
     return { exists: false, errors: 0 };
   }
@@ -108,6 +125,12 @@ export async function readBundleInfo(bundleDir: string): Promise<BundleInfo> {
     readOptionalJson<PublishReport>(path.join(bundleDir, 'publish-report.json')),
     missingTarballs(bundleDir, manifest),
   ]);
+  const [pythonApplicationIndex, pythonApplicationFetchReport] = await Promise.all([
+    readPythonApplicationBundleIndex(bundleDir),
+    readOptionalJson<PythonApplicationDownloadReport>(
+      path.join(bundleDir, 'python-application-fetch-report.json')
+    ),
+  ]);
 
   const packageNames = new Set(manifest.packages.map((pkg) => pkg.name));
   const tags = tagsFromManifest(distTags);
@@ -122,6 +145,17 @@ export async function readBundleInfo(bundleDir: string): Promise<BundleInfo> {
     packageNameCount: packageNames.size,
     packages: packagesFromManifest(manifest),
     publishReport: reportStatus(publishReport),
+    pythonApplications: {
+      applications: (pythonApplicationIndex?.applications ?? []).map((application) => ({
+        name: application.application.name,
+        planId: application.planId,
+        targetId: application.targetId,
+        version: application.application.version,
+      })),
+      artifactBytes: pythonApplicationIndex?.summary.totalBytes ?? 0,
+      artifactCount: pythonApplicationIndex?.summary.artifacts ?? 0,
+      fetchReport: reportStatus(pythonApplicationFetchReport),
+    },
     sourceRegistry: manifest.sourceRegistry,
     tagCount: tags.length,
     tags,
