@@ -175,6 +175,7 @@ export function addPythonRuntimeContract(
           },
         }
       : {}),
+    ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
     ...(runtimeArtifacts.length > 0 ? { runtimeArtifacts } : {}),
     runtimeContract: runtimeContract(plan, options.recipe),

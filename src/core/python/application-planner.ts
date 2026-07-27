@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { semanticDigest } from '../canonical-json.js';
 import { createPythonEnvironmentPlan, type PythonEnvironmentPlan } from './environment-plan.js';
 import type { PythonLockedPackage, PythonLockInput } from './input-types.js';
 import type { PythonIndexClient, PythonIndexFile, PythonProjectIndex } from './index-client.js';
@@ -11,7 +12,11 @@ import { compareVersions, isPrereleaseVersion, versionSatisfies } from './pep440
 import { getBuiltInPlatformFamily, type BuiltInPlatformFamilyId } from './platform-family.js';
 import { platformCoveragePolicyDigest, type PlatformCoveragePolicy } from './coverage-policy.js';
 import type { PythonApplicationIntent } from './application-intent.js';
-import type { PythonApplicationRecipe } from './application-recipe.js';
+import {
+  pythonRecipeIncompatibilityReason,
+  resolvePythonApplicationRecipe,
+  type PythonApplicationRecipe,
+} from './application-recipe.js';
 import { normalizePackageName } from './names.js';
 import { parseWheelFilename, type WheelFilename } from './wheels.js';
 import type { PythonApplicationResolver, UvResolutionEvidence } from './uv-adapter.js';
@@ -180,12 +185,17 @@ export function generatePythonPlannerCandidates(options: {
   );
 }
 
-function exactRequirement(intent: PythonApplicationIntent, version: string): string {
-  const extras =
-    intent.application.extras.length > 0
-      ? `[${[...intent.application.extras].sort().join(',')}]`
-      : '';
-  return `${intent.application.name}${extras}==${version}`;
+function exactRequirements(
+  intent: PythonApplicationIntent,
+  version: string,
+  recipe: PythonApplicationRecipe | undefined
+): { additionalRequirements: string[]; requirement: string } {
+  const resolvedRecipe = resolvePythonApplicationRecipe(recipe, intent);
+  const extras = resolvedRecipe.extras.length > 0 ? `[${resolvedRecipe.extras.join(',')}]` : '';
+  return {
+    additionalRequirements: resolvedRecipe.additionalRequirements,
+    requirement: `${intent.application.name}${extras}==${version}`,
+  };
 }
 
 function targetEnvironment(
@@ -428,6 +438,24 @@ async function resolveCandidate(
     platformFamilyId: BuiltInPlatformFamilyId;
   }[] = [];
   for (const platformFamilyId of options.coveragePolicy.platforms) {
+    const recipeIncompatibility = pythonRecipeIncompatibilityReason(
+      options.recipe,
+      options.intent,
+      {
+        applicationVersion,
+        platformFamilyId,
+        pythonMinor,
+      }
+    );
+    if (recipeIncompatibility) {
+      rejectedCandidates.push({
+        applicationVersion,
+        platformFamilyId,
+        pythonMinor,
+        reason: `recipe-incompatible: ${recipeIncompatibility}`,
+      });
+      return undefined;
+    }
     const baselines =
       platformFamilyId === 'linux-glibc-x86_64'
         ? options.coveragePolicy.linux?.oldestSupportedGlibc
@@ -446,13 +474,17 @@ async function resolveCandidate(
     for (const glibc of baselines) {
       try {
         const branchName = `${applicationVersion}--py${pythonMinor.replace('.', '')}--${platformFamilyId}${glibc ? `--glibc-${glibc}` : ''}`;
+        const requirements = exactRequirements(options.intent, applicationVersion, options.recipe);
         const evidence = await options.resolver.resolve({
+          ...(requirements.additionalRequirements.length > 0
+            ? { additionalRequirements: requirements.additionalRequirements }
+            : {}),
           cacheDir: options.cacheDir,
           ...(options.cutoff ? { cutoff: options.cutoff } : {}),
           ...(glibc ? { glibc } : {}),
           platformFamilyId,
           pythonMinor,
-          requirement: exactRequirement(options.intent, applicationVersion),
+          requirement: requirements.requirement,
           sourceIndex: options.index.sourceIndex,
           uvPath: options.uvPath,
           workDir: path.join(options.workDir, branchName),
@@ -497,6 +529,7 @@ async function resolveCandidate(
 export async function planPythonApplication(
   options: PlanPythonApplicationOptions
 ): Promise<PlanPythonApplicationResult> {
+  resolvePythonApplicationRecipe(options.recipe, options.intent);
   const rootProject = await options.index.getProject(options.intent.application.name);
   const versions = applicationVersions(rootProject, options.intent, options.recipe, options.cutoff);
   if (versions.length === 0) {
@@ -574,6 +607,15 @@ export async function planPythonApplication(
                 (rejection) =>
                   `${rejection.applicationVersion} / Python ${rejection.pythonMinor}${rejection.platformFamilyId ? ` / ${rejection.platformFamilyId}` : ''}: ${rejection.reason}`
               ),
+            },
+          }
+        : {}),
+      ...(options.recipe
+        ? {
+            recipe: {
+              digest: semanticDigest(options.recipe),
+              id: options.recipe.id,
+              version: options.recipe.version,
             },
           }
         : {}),

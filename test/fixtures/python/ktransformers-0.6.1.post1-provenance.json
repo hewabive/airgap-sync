@@ -1,0 +1,49 @@
+{
+  "capturedAt": "2026-07-27T00:00:00.000Z",
+  "projects": {
+    "kt-kernel": {
+      "files": [
+        {
+          "filename": "kt_kernel-0.6.1.post1-cp311-cp311-manylinux_2_35_x86_64.whl",
+          "sha256": "0873b6871fe922aa1ad530d14376f9d1418914988f6aa103a2e2aa13d5952e40",
+          "size": 2503418
+        },
+        {
+          "filename": "kt_kernel-0.6.1.post1-cp312-cp312-manylinux_2_35_x86_64.whl",
+          "sha256": "cf41aeddc010cb653acdef1f3759cc77bea9f8dacb5d5f1c4f0cd0b47e3fc169",
+          "size": 2498995
+        },
+        {
+          "filename": "kt_kernel-0.6.1.post1-cp313-cp313-manylinux_2_35_x86_64.whl",
+          "sha256": "873ca175fe501f733c1190760fb4852edcdd73fd75776f28e69725908e734675",
+          "size": 2495431
+        }
+      ],
+      "requiresPython": ">=3.10",
+      "version": "0.6.1.post1"
+    },
+    "ktransformers": {
+      "files": [
+        {
+          "filename": "ktransformers-0.6.1.post1-py3-none-any.whl",
+          "sha256": "a86e5a86532ecd5493e9bb613501f6f10658d491a652302bfc283bc02fb64555",
+          "size": 9991
+        }
+      ],
+      "requiresDist": [
+        "kt-kernel==0.6.1.post1",
+        "transformers-kt==5.6.0.post1; extra == \"sft\"",
+        "accelerate-kt==1.14.0.post1; extra == \"sft\"",
+        "sglang-kt==0.6.1.post2; extra == \"sglang\""
+      ],
+      "requiresPython": ">=3.11",
+      "version": "0.6.1.post1"
+    }
+  },
+  "schemaVersion": 1,
+  "sources": [
+    "https://pypi.org/pypi/ktransformers/0.6.1.post1/json",
+    "https://pypi.org/pypi/kt-kernel/0.6.1.post1/json",
+    "https://github.com/kvcache-ai/ktransformers/blob/main/doc/en/install.md"
+  ]
+}

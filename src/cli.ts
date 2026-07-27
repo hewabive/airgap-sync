@@ -32,14 +32,17 @@ import {
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
   fetchSeedBundle,
+  findMaintainedPythonApplicationRecipe,
   explainPlatformCoveragePolicy,
   getBuiltInPlatformFamily,
   HttpGiteaClient,
   HttpRegistryClient,
   HttpPythonIndexClient,
   initWorkspace,
+  installMaintainedPythonApplicationRecipe,
   listBuiltInPlatformFamilies,
   normalizeMachineProbeFacts,
+  normalizePythonApplicationRecipe,
   packageName,
   packageVersion,
   parseRootSpecs,
@@ -915,13 +918,15 @@ function formatPythonApplicationPlan(plan: PythonEnvironmentPlan): string {
 
 function formatPythonPlanningError(error: PythonApplicationPlanningError): string {
   const branches = error.rejectedCandidates.slice(0, 8).map((rejection) => {
-    const kind = rejection.reason.includes('no-wheel')
-      ? 'required binary wheels are unavailable'
-      : rejection.reason.includes('no-solution')
-        ? 'dependencies have no compatible solution'
-        : rejection.reason.includes('tool-failure')
-          ? 'the pinned planner failed'
-          : 'this application/runtime combination is unsupported';
+    const kind = rejection.reason.startsWith('recipe-incompatible: ')
+      ? rejection.reason.slice('recipe-incompatible: '.length)
+      : rejection.reason.includes('no-wheel')
+        ? 'required binary wheels are unavailable'
+        : rejection.reason.includes('no-solution')
+          ? 'dependencies have no compatible solution'
+          : rejection.reason.includes('tool-failure')
+            ? 'the pinned planner failed'
+            : 'this application/runtime combination is unsupported';
     return `- ${rejection.platformFamilyId ?? 'requested coverage'}, Python ${rejection.pythonMinor}, application ${rejection.applicationVersion}: ${kind}`;
   });
   return [
@@ -946,23 +951,11 @@ async function readWorkspacePythonRecipe(
   if (recipePath !== workspaceRoot && !recipePath.startsWith(`${workspaceRoot}${path.sep}`)) {
     throw new Error('python-app recipe must be inside the workspace');
   }
-  const value: unknown = JSON.parse(await readFile(recipePath, 'utf8'));
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    Array.isArray(value) ||
-    !('schemaVersion' in value) ||
-    value.schemaVersion !== 1 ||
-    !('id' in value) ||
-    typeof value.id !== 'string' ||
-    !('application' in value) ||
-    typeof value.application !== 'string' ||
-    !('version' in value) ||
-    typeof value.version !== 'string'
-  ) {
-    throw new Error(`Invalid Python application recipe: ${recipePath}`);
+  try {
+    return normalizePythonApplicationRecipe(JSON.parse(await readFile(recipePath, 'utf8')));
+  } catch (error) {
+    throw new Error(`Invalid Python application recipe ${recipePath}: ${(error as Error).message}`);
   }
-  return value as PythonApplicationRecipe;
 }
 
 interface GitFetchOptions {
@@ -3179,11 +3172,18 @@ targetAddCommand
           'No Python application coverage is configured; use --platform or add a coverage policy'
         );
       }
+      const maintainedRecipe =
+        options.recipe === undefined ? findMaintainedPythonApplicationRecipe(spec) : undefined;
+      const recipe =
+        options.recipe ??
+        (maintainedRecipe
+          ? await installMaintainedPythonApplicationRecipe(workspace, maintainedRecipe)
+          : undefined);
       const target: WorkspacePythonApplicationTarget = {
         application: {
           extras: options.extra ?? [],
           features: parseCapabilities(options.feature ?? []),
-          ...(options.recipe ? { recipe: options.recipe } : {}),
+          ...(recipe ? { recipe } : {}),
           ...(options.version ? { version: options.version } : {}),
         },
         coverage,
@@ -3197,7 +3197,9 @@ targetAddCommand
       console.log(
         `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nCoverage: ${
           typeof coverage === 'string' ? coverage : coverage.platforms.join(', ')
-        }\nPython runtime: ${options.python ?? 'selected automatically during planning'}\nTotal targets: ${String(result.config.targets.length)}`
+        }\nPython runtime: ${options.python ?? 'selected automatically during planning'}${
+          recipe ? `\nRecipe: ${recipe}` : ''
+        }\nTotal targets: ${String(result.config.targets.length)}`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -3567,7 +3569,11 @@ program
           if (
             semanticDigest(activePlan.plan.intent) !== semanticDigest(resolvedApplication.intent) ||
             activePlan.plan.coverage.digest !==
-              platformCoveragePolicyDigest(resolvedApplication.coveragePolicy)
+              platformCoveragePolicyDigest(resolvedApplication.coveragePolicy) ||
+            activePlan.plan.recipe?.digest !==
+              (target.application.recipe
+                ? semanticDigest(await readWorkspacePythonRecipe(workspaceDir, target))
+                : undefined)
           ) {
             throw new Error(
               `Python application ${targetId} configuration changed after planning; run airgap-sync plan --update ${target.spec}`

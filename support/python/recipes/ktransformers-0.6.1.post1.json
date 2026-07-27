@@ -1,0 +1,45 @@
+{
+  "application": "ktransformers",
+  "compatibility": {
+    "applicationVersions": "==0.6.1.post1",
+    "expiresAt": "2027-01-31T00:00:00.000Z",
+    "incompatibleCombinations": [
+      {
+        "reason": "KTransformers 0.6.1.post1 depends on kt-kernel 0.6.1.post1, which publishes Linux wheels but no Windows wheel; upstream recommends WSL instead of native Windows",
+        "when": {
+          "platformFamilyId": "windows-x86_64"
+        }
+      }
+    ],
+    "preferredPythonMinors": ["3.11", "3.12"],
+    "requiresPython": ">=3.11,<3.13"
+  },
+  "features": [
+    {
+      "description": "Select the intended inference acceleration explicitly; this is not inferred from the collector or consumer machine",
+      "name": "accelerator",
+      "values": [
+        {
+          "value": "cpu"
+        },
+        {
+          "value": "cuda"
+        }
+      ]
+    }
+  ],
+  "healthChecks": [
+    {
+      "args": ["-c", "import ktransformers"],
+      "command": "python"
+    }
+  ],
+  "id": "ktransformers-0.6.1.post1",
+  "schemaVersion": 1,
+  "systemPrerequisites": ["Linux x86-64", "x86-64 CPU with AVX2"],
+  "upstreamDocumentation": [
+    "https://pypi.org/project/ktransformers/0.6.1.post1/",
+    "https://github.com/kvcache-ai/ktransformers/blob/main/doc/en/install.md"
+  ],
+  "version": "2026-07-27"
+}

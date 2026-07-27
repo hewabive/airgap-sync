@@ -81,6 +81,9 @@ describe('workspace config', () => {
     });
     expect(await fs.pathExists(path.join(tempDir, 'airgap-sync.json'))).toBe(true);
     expect(await fs.pathExists(path.join(tempDir, 'airgap-bundle'))).toBe(true);
+    expect(
+      await fs.pathExists(path.join(tempDir, '.airgap-sync/recipes/ktransformers-0.6.1.post1.json'))
+    ).toBe(true);
   });
 
   it('adds, lists, deduplicates, and removes targets', async () => {

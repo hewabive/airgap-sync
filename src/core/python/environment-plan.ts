@@ -69,6 +69,12 @@ export interface PythonRuntimeContract {
   }[];
 }
 
+export interface PythonEnvironmentPlanRecipe {
+  digest: string;
+  id: string;
+  version: string;
+}
+
 export interface PythonEnvironmentPlan {
   application: {
     name: string;
@@ -89,6 +95,7 @@ export interface PythonEnvironmentPlan {
     applicationArtifactOwner: string;
     pythonPackageOwner: string;
   };
+  recipe?: PythonEnvironmentPlanRecipe;
   resolver: {
     cutoff?: string;
     engine: 'uv';
@@ -121,6 +128,7 @@ export function pythonEnvironmentPlanSemanticContent(
     platforms: plan.platforms,
     ...(plan.preferredPythonMinor ? { preferredPythonMinor: plan.preferredPythonMinor } : {}),
     ...(plan.publication ? { publication: plan.publication } : {}),
+    ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
     ...(plan.runtimeArtifacts ? { runtimeArtifacts: plan.runtimeArtifacts } : {}),
     ...(plan.runtimeContract ? { runtimeContract: plan.runtimeContract } : {}),

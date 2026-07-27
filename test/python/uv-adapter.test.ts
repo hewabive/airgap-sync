@@ -83,6 +83,7 @@ describe('uv application resolver adapter', () => {
   });
 
   it('parses machine-readable pylock evidence', async () => {
+    let requirementsInput = '';
     const resolver = new UvApplicationResolver(async (invocation) => {
       if (invocation.args[0] === '--version') {
         return {
@@ -91,6 +92,7 @@ describe('uv application resolver adapter', () => {
           stdout: 'uv 0.11.16\n',
         };
       }
+      requirementsInput = await fs.readFile(invocation.args[2]!, 'utf8');
       const outputPath = invocation.args.at(-1)!;
       await fs.writeFile(
         outputPath,
@@ -117,7 +119,11 @@ describe('uv application resolver adapter', () => {
       };
     });
 
-    const evidence = await resolver.resolve(request());
+    const evidence = await resolver.resolve(
+      request({
+        additionalRequirements: ['native-helper==2.0.0'],
+      })
+    );
 
     expect(evidence.platformTarget).toBe('x86_64-manylinux_2_17');
     expect(evidence.lock.packages[0]).toMatchObject({
@@ -125,6 +131,7 @@ describe('uv application resolver adapter', () => {
       version: '1.0.0',
     });
     expect(evidence.digest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(requirementsInput).toBe('demo-app==1.0.0\nnative-helper==2.0.0\n');
   });
 
   it('preserves a no-solution error without parsing human text upstream', async () => {

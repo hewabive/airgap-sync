@@ -38,6 +38,7 @@ export class UvResolutionError extends Error {
 }
 
 export interface UvResolveRequest {
+  additionalRequirements?: string[];
   cacheDir: string;
   cutoff?: string;
   glibc?: string;
@@ -201,15 +202,19 @@ export class UvApplicationResolver implements PythonApplicationResolver {
   }
 
   async resolve(request: UvResolveRequest): Promise<UvResolutionEvidence> {
-    if (/[\r\n]/u.test(request.requirement)) {
-      throw new UvResolutionError('invalid-input', 'Application requirement must fit on one line');
+    const requirements = [request.requirement, ...(request.additionalRequirements ?? [])];
+    if (requirements.some((requirement) => !requirement.trim() || /[\r\n]/u.test(requirement))) {
+      throw new UvResolutionError(
+        'invalid-input',
+        'Each application requirement must fit on one line'
+      );
     }
     await fs.ensureDir(request.workDir);
     await fs.ensureDir(request.cacheDir);
     await this.#verifyExecutable(request);
     const inputPath = path.join(request.workDir, 'requirements.in');
     const outputPath = path.join(request.workDir, 'pylock.toml');
-    await fs.writeFile(inputPath, `${request.requirement}\n`);
+    await fs.writeFile(inputPath, `${requirements.join('\n')}\n`);
     const invocation = createUvCompileInvocation(request, inputPath, outputPath);
     const result = await this.#commandRunner(invocation);
     if (result.exitCode !== 0) {

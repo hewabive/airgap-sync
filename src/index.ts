@@ -66,6 +66,17 @@ export {
   PythonApplicationPlanningError,
 } from './core/python/application-planner.js';
 export {
+  normalizePythonApplicationRecipe,
+  pythonRecipeIncompatibilityReason,
+  resolvePythonApplicationRecipe,
+} from './core/python/application-recipe.js';
+export {
+  findMaintainedPythonApplicationRecipe,
+  installMaintainedPythonApplicationRecipe,
+  installMaintainedPythonApplicationRecipes,
+  listMaintainedPythonApplicationRecipes,
+} from './core/python/maintained-recipes.js';
+export {
   addPythonRuntimeContract,
   createPythonPrerequisiteReport,
 } from './core/python/runtime-contract.js';
@@ -373,10 +384,12 @@ export type {
   PythonApplicationRecipeCompatibility,
   PythonApplicationRecipeFeature,
 } from './core/python/application-recipe.js';
+export type { MaintainedPythonApplicationRecipe } from './core/python/maintained-recipes.js';
 export type {
   PythonEnvironmentPlan,
   PythonEnvironmentPlanInput,
   PythonEnvironmentPlanPresentation,
+  PythonEnvironmentPlanRecipe,
   PythonLockedPackagePlan,
   PythonPlanWheel,
   PythonPlanTransferArtifact,

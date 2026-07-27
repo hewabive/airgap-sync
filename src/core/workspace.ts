@@ -30,6 +30,7 @@ import type { PythonApplicationIntent, PythonRuntimePolicy } from './python/appl
 import { isValidPackageName, normalizePackageName } from './python/names.js';
 import { isValidSpecifierSet } from './python/pep440.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
+import { installMaintainedPythonApplicationRecipes } from './python/maintained-recipes.js';
 
 export type { PythonResolutionMode } from './python/resolution-policy.js';
 
@@ -946,6 +947,9 @@ export async function initWorkspace(options: InitWorkspaceOptions): Promise<Work
   const config = createDefaultWorkspaceConfig(options.legacy === true);
   await fs.writeJson(configPath, config, { spaces: 2 });
   await fs.ensureDir(path.resolve(workspaceDir, config.output));
+  if (config.schemaVersion === 2) {
+    await installMaintainedPythonApplicationRecipes(workspaceDir);
+  }
   return config;
 }
 
