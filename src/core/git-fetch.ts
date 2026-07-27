@@ -60,6 +60,16 @@ interface RefChangeSummary {
   updatedRefs: number;
 }
 
+function parseRemoteHeadRef(value: string): string | undefined {
+  for (const line of value.split(/\r?\n/)) {
+    const match = /^ref:\s+(refs\/heads\/\S+)\s+HEAD$/.exec(line.trim());
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return undefined;
+}
+
 function redactGitArg(arg: string): string {
   return arg.startsWith('http.extraHeader=') ? 'http.extraHeader=<redacted>' : arg;
 }
@@ -245,6 +255,44 @@ async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Pr
   });
   await runner({
     args: safeDirectoryGitArgs(targetPath, ['-C', targetPath, 'fetch', '--prune', 'origin']),
+  });
+  const remoteHead = await runner({
+    args: safeDirectoryGitArgs(targetPath, [
+      '-C',
+      targetPath,
+      'ls-remote',
+      '--symref',
+      'origin',
+      'HEAD',
+    ]),
+  });
+  if (!remoteHead) {
+    return;
+  }
+
+  const remoteHeadRef = parseRemoteHeadRef(remoteHead.stdout);
+  if (!remoteHeadRef) {
+    return;
+  }
+
+  await runner({
+    args: safeDirectoryGitArgs(targetPath, [
+      '-C',
+      targetPath,
+      'show-ref',
+      '--verify',
+      '--quiet',
+      remoteHeadRef,
+    ]),
+  });
+  await runner({
+    args: safeDirectoryGitArgs(targetPath, [
+      '-C',
+      targetPath,
+      'symbolic-ref',
+      'HEAD',
+      remoteHeadRef,
+    ]),
   });
 }
 

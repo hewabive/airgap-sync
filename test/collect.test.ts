@@ -324,6 +324,7 @@ describe('collectBundle', () => {
       `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
       `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
       `-C ${mirrorPath} fetch --prune origin`,
+      `-C ${mirrorPath} ls-remote --symref origin HEAD`,
     ]);
     expect(report).toMatchObject({
       dryRun: false,
@@ -957,6 +958,7 @@ describe('collectBundle', () => {
       `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
       `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,
       `-C ${mirrorPath} fetch --prune origin`,
+      `-C ${mirrorPath} ls-remote --symref origin HEAD`,
       `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
     ]);
   });

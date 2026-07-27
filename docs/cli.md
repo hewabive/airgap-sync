@@ -471,9 +471,11 @@ Reads `git-sources.json` and stores local bare mirror repositories using preserv
 source paths such as `git-mirrors/github.com/antvis/G2.git`. Missing mirrors are
 created as bare repositories and fetched through explicit branch/tag refspecs.
 Existing mirrors run `git remote set-url origin` and `git fetch --prune origin` for
-`refs/heads/*` and `refs/tags/*`. Provider-specific refs such as GitHub pull-request
-refs are intentionally not downloaded into new mirrors. The command writes
-`git-fetch-report.json`. During fetch, each mirror is logged with its
+`refs/heads/*` and `refs/tags/*`. After each fetch, the mirror's symbolic `HEAD` is
+synchronized with the upstream default branch; this also repairs mirrors created by
+older versions with a stale or dangling `HEAD`. Provider-specific refs such as GitHub
+pull-request refs are intentionally not downloaded into new mirrors. The command
+writes `git-fetch-report.json`. During fetch, each mirror is logged with its
 repository, status, whether refs changed, and, when it can be counted locally, the
 number of new commits on updated refs.
 

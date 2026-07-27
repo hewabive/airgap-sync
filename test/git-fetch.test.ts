@@ -2,7 +2,11 @@ import os from 'node:os';
 import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { fetchGitSources, type GitCommandInvocation } from '../src/core/git-fetch.js';
+import {
+  fetchGitSources,
+  runGitCommand,
+  type GitCommandInvocation,
+} from '../src/core/git-fetch.js';
 import type { GitSourcesManifest } from '../src/types.js';
 
 let bundleDir: string;
@@ -28,6 +32,31 @@ function mirrorGitArgs(mirrorPath: string, args: string[]): string[] {
   return ['-c', `safe.directory=${mirrorPath}`, '-C', mirrorPath, ...args];
 }
 
+function remoteHeadCommandResult(
+  invocation: GitCommandInvocation
+): { stderr: string; stdout: string } | undefined {
+  return invocation.args.includes('ls-remote')
+    ? {
+        stderr: '',
+        stdout: 'ref: refs/heads/main\tHEAD\nabc123\tHEAD\n',
+      }
+    : undefined;
+}
+
+function mirrorHeadSyncCalls(mirrorPath: string): GitCommandInvocation[] {
+  return [
+    {
+      args: mirrorGitArgs(mirrorPath, ['ls-remote', '--symref', 'origin', 'HEAD']),
+    },
+    {
+      args: mirrorGitArgs(mirrorPath, ['show-ref', '--verify', '--quiet', 'refs/heads/main']),
+    },
+    {
+      args: mirrorGitArgs(mirrorPath, ['symbolic-ref', 'HEAD', 'refs/heads/main']),
+    },
+  ];
+}
+
 describe('fetchGitSources', () => {
   beforeEach(async () => {
     bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-git-fetch-'));
@@ -46,7 +75,7 @@ describe('fetchGitSources', () => {
       manifest: sourcesManifest,
       runner: (invocation) => {
         calls.push(invocation);
-        return Promise.resolve();
+        return Promise.resolve(remoteHeadCommandResult(invocation));
       },
     });
 
@@ -81,7 +110,7 @@ describe('fetchGitSources', () => {
       manifest: sourcesManifest,
       runner: (invocation) => {
         calls.push(invocation);
-        return Promise.resolve();
+        return Promise.resolve(remoteHeadCommandResult(invocation));
       },
     });
 
@@ -124,6 +153,7 @@ describe('fetchGitSources', () => {
           'origin',
         ]),
       },
+      ...mirrorHeadSyncCalls(path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git')),
     ]);
     expect(report).toMatchObject({
       changed: 1,
@@ -151,7 +181,7 @@ describe('fetchGitSources', () => {
         return Promise.resolve(
           invocation.args.includes('for-each-ref')
             ? { stderr: '', stdout: 'refs/heads/main abc123\n' }
-            : undefined
+            : remoteHeadCommandResult(invocation)
         );
       },
     });
@@ -192,6 +222,7 @@ describe('fetchGitSources', () => {
       {
         args: mirrorGitArgs(targetPath, ['fetch', '--prune', 'origin']),
       },
+      ...mirrorHeadSyncCalls(targetPath),
       {
         args: mirrorGitArgs(targetPath, [
           'for-each-ref',
@@ -233,7 +264,7 @@ describe('fetchGitSources', () => {
         if (invocation.args.includes('rev-list')) {
           return Promise.resolve({ stderr: '', stdout: '3\n' });
         }
-        return Promise.resolve(undefined);
+        return Promise.resolve(remoteHeadCommandResult(invocation));
       },
     });
 
@@ -273,6 +304,7 @@ describe('fetchGitSources', () => {
       {
         args: mirrorGitArgs(targetPath, ['fetch', '--prune', 'origin']),
       },
+      ...mirrorHeadSyncCalls(targetPath),
       {
         args: mirrorGitArgs(targetPath, [
           'for-each-ref',
@@ -337,7 +369,7 @@ describe('fetchGitSources', () => {
       mirrorsDir,
       runner: (invocation) => {
         calls.push(invocation);
-        return Promise.resolve();
+        return Promise.resolve(remoteHeadCommandResult(invocation));
       },
     });
 
@@ -380,6 +412,64 @@ describe('fetchGitSources', () => {
           'origin',
         ]),
       },
+      ...mirrorHeadSyncCalls(path.join(mirrorsDir, 'github.com/owner/repo.git')),
     ]);
+  });
+
+  it('sets and repairs a mirror HEAD from the upstream default branch', async () => {
+    const upstreamPath = path.join(bundleDir, 'upstream');
+    await runGitCommand({
+      args: ['init', '--initial-branch=main', upstreamPath],
+    });
+    await fs.writeFile(path.join(upstreamPath, 'package.json'), '{}\n');
+    await runGitCommand({
+      args: ['-C', upstreamPath, 'add', 'package.json'],
+    });
+    await runGitCommand({
+      args: [
+        '-c',
+        'user.name=Airgap Sync Test',
+        '-c',
+        'user.email=airgap-sync@example.invalid',
+        '-C',
+        upstreamPath,
+        'commit',
+        '-m',
+        'Initial commit',
+      ],
+    });
+
+    const manifest: GitSourcesManifest = {
+      ...sourcesManifest,
+      sources: [
+        {
+          ...sourcesManifest.sources[0]!,
+          sourceUrl: upstreamPath,
+        },
+      ],
+    };
+    await fetchGitSources({
+      bundleDir,
+      manifest,
+    });
+
+    const mirrorPath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    const clonedHead = await runGitCommand({
+      args: ['--git-dir', mirrorPath, 'symbolic-ref', 'HEAD'],
+    });
+    expect(clonedHead.stdout.trim()).toBe('refs/heads/main');
+
+    await runGitCommand({
+      args: ['--git-dir', mirrorPath, 'symbolic-ref', 'HEAD', 'refs/heads/master'],
+    });
+    await fetchGitSources({
+      bundleDir,
+      manifest,
+    });
+
+    const migratedHead = await runGitCommand({
+      args: ['--git-dir', mirrorPath, 'symbolic-ref', 'HEAD'],
+    });
+    expect(migratedHead.stdout.trim()).toBe('refs/heads/main');
   });
 });

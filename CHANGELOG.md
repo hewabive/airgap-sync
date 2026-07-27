@@ -34,6 +34,9 @@
   package versions can skip source-registry metadata lookups.
 - Fixed download Git mirror reporting so changes from earlier fixed-point iterations
   are preserved in the final summary and `git-fetch-report.json`.
+- Fixed bare Git mirror `HEAD` synchronization with the upstream default branch.
+  Existing mirrors with stale or dangling `HEAD` references are repaired automatically
+  during their next fetch.
 - Added automatic pnpm toolchain collection for Git/local manifests that declare
   `packageManager` or `devEngines.packageManager`. Both `pnpm` and the standalone
   `@pnpm/exe` bootstrap package are included even when `package.json` is covered by a
