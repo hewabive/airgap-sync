@@ -9,6 +9,7 @@ import type { ActivePythonApplicationPlan } from '../../src/core/python/active-p
 import {
   downloadPythonApplicationPlans,
   readPythonApplicationBundleIndex,
+  type PythonApplicationDownloadProgressEvent,
   verifyPythonApplicationBundle,
 } from '../../src/core/python/application-bundle.js';
 import { pythonApplicationTargetId } from '../../src/core/python/application-paths.js';
@@ -248,9 +249,11 @@ describe('Python application bundle', () => {
       })
     );
 
+    const progress: PythonApplicationDownloadProgressEvent[] = [];
     const report = await downloadPythonApplicationPlans({
       bundleDir,
       generatedAt: '2026-07-27T00:00:00.000Z',
+      onProgress: (event) => progress.push(event),
       targets: [
         { activePlan: first, targetId: first.manifest.targetId },
         { activePlan: second, targetId: second.manifest.targetId },
@@ -262,6 +265,33 @@ describe('Python application bundle', () => {
       errors: [],
       incrementalBytes: content.byteLength,
       totalBytes: content.byteLength,
+    });
+    expect(progress[0]).toEqual({
+      current: 0,
+      detail: '2 application plans',
+      status: 'start',
+      total: 1,
+    });
+    expect(progress).toContainEqual(
+      expect.objectContaining({
+        bytes: 0,
+        current: 0,
+        detail: `download ${path.basename(source)}`,
+        status: 'progress',
+        total: 1,
+        totalBytes: content.byteLength,
+      })
+    );
+    expect(progress).toContainEqual({
+      current: 1,
+      detail: `downloaded ${path.basename(source)}`,
+      status: 'progress',
+      total: 1,
+    });
+    expect(progress.at(-1)).toEqual({
+      current: 1,
+      status: 'done',
+      total: 1,
     });
     const index = await readPythonApplicationBundleIndex(bundleDir);
     expect(index).toMatchObject({

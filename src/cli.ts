@@ -113,6 +113,7 @@ import type {
   GitPublishOwnerKind,
   LatestPolicy,
   PlatformCoveragePolicy,
+  PythonApplicationDownloadProgressEvent,
   PythonResolutionMode,
   PublishProgressEvent,
   PublishProgressPhase,
@@ -1091,13 +1092,22 @@ const publishPhaseLabels: Record<PublishProgressPhase, string> = {
   validate: 'validate bundle',
 };
 
-const collectPhaseLabels: Record<CollectProgressEvent['phase'], string> = {
+type DownloadProgressEvent =
+  | CollectProgressEvent
+  | (PythonApplicationDownloadProgressEvent & {
+      iteration?: undefined;
+      phase: 'python-application-fetch';
+      queue?: undefined;
+    });
+
+const collectPhaseLabels: Record<DownloadProgressEvent['phase'], string> = {
   'bundle-write': 'write bundle',
   'git-fetch': 'fetch git mirrors',
   'git-manifest-scan': 'scan git manifests',
   'lockfile-scan': 'scan lockfiles',
   'manifest-scan': 'scan package manifests',
   'npm-fetch': 'resolve/download npm',
+  'python-application-fetch': 'prepare Python application artifacts',
   'python-fetch': 'resolve/download Python',
   'repository-update': 'update repositories',
 };
@@ -1123,25 +1133,52 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
   };
 }
 
-function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
+function formatProgressBytes(bytes: number): string {
+  if (bytes < 1_024) {
+    return `${String(bytes)} B`;
+  }
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1_024;
+  let unit = units[0]!;
+  for (const candidate of units.slice(1)) {
+    if (value < 1_024) {
+      break;
+    }
+    value /= 1_024;
+    unit = candidate;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
+}
+
+function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
   const lastLogged = new Map<string, number>();
   const lastOutputAt = new Map<string, number>();
-  const lastEvents = new Map<string, CollectProgressEvent>();
+  const lastEvents = new Map<string, DownloadProgressEvent>();
   const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
 
-  function formatProgressState(event: CollectProgressEvent): string {
+  function formatProgressState(event: DownloadProgressEvent): string {
     const total = event.total === undefined ? '' : `/${String(event.total)}`;
     const queue = event.queue === undefined ? '' : ` queue=${String(event.queue)}`;
+    const bytes =
+      'bytes' in event
+        ? ` bytes=${formatProgressBytes(event.bytes)}${
+            event.totalBytes === undefined ? '' : `/${formatProgressBytes(event.totalBytes)}`
+          }`
+        : '';
     const detail = event.detail ? ` ${event.detail}` : '';
     const current = event.current === undefined ? '...' : String(event.current);
-    return `${current}${total}${queue}${detail}`;
+    return `${current}${total}${queue}${bytes}${detail}`;
   }
 
-  function formatProgressLine(event: CollectProgressEvent, label: string, prefix: string): string {
+  function formatProgressLine(event: DownloadProgressEvent, label: string, prefix: string): string {
     return `${prefix} ${label}: ${formatProgressState(event)}`;
   }
 
-  function formatHeartbeatLine(event: CollectProgressEvent, label: string, prefix: string): string {
+  function formatHeartbeatLine(
+    event: DownloadProgressEvent,
+    label: string,
+    prefix: string
+  ): string {
     const hint = event.phase === 'git-fetch' ? ` ${gitFetchInteractivePromptHint}` : '';
     return `${prefix} ${label}: still running ${formatProgressState(event)}${hint}`;
   }
@@ -1197,7 +1234,8 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
           : event.total === undefined
             ? ` (${String(event.current)})`
             : ` (${String(event.current)}/${String(event.total)})`;
-      console.error(`${prefix} ${label}: done${count}`);
+      const detail = event.detail ? ` ${event.detail}` : '';
+      console.error(`${prefix} ${label}: done${count}${detail}`);
       recordOutput(key);
       return;
     }
@@ -1217,11 +1255,19 @@ function createCollectProgressLogger(): (event: CollectProgressEvent) => void {
     const last = lastLogged.get(key) ?? 0;
     const threshold =
       event.total && event.total > 0 ? Math.max(1, Math.ceil(event.total / 20)) : 25;
+    const applicationArtifactCompleted =
+      event.phase === 'python-application-fetch' &&
+      /^(?:downloaded|existing|failed|reused|would-download) /u.test(event.detail ?? '');
     const shouldLog =
-      event.phase === 'git-fetch' ||
-      event.current === 1 ||
-      event.current - last >= threshold ||
-      (event.total !== undefined && event.current === event.total);
+      event.phase === 'python-application-fetch'
+        ? !lastLogged.has(key) ||
+          (applicationArtifactCompleted &&
+            (event.current === 1 || event.current - last >= threshold)) ||
+          event.current === event.total
+        : event.phase === 'git-fetch' ||
+          event.current === 1 ||
+          event.current - last >= threshold ||
+          (event.total !== undefined && event.current === event.total);
 
     if (!shouldLog) {
       return;
@@ -3652,6 +3698,7 @@ program
           : undefined;
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
+        const onDownloadProgress = createCollectProgressLogger();
         const report = await collectBundle({
           allowApproximatePython,
           dryRun: options.dryRun === true,
@@ -3670,7 +3717,7 @@ program
           ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
           tagResolutionPolicy,
           ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
-          onProgress: createCollectProgressLogger(),
+          onProgress: onDownloadProgress,
           outputDir,
           ...(pythonIndex ? { pythonIndex } : {}),
           ...(legacyPython.sourceIndex ? { pythonSourceIndex: legacyPython.sourceIndex } : {}),
@@ -3687,6 +3734,9 @@ program
             dryRun: options.dryRun === true,
             generatedAt: report.generatedAt,
             ...(activeConfig.giteaUrl ? { giteaBaseUrl: activeConfig.giteaUrl } : {}),
+            onProgress: (event) => {
+              onDownloadProgress({ ...event, phase: 'python-application-fetch' });
+            },
             partial: targetSelection !== undefined,
             targets: pythonApplicationPlans,
           });

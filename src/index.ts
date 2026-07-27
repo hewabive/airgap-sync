@@ -426,6 +426,8 @@ export type {
   PythonApplicationBundleEntry,
   PythonApplicationBundleIndex,
   PythonApplicationDownloadAction,
+  PythonApplicationDownloadProgressEvent,
+  PythonApplicationDownloadProgressStatus,
   PythonApplicationDownloadReport,
   PythonApplicationDownloadStatus,
   VerifyPythonApplicationBundleResult,
