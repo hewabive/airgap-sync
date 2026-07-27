@@ -533,6 +533,7 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
   const gitApplyErrors = report.gitApply.errors.length;
   const gitConfigErrors = report.gitConfig?.errors.length ?? 0;
   const pythonErrors = report.python?.errors.length ?? 0;
+  const pythonApplicationErrors = report.pythonApplications?.errors.length ?? 0;
   const totalErrors =
     npmAuthErrors.length +
     npmPublishErrors.length +
@@ -540,7 +541,8 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     giteaErrors +
     gitApplyErrors +
     gitConfigErrors +
-    pythonErrors;
+    pythonErrors +
+    pythonApplicationErrors;
   const mode = report.dryRun ? 'dry run, ' : '';
   const status = report.succeeded
     ? green(
@@ -579,6 +581,11 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
             report.python.skipped
           )} already in registry, ${String(pythonErrors)} errors.`,
           `Python index: ${report.python.indexUrl}`,
+        ]
+      : []),
+    ...(report.pythonApplications
+      ? [
+          `Python application contracts: ${String(report.pythonApplications.actions.length)} total, ${String(report.pythonApplications.published + report.pythonApplications.planned)} ${report.dryRun ? 'planned' : 'published'}, ${String(report.pythonApplications.skipped)} already in registry, ${String(pythonApplicationErrors)} errors.`,
         ]
       : []),
     `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(
@@ -909,6 +916,7 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
   'git-config': 'configure Git rewrites',
   publish: 'publish npm packages',
   'python-publish': 'publish Python wheels',
+  'python-application-publish': 'publish Python application contracts',
   report: 'write publish report',
 };
 
@@ -1229,6 +1237,7 @@ function formatBundleInfo(info: BundleInfo): string {
     formatReportStatus('Fetch report', info.fetchReport),
     formatReportStatus('Publish report', info.publishReport),
     formatReportStatus('Python application fetch report', info.pythonApplications.fetchReport),
+    formatReportStatus('Python application publish report', info.pythonApplications.publishReport),
   ];
 
   if (info.missingTarballs.length > 0) {
@@ -1468,7 +1477,8 @@ async function resolvePublishWorkspaceDefaults(options: {
   if (!gitea) {
     throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
   }
-  const pythonOwner = options.pythonOwner ?? config?.pythonPublishOwner;
+  const pythonOwner =
+    options.pythonOwner ?? config?.python?.publishOwner ?? config?.pythonPublishOwner;
   const gitOwnerStrategy = options.gitOwnerStrategy ?? config?.gitOwnerStrategy ?? 'preserve';
   const gitPublishOwner = options.gitPublishOwner ?? config?.gitPublishOwner;
   const gitPublishOwnerKind = options.gitPublishOwnerKind ?? config?.gitPublishOwnerKind;
@@ -2691,6 +2701,9 @@ program
             : {}),
           includeCpython: config.python?.artifactTransfer?.cpython === true,
           includeUv: config.python?.artifactTransfer?.uv === true,
+          ...(config.python?.publishOwner
+            ? { pythonPackageOwner: config.python.publishOwner }
+            : {}),
           ...(recipe ? { recipe } : {}),
         });
         const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
@@ -3266,6 +3279,7 @@ program
             bundleDir: outputDir,
             dryRun: options.dryRun === true,
             generatedAt: report.generatedAt,
+            ...(activeConfig.giteaUrl ? { giteaBaseUrl: activeConfig.giteaUrl } : {}),
             partial: targetSelection !== undefined,
             targets: pythonApplicationPlans,
           });

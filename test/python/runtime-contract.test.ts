@@ -111,8 +111,11 @@ describe('Python runtime contract', () => {
   it('declares external provisioning and machine prerequisites', () => {
     const original = plan();
     const enriched = addPythonRuntimeContract(original, {
+      applicationArtifactOwner: 'python-apps',
+      pythonPackageOwner: 'pypi',
       recipe: {
         application: 'demo-app',
+        healthChecks: [{ args: ['-c', 'import demo_app'], command: 'python' }],
         id: 'demo',
         schemaVersion: 1,
         systemPrerequisites: ['libdemo >= 1'],
@@ -136,6 +139,15 @@ describe('Python runtime contract', () => {
       ])
     );
     expect(enriched).not.toHaveProperty('installActions');
+    expect(enriched).toMatchObject({
+      publication: {
+        applicationArtifactOwner: 'python-apps',
+        pythonPackageOwner: 'pypi',
+      },
+      verification: {
+        healthChecks: [{ args: ['-c', 'import demo_app'], command: 'python' }],
+      },
+    });
     expect(createPythonPrerequisiteReport(enriched, '2026-07-27T00:00:00.000Z')).toMatchObject({
       application: {
         name: 'demo-app',

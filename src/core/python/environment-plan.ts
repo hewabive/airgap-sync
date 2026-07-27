@@ -98,6 +98,12 @@ export interface PythonEnvironmentPlan {
   runtimeArtifacts?: PythonPlanTransferArtifact[];
   runtimeContract?: PythonRuntimeContract;
   schemaVersion: 1;
+  verification?: {
+    healthChecks: {
+      args: string[];
+      command: string;
+    }[];
+  };
   wheels: PythonPlanWheel[];
 }
 
@@ -119,6 +125,7 @@ export function pythonEnvironmentPlanSemanticContent(
     ...(plan.runtimeArtifacts ? { runtimeArtifacts: plan.runtimeArtifacts } : {}),
     ...(plan.runtimeContract ? { runtimeContract: plan.runtimeContract } : {}),
     schemaVersion: plan.schemaVersion,
+    ...(plan.verification ? { verification: plan.verification } : {}),
     wheels: plan.wheels,
   };
 }

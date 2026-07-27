@@ -39,3 +39,11 @@ The generated `python-seed-manifest.json` also references v2 wheel paths so the
 existing Gitea PyPI publisher can publish the shared artifacts during migration.
 Partial downloads preserve references owned by unselected applications, and prune
 removes an artifact only after no active application plan references it.
+
+Each supported platform branch receives a hash-complete `requirements.lock`, the raw
+resolver `pylock.toml`, closed-index `pip`/`uv` configuration templates, and a
+machine-readable consumer contract. The standard consumer command uses
+`--only-binary=:all:`, `--no-deps`, and `--require-hashes`. Publishing sends wheels to
+Gitea PyPI and sends plans, locks, configuration, prerequisite reports, and optional
+CPython/`uv` archives to Gitea Generic Packages. It does not install or configure a
+production Python environment.

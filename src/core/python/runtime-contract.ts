@@ -20,6 +20,7 @@ export interface AddPythonRuntimeContractOptions {
   includeUv?: boolean;
   recipe?: PythonApplicationRecipe;
   runtimeCatalog?: ManagedPythonRuntimeCatalog;
+  pythonPackageOwner?: string;
 }
 
 export interface PythonPrerequisiteReport {
@@ -166,10 +167,27 @@ export function addPythonRuntimeContract(
     ...(plan.preferredPythonMinor ? { preferredPythonMinor: plan.preferredPythonMinor } : {}),
     ...(plan.presentation ? { presentation: plan.presentation } : {}),
     ...(plan.publication ? { publication: plan.publication } : {}),
+    ...(!plan.publication && options.applicationArtifactOwner && options.pythonPackageOwner
+      ? {
+          publication: {
+            applicationArtifactOwner: options.applicationArtifactOwner,
+            pythonPackageOwner: options.pythonPackageOwner,
+          },
+        }
+      : {}),
     resolver: plan.resolver,
     ...(runtimeArtifacts.length > 0 ? { runtimeArtifacts } : {}),
     runtimeContract: runtimeContract(plan, options.recipe),
     schemaVersion: plan.schemaVersion,
+    ...(options.recipe?.healthChecks?.length
+      ? {
+          verification: {
+            healthChecks: options.recipe.healthChecks,
+          },
+        }
+      : plan.verification
+        ? { verification: plan.verification }
+        : {}),
     wheels: plan.wheels,
   };
   return createPythonEnvironmentPlan(input);

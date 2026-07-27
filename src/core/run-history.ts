@@ -133,6 +133,8 @@ function pythonApplicationDocumentPaths(index: PythonApplicationBundleIndex): st
       application.planPath,
       application.planDiffPath,
       application.prerequisiteReportPath,
+      application.consumerContractPath,
+      ...application.consumerConfigurationPaths,
       ...application.locks.map((lock) => lock.file),
     ]) {
       if (
@@ -533,6 +535,8 @@ export async function writePublishRunHistory(
       'apply-dry-run-report.json',
       'python-publish-report.json',
       'python-publish-dry-run-report.json',
+      'python-application-publish-report.json',
+      'python-application-publish-dry-run-report.json',
     ].map((fileName) =>
       copyIfExists(path.join(options.bundleDir, fileName), path.join(targetDir, fileName))
     )

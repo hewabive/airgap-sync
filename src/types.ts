@@ -1,5 +1,6 @@
 import type { PythonFetchReport } from './core/python/bundle.js';
 import type { PythonApplicationDownloadReport } from './core/python/application-bundle.js';
+import type { PythonGenericPublishReport } from './core/python/generic-publisher.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
 import type { PythonResolutionMode } from './core/python/resolution-policy.js';
 
@@ -466,6 +467,7 @@ export interface ApplyBundleReport {
   gitea: GiteaRepositoryProvisionReport;
   publish: PublishReport;
   python?: PythonPublishReport;
+  pythonApplications?: PythonGenericPublishReport;
   registryUrl: string;
   succeeded: boolean;
 }

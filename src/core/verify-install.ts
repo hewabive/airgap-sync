@@ -15,6 +15,13 @@ import type {
 import type { WorkspaceSnapshot, WorkspaceTargetSnapshot } from './workspace.js';
 import { readPythonSeedManifest, type PythonSeedManifest } from './python/bundle.js';
 import type { PythonTargetEnvironmentConfig } from './python/environments.js';
+import {
+  readPythonApplicationBundleIndex,
+  type PythonApplicationBundleEntry,
+} from './python/application-bundle.js';
+import type { PythonConsumerContract } from './python/consumer-contract.js';
+import type { PythonEnvironmentPlan, PythonPlatformPlan } from './python/environment-plan.js';
+import { compareVersions, versionSatisfies } from './python/pep440.js';
 
 export interface InstallCommandInvocation {
   args: string[];
@@ -335,6 +342,260 @@ async function verifyPythonInstall(options: {
   };
 }
 
+interface PythonInterpreterCommand {
+  command: string;
+  prefixArgs: string[];
+}
+
+function localPythonPlatformFamilyId(): string | undefined {
+  if (process.arch !== 'x64') {
+    return undefined;
+  }
+  if (process.platform === 'win32') {
+    return 'windows-x86_64';
+  }
+  if (process.platform === 'linux') {
+    return 'linux-glibc-x86_64';
+  }
+  return undefined;
+}
+
+function localGlibcVersion(): string | undefined {
+  const header = (process.report.getReport() as { header?: { glibcVersionRuntime?: unknown } })
+    .header;
+  return typeof header?.glibcVersionRuntime === 'string' ? header.glibcVersionRuntime : undefined;
+}
+
+function interpreterCandidates(pythonMinor: string): PythonInterpreterCommand[] {
+  return process.platform === 'win32'
+    ? [
+        { command: 'py', prefixArgs: [`-${pythonMinor}`] },
+        { command: `python${pythonMinor}`, prefixArgs: [] },
+        { command: 'python', prefixArgs: [] },
+      ]
+    : [
+        { command: `python${pythonMinor}`, prefixArgs: [] },
+        { command: 'python3', prefixArgs: [] },
+        { command: 'python', prefixArgs: [] },
+      ];
+}
+
+async function findMatchingInterpreter(options: {
+  branch: PythonPlatformPlan;
+  env: NodeJS.ProcessEnv;
+  runner: InstallCommandRunner;
+  tempRoot: string;
+  timeoutMs: number;
+}): Promise<PythonInterpreterCommand | undefined> {
+  for (const candidate of interpreterCandidates(options.branch.pythonMinor)) {
+    const result = await options.runner({
+      args: [...candidate.prefixArgs, '--version'],
+      command: candidate.command,
+      cwd: options.tempRoot,
+      env: options.env,
+      timeoutMs: options.timeoutMs,
+    });
+    if (result.exitCode !== 0) {
+      continue;
+    }
+    const version = /Python\s+(\d+\.\d+\.\d+)/iu.exec(`${result.stdout}\n${result.stderr}`)?.[1];
+    if (
+      version?.startsWith(`${options.branch.pythonMinor}.`) &&
+      versionSatisfies(version, options.branch.requiresPython)
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+async function verifyPythonApplicationInstall(options: {
+  application: PythonApplicationBundleEntry;
+  bundleDir: string;
+  env: NodeJS.ProcessEnv;
+  indexUrl: string;
+  runner: InstallCommandRunner;
+  tempRoot: string;
+  timeoutMs: number;
+}): Promise<VerifyInstallProjectResult> {
+  const plan = await fs.readJson<PythonEnvironmentPlan>(
+    path.join(options.bundleDir, options.application.planPath)
+  );
+  const contract = await fs.readJson<PythonConsumerContract>(
+    path.join(options.bundleDir, options.application.consumerContractPath)
+  );
+  const platformFamilyId = localPythonPlatformFamilyId();
+  const branch = plan.platforms.find(
+    (candidate) => candidate.platformFamilyId === platformFamilyId
+  );
+  const subject = `python-app:${options.application.targetId}`;
+  if (!branch) {
+    return {
+      packageManager: 'pip',
+      projectPath: subject,
+      reason: `This verifier does not match a planned platform branch (${platformFamilyId ?? `${process.platform}/${process.arch}`})`,
+      status: 'skipped',
+      targetUrl: options.indexUrl,
+    };
+  }
+  const glibcVersion = localGlibcVersion();
+  if (
+    branch.supportBoundary?.glibc &&
+    (!glibcVersion || compareVersions(glibcVersion, branch.supportBoundary.glibc) < 0)
+  ) {
+    return {
+      packageManager: 'pip',
+      projectPath: subject,
+      reason: `Verifier glibc ${glibcVersion ?? 'unknown'} does not satisfy >= ${branch.supportBoundary.glibc}`,
+      status: 'skipped',
+      targetUrl: options.indexUrl,
+    };
+  }
+  const interpreter = await findMatchingInterpreter({
+    branch,
+    env: options.env,
+    runner: options.runner,
+    tempRoot: options.tempRoot,
+    timeoutMs: options.timeoutMs,
+  });
+  if (!interpreter) {
+    return {
+      packageManager: 'pip',
+      projectPath: subject,
+      reason: `No externally provisioned Python ${branch.pythonMinor} interpreter is available`,
+      status: 'skipped',
+      targetUrl: options.indexUrl,
+    };
+  }
+  const lock = options.application.locks.find(
+    (candidate) =>
+      candidate.format === 'requirements' &&
+      candidate.platformFamilyId === branch.platformFamilyId &&
+      candidate.pythonMinor === branch.pythonMinor
+  );
+  if (!lock) {
+    return {
+      packageManager: 'pip',
+      projectPath: subject,
+      reason: 'The bundle has no matching requirements lock',
+      status: 'failed',
+      targetUrl: options.indexUrl,
+    };
+  }
+  const venvPath = path.join(options.tempRoot, 'python-applications', options.application.targetId);
+  await fs.ensureDir(path.dirname(venvPath));
+  const createArgs = [...interpreter.prefixArgs, '-m', 'venv', venvPath];
+  const create = await options.runner({
+    args: createArgs,
+    command: interpreter.command,
+    cwd: options.tempRoot,
+    env: options.env,
+    timeoutMs: options.timeoutMs,
+  });
+  if (create.exitCode !== 0) {
+    const output = `${create.stdout}\n${create.stderr}`;
+    return {
+      command: [interpreter.command, ...createArgs],
+      exitCode: create.exitCode,
+      packageManager: 'pip',
+      projectPath: subject,
+      ...(/ensurepip|python\S*-venv|no module named ['"]?venv/iu.test(output)
+        ? { reason: 'Matching Python is present but venv/ensurepip support is unavailable' }
+        : {}),
+      status: /ensurepip|python\S*-venv|no module named ['"]?venv/iu.test(output)
+        ? 'skipped'
+        : 'failed',
+      stderr: truncateOutput(create.stderr),
+      stdout: truncateOutput(create.stdout),
+      targetUrl: options.indexUrl,
+    };
+  }
+  const python =
+    process.platform === 'win32'
+      ? path.join(venvPath, 'Scripts', 'python.exe')
+      : path.join(venvPath, 'bin', 'python');
+  const lockPath = path.join(options.bundleDir, lock.file);
+  const installArgs = [
+    '-m',
+    'pip',
+    'install',
+    '--index-url',
+    options.indexUrl,
+    '--only-binary=:all:',
+    '--no-deps',
+    '--require-hashes',
+    '-r',
+    lockPath,
+  ];
+  const install = await options.runner({
+    args: installArgs,
+    command: python,
+    cwd: options.tempRoot,
+    env: options.env,
+    timeoutMs: options.timeoutMs,
+  });
+  if (install.exitCode !== 0) {
+    return {
+      command: [python, ...installArgs],
+      exitCode: install.exitCode,
+      packageManager: 'pip',
+      projectPath: subject,
+      status: 'failed',
+      stderr: truncateOutput(install.stderr),
+      stdout: truncateOutput(install.stdout),
+      targetUrl: options.indexUrl,
+      tempPath: venvPath,
+    };
+  }
+  const checks = [
+    { args: ['-m', 'pip', 'check'], command: python },
+    ...(contract.platforms
+      .find((candidate) => candidate.platformFamilyId === branch.platformFamilyId)
+      ?.healthChecks.map((check) => ({
+        args: check.args,
+        command: /^(?:python|python3)$/u.test(check.command) ? python : check.command,
+      })) ?? []),
+  ];
+  const binDirectory = path.dirname(python);
+  const verificationEnv = {
+    ...options.env,
+    PATH: `${binDirectory}${path.delimiter}${options.env.PATH ?? ''}`,
+  };
+  for (const check of checks) {
+    const result = await options.runner({
+      args: check.args,
+      command: check.command,
+      cwd: options.tempRoot,
+      env: verificationEnv,
+      timeoutMs: options.timeoutMs,
+    });
+    if (result.exitCode !== 0) {
+      return {
+        command: [check.command, ...check.args],
+        exitCode: result.exitCode,
+        packageManager: 'pip',
+        projectPath: subject,
+        status: 'failed',
+        stderr: truncateOutput(result.stderr),
+        stdout: truncateOutput(result.stdout),
+        targetUrl: options.indexUrl,
+        tempPath: venvPath,
+      };
+    }
+  }
+  return {
+    command: [python, ...installArgs],
+    exitCode: 0,
+    packageManager: 'pip',
+    projectPath: subject,
+    status: 'passed',
+    stderr: truncateOutput(install.stderr),
+    stdout: truncateOutput(install.stdout),
+    targetUrl: options.indexUrl,
+    tempPath: venvPath,
+  };
+}
+
 function summarize(
   projects: VerifyInstallProjectResult[]
 ): Pick<VerifyInstallReport, 'failed' | 'ok' | 'passed' | 'skipped' | 'totalProjects'> {
@@ -441,9 +702,11 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
   const pythonManifest = (await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json')))
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
-  const pythonOwner = options.pythonOwner ?? snapshot.pythonPublishOwner;
+  const pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
+  const pythonOwner =
+    options.pythonOwner ?? snapshot.python?.publishOwner ?? snapshot.pythonPublishOwner;
   const pythonIndexUrl =
-    pythonManifest && pythonOwner
+    (pythonManifest || pythonApplicationIndex) && pythonOwner
       ? `${normalizeBaseUrl(options.giteaBaseUrl)}/api/packages/${encodeURIComponent(pythonOwner)}/pypi/simple`
       : undefined;
   const gitSources = await readOptionalGitSources(bundleDir);
@@ -491,13 +754,22 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
         })
       );
     }
-    if (pythonManifest) {
+    const legacyPythonManifest = pythonManifest
+      ? {
+          ...pythonManifest,
+          packages: pythonManifest.packages.flatMap((pkg) => {
+            const files = pkg.files.filter((file) => file.file.startsWith('python-packages/'));
+            return files.length > 0 ? [{ ...pkg, files }] : [];
+          }),
+        }
+      : undefined;
+    if (legacyPythonManifest?.packages.length) {
       projects.push(
         pythonIndexUrl
           ? await verifyPythonInstall({
               env,
               indexUrl: pythonIndexUrl,
-              manifest: pythonManifest,
+              manifest: legacyPythonManifest,
               runner,
               tempRoot,
               timeoutMs,
@@ -505,6 +777,27 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
           : {
               packageManager: 'pip',
               projectPath: 'python',
+              reason: 'Python publish owner is not configured',
+              status: 'skipped',
+              targetUrl: options.giteaBaseUrl,
+            }
+      );
+    }
+    for (const application of pythonApplicationIndex?.applications ?? []) {
+      projects.push(
+        pythonIndexUrl
+          ? await verifyPythonApplicationInstall({
+              application,
+              bundleDir,
+              env,
+              indexUrl: pythonIndexUrl,
+              runner,
+              tempRoot,
+              timeoutMs,
+            })
+          : {
+              packageManager: 'pip',
+              projectPath: `python-app:${application.targetId}`,
               reason: 'Python publish owner is not configured',
               status: 'skipped',
               targetUrl: options.giteaBaseUrl,

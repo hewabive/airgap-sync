@@ -49,6 +49,11 @@ export {
 } from './core/python/application-bundle.js';
 export { comparePythonEnvironmentPlans, formatPythonPlanDiff } from './core/python/plan-diff.js';
 export {
+  createPythonConsumerBundleDocuments,
+  createPythonRequirementsLock,
+} from './core/python/consumer-contract.js';
+export { publishPythonGenericArtifacts } from './core/python/generic-publisher.js';
+export {
   createPythonEnvironmentPlan,
   pythonEnvironmentPlanId,
   pythonEnvironmentPlanSemanticContent,
@@ -398,6 +403,19 @@ export type {
   VerifyPythonApplicationBundleResult,
 } from './core/python/application-bundle.js';
 export type { PythonPlanDiffReport } from './core/python/plan-diff.js';
+export type {
+  CreatePythonConsumerBundleDocumentsOptions,
+  PythonConsumerBundleDocuments,
+  PythonConsumerContract,
+  PythonConsumerLock,
+  PythonConsumerPlatformContract,
+} from './core/python/consumer-contract.js';
+export type {
+  PublishPythonGenericArtifactsOptions,
+  PythonGenericPublishAction,
+  PythonGenericPublishAuth,
+  PythonGenericPublishReport,
+} from './core/python/generic-publisher.js';
 
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
 export type {
