@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "build": "tsc --noEmit && tsup",
+    "benchmark:python-bundle": "node ./scripts/benchmark-python-bundle.mjs",
     "check": "npm run lint && npm run typecheck && npm run test:run && npm run knip",
     "cli": "node ./dist/cli.cjs",
     "dev": "tsup --watch",

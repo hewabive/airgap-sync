@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/hewabive/airgap-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/hewabive/airgap-sync/actions/workflows/ci.yml)
 
-Synchronize Git repositories, npm packages, and Python wheels across an air gap using
-removable media.
+Synchronize Git repositories, npm packages, and Python applications across an air gap
+using removable media.
 
 The intended workflow is simple for the operator:
 
@@ -11,14 +11,17 @@ The intended workflow is simple for the operator:
    discover their Node dependency graph, and download the required npm packages and Git
    dependency mirrors into `airgap-bundle/`.
 2. Move the removable media into the closed network.
-3. Run **Publish updates** to populate the closed-network npm registry and Git host
-   using normal `npm publish`, `npm dist-tag`, and `git push` operations.
+3. Run **Publish updates** to populate the closed-network npm registry and Gitea
+   package/Git services through normal publication APIs.
 4. Consumer machines install normally from the closed-network services:
 
 ```bash
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
-PIP_INDEX_URL=http://gitea.local/api/packages/pypi/pypi/simple pip install -r requirements.txt
+python3.11 -m pip install \
+  --index-url http://gitea.local/api/packages/pypi/pypi/simple \
+  --only-binary=:all: --no-deps --require-hashes \
+  -r requirements.lock
 ```
 
 `airgap-sync` is not a live proxy and not a full npm registry mirror. It builds the
@@ -37,21 +40,25 @@ been tested with Verdaccio and Gitea:
 - npm dependency resolution, tarball download, checksum validation, retries, and pruning;
 - Python discovery from `requirements*.txt`, `uv.lock`, and `pylock*.toml`, with
   per-environment wheel resolution, hash validation, and Gitea PyPI publishing;
+- application-first Python planning with automatic CPython-minor selection, broad
+  Windows/Linux x86-64 coverage, inferred glibc boundaries, immutable per-platform
+  locks, and Gitea Generic Package consumer contracts;
 - Git dependency discovery and mirroring;
 - npm publish with temporary tags, dist-tag restoration, and bundled `latest` handling;
 - Gitea repository creation or publishing to already-created Git repositories;
-- static bundle validation and install verification for configured Git targets;
+- static bundle validation and temporary install verification for configured
+  Git/Python application targets;
 - append-only download and publish run reports under `airgap-bundle/runs/`.
 
-Expect more hardening around large real-world repositories, authentication variants,
-performance on slow removable media, and operator ergonomics.
+Remaining real-environment validation focuses on large repositories, private
+authentication variants, slow removable media, and suitable KTransformers hardware.
 
 ## Requirements
 
 - Node.js 22 or newer
 - npm 11 or newer
 - Git
-- Online side: access to the source npm registry and upstream Git hosts
+- Online side: access to source npm/Python registries and upstream Git hosts
 - Closed side: an npm-compatible registry and Gitea 1.26.2 or newer with its package
   registry enabled
 
@@ -77,13 +84,15 @@ Running `airgap-sync` without a subcommand opens the interactive menu. Use
 
 The menu covers the normal workflow:
 
-- **Targets**: add, remove, configure, or download one Git/npm/PyPI target.
+- **Targets**: add, remove, configure, or download one Git/npm/Python application
+  target.
 - **Download updates**: run the online collection phase.
 - **Publish updates**: publish the bundle into the closed-network registry and Git host.
 - **Verify installs**: run package-manager installs for configured Git targets.
 - **Diagnostics**: inspect, validate, and summarize the bundle.
-- **Settings**: configure endpoints, Python/PyPI target environments, defaults, and
-  saved credentials.
+- **Settings**: configure endpoints, Python application publication/coverage, defaults,
+  and saved credentials. Exact environments and raw PyPI seeding remain under
+  Advanced/Legacy.
 
 The same workflow can be scripted:
 
@@ -92,9 +101,8 @@ The same workflow can be scripted:
 npm exec -- airgap-sync init
 npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
 npm exec -- airgap-sync target add npm eslint@latest
-npm exec -- airgap-sync target add pypi 'requests==2.32.4' --python-resolution-mode approximate
-npm exec -- airgap-sync target add python-wheel 'https://example/vllm.whl' --sha256 <digest> --python-resolution-mode approximate
-npm exec -- airgap-sync target add python-runtime 3.12.13 'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' --sha256 <digest>
+npm exec -- airgap-sync target add python-app orjson --coverage desktop-x64
+npm exec -- airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z
 
 # Online machine.
 npm exec -- airgap-sync download --prune
@@ -118,6 +126,39 @@ For Windows operators who prefer a double-click workflow, optional launchers liv
 machines; they find the removable drive workspace automatically. The download launcher
 updates and rebuilds the source checkout before running `download`; the publish
 launcher only runs the already-built `publish` command.
+
+## Python Applications
+
+New workspaces use schema v2 and default to broad Windows/Linux x86-64 coverage. The
+normal workflow asks for an application and coverage, not Python patch versions,
+distributions, manylinux tags, CPU/GPU inventory, or a resolver:
+
+```bash
+npm exec -- airgap-sync target add python-app ktransformers \
+  --coverage desktop-x64 \
+  --feature accelerator=cuda
+npm exec -- airgap-sync plan
+```
+
+Planning uses a pinned, hash-verified `uv` executable but remains independent of the
+collector platform. Every requested branch must resolve with wheels only; otherwise no
+partial plan is activated. Narrowing the target is explicit:
+
+```bash
+npm exec -- airgap-sync target add python-app ktransformers \
+  --platform linux-glibc-x86_64 \
+  --feature accelerator=cuda
+```
+
+KTransformers has a maintained workspace-local recipe. The reviewed release has a
+complete Linux wheel closure with an inferred glibc 2.35 floor, while its `kt-kernel`
+dependency has no native Windows wheel. Broad coverage therefore reports Windows as
+unsupported instead of silently publishing Linux only. Model weights are separate
+application data and are not included as PyPI dependencies.
+
+After `download` and closed-network `publish`, the bundle's consumer contract provides
+the exact standard pip/uv command. The compatible CPython runtime and system
+prerequisites are provisioned outside `airgap-sync`.
 
 ## Git Mirrors
 
@@ -175,7 +216,8 @@ The configured workspace lives next to the transfer bundle on removable media:
 ```text
 airgap-sync.json          Target list, endpoints, bundle path, and menu defaults
 airgap-sync.secrets.json  Optional saved secrets, ignored by Git
-airgap-bundle/            Transfer bundle for npm packages and Git mirrors
+.airgap-sync/             Active Python plans and workspace-local recipes
+airgap-bundle/            Transfer bundle
 ```
 
 `airgap-sync.json` is long-lived workspace state. It stores configured targets and
@@ -190,6 +232,9 @@ The bundle contains the current transferable state plus audit reports:
 ```text
 airgap-bundle/packages/                 npm tarballs
 airgap-bundle/python-packages/          Python wheels
+airgap-bundle/python/application-index.json
+airgap-bundle/python/applications/      Per-application plans, locks, and contracts
+airgap-bundle/python/artifacts/         Shared content-addressed Python artifacts
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
 airgap-bundle/python-seed-manifest.json bundled Python files and target environments
@@ -211,8 +256,10 @@ configured Git targets against the closed-network npm registry and Git host. It 
 closest automated check to the final consumer workflow, but it does not yet enforce a
 network-deny sandbox. Use `--ignore-scripts` when install scripts should not run during
 verification. When the machine has a Python interpreter exactly matching a configured
-target environment, the command also creates a temporary venv and installs the pinned
-bundled wheels from Gitea; otherwise the Python check is recorded as skipped.
+application branch, the command creates a temporary venv and runs the generated exact
+closed-index lock plus `pip check` and reviewed health checks. Otherwise the Python
+check is recorded as skipped. Production Python provisioning and installation remain
+outside `airgap-sync`.
 
 pnpm v11 treats packages published into local Verdaccio as newly published packages.
 For closed-network consumers that install trusted project lockfiles, configure pnpm to
@@ -276,6 +323,8 @@ npm run lint        # Run ESLint
 npm run format      # Format source and docs
 npm run check       # Lint, type-check, tests, and knip
 npm run e2e:local   # Run the local Gitea/Verdaccio integration test
+npm run e2e:ktransformers # Live pinned-uv KTransformers planning check
+npm run benchmark:python-bundle -- /media/USB/airgap-bundle
 ```
 
 ## Documentation
@@ -287,6 +336,7 @@ npm run e2e:local   # Run the local Gitea/Verdaccio integration test
 - [Workflows](./docs/workflows.md)
 - [Changelog](./CHANGELOG.md)
 - [Security Policy](./SECURITY.md)
+- [Python Application Security Review](./docs/python-application-security-review.md)
 
 ## License
 

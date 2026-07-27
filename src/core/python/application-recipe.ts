@@ -288,6 +288,18 @@ export function resolvePythonApplicationRecipe(
   };
 }
 
+export function assertPythonApplicationRecipeCurrent(
+  recipe: PythonApplicationRecipe | undefined,
+  plannedAt: string
+): void {
+  const expiresAt = recipe?.compatibility?.expiresAt;
+  if (expiresAt && Date.parse(plannedAt) >= Date.parse(expiresAt)) {
+    throw new Error(
+      `Python application recipe ${recipe.id} expired at ${expiresAt}; review and update the workspace-local recipe before planning`
+    );
+  }
+}
+
 export function pythonRecipeIncompatibilityReason(
   recipe: PythonApplicationRecipe | undefined,
   intent: PythonApplicationIntent,

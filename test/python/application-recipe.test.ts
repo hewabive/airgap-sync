@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertPythonApplicationRecipeCurrent,
   normalizePythonApplicationRecipe,
   pythonRecipeIncompatibilityReason,
   resolvePythonApplicationRecipe,
@@ -116,5 +117,24 @@ describe('Python application recipes', () => {
         version: '1',
       })
     ).toThrow('without an environment marker');
+  });
+
+  it('requires an explicit review after a maintained recipe expires', () => {
+    const recipe = normalizePythonApplicationRecipe({
+      application: 'demo-app',
+      compatibility: {
+        expiresAt: '2026-08-01T00:00:00.000Z',
+      },
+      id: 'demo',
+      schemaVersion: 1,
+      version: '1',
+    });
+
+    expect(() => {
+      assertPythonApplicationRecipeCurrent(recipe, '2026-07-31T23:59:59.000Z');
+    }).not.toThrow();
+    expect(() => {
+      assertPythonApplicationRecipeCurrent(recipe, '2026-08-01T00:00:00.000Z');
+    }).toThrow('review and update');
   });
 });

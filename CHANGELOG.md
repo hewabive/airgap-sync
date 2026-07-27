@@ -2,6 +2,24 @@
 
 ## 0.1.0
 
+- Added schema-v2 `python-app` targets with application-first Windows/Linux coverage,
+  automatic CPython-minor selection, pinned `uv` planning, wheels-only closures,
+  inferred glibc boundaries, and collector-independent cross-platform resolution.
+- Added immutable Python application plans, content-addressed shared wheels,
+  per-platform pylock/requirements locks, external runtime prerequisite contracts,
+  plan diffs, reference-safe partial updates/pruning, and bundle verification.
+- Added Gitea Generic Package publication for application plans, consumer contracts,
+  locks, and optional hash-verified CPython/uv transfers; production installation
+  remains owned by consumer infrastructure using standard pip/uv commands.
+- Added broad coverage commands, privacy-limited optional probe diagnostics, the
+  application-first interactive menu/settings flow, guided unsupported-coverage
+  errors, and Advanced/Legacy placement for raw Python seeding controls.
+- Added a maintained KTransformers recipe and captured fixture. Broad native Windows
+  coverage is rejected precisely because the reviewed `kt-kernel` release has Linux
+  wheels only; Linux planning selects Python 3.11 and infers glibc 2.35.
+- Added interrupted download/publication recovery tests, fixed-cutoff reproducibility
+  coverage, removable-media bundle benchmarking, and a Python application security
+  review.
 - Added workspace targets for repeatable removable-media workflows.
 - Added partial workspace downloads for selected targets.
 - Made `publish` workspace-aware so it can use `airgap-sync.json` defaults when run

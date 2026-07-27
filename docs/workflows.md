@@ -43,9 +43,8 @@ airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
-airgap-sync target add pypi 'requests==2.32.4' --python-resolution-mode approximate
-airgap-sync target add python-wheel 'https://example/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' --sha256 <digest> --python-resolution-mode approximate
-airgap-sync target add python-runtime 3.12.13 'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' --sha256 <digest>
+airgap-sync target add python-app orjson --coverage desktop-x64
+airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z
 airgap-sync target list
 ```
 
@@ -58,10 +57,10 @@ Operators who prefer prompts can run:
 airgap-sync
 ```
 
-The menu covers target management, endpoint configuration, Python/PyPI target
-environments, online download, offline publish, verification, and bundle info. During
-interactive workspace initialization it offers to configure Python support. The same
-settings remain available later under `Settings` → `Python / PyPI`.
+The menu covers target management, endpoint configuration, Python application
+coverage/publication, online download, offline publish, verification, and bundle info.
+During initialization it asks whether Python applications should cover Windows, Linux,
+or both. Exact environments and raw PyPI targets remain under Advanced/Legacy.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
@@ -81,57 +80,59 @@ If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
 
-Python support is enabled by adding explicit target environments through the menu or
-JSON. Full patch versions and Linux compatibility levels are required so wheel
-selection never guesses the consumer platform:
+New workspaces use application-first schema v2:
 
 ```json
 {
+  "schemaVersion": 2,
   "gitOwnerStrategy": "preserve",
-  "pythonSourceIndex": "https://pypi.org/simple/",
-  "pythonPublishOwner": "pypi",
-  "pythonResolutionMode": "locked-only",
+  "python": {
+    "sourceIndex": "https://pypi.org/simple/",
+    "publishOwner": "pypi",
+    "applicationArtifactOwner": "python-apps",
+    "planner": {
+      "engine": "uv",
+      "version": "0.11.16"
+    }
+  },
+  "coveragePolicies": [
+    {
+      "id": "desktop-x64",
+      "platforms": ["windows-x86_64", "linux-glibc-x86_64"],
+      "version": 1,
+      "wheelStrategy": "all-compatible"
+    }
+  ],
   "targets": [
     {
       "type": "git",
       "url": "https://github.com/acme/app.git"
     },
     {
-      "type": "pypi",
-      "spec": "ktransformers",
-      "pythonResolutionMode": "approximate"
-    }
-  ],
-  "pythonTargetEnvironments": [
-    {
-      "name": "prod-linux",
-      "pythonVersion": "3.11.9",
-      "os": "linux",
-      "arch": "x86_64",
-      "manylinux": "manylinux_2_17"
+      "type": "python-app",
+      "spec": "orjson",
+      "coverage": "desktop-x64",
+      "application": {
+        "extras": [],
+        "features": {}
+      },
+      "python": {
+        "policy": "auto"
+      }
     }
   ]
 }
 ```
 
-`requirements*.txt`, `uv.lock`, and `pylock*.toml` are discovered in workspace
-repositories and mirrored Git dependencies. `--include-dev` also includes development
-requirements files and lock dependency groups. Direct URL, VCS, editable, path, sdist,
-and extra-index inputs are intentionally reported as unsupported in this version.
-Unlocked requirements and direct PyPI targets fail under the `locked-only` mode. The
-top-level `pythonResolutionMode` is the workspace default; Git, PyPI, and exact
-root-wheel targets can override it with their own `pythonResolutionMode`. This allows,
-for example, locked Git applications and one approximate direct PyPI target to share a
-workspace. Use `target set-python-resolution <index> approximate` to change an existing
-target, or `inherit` to return it to the workspace default. The run-wide
-`--allow-approximate-python` flag has highest priority and enables approximate
-resolution for every target for that one download.
+Run `plan` after adding/changing a Python application, coverage policy, feature, or
+workspace-local recipe. Planning chooses an application version and compatible Python
+minor, resolves every requested platform with wheels only, and infers Linux's glibc
+floor. The plan becomes active only when coverage is complete.
 
-Choose `approximate` only to explicitly accept the simplified resolver without
-dependency backtracking.
-An exact `python-wheel` target also needs this opt-in for its transitive metadata
-closure, but the root itself is always pinned and verified by SHA-256. All resolved
-wheels are published through the same Gitea PyPI owner during the offline phase.
+Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
+`python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.
+Their exact environments and approximate resolver opt-ins are Advanced/Legacy, not
+normal application settings.
 
 ## Online Phase
 
@@ -155,7 +156,9 @@ enabled in defaults, so dependencies for other configured targets are not remove
 The download step fetches configured Git targets as bare mirrors under
 `airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
 configured npm targets as root package specs, and writes the transfer bundle under
-`airgap-bundle/` by default.
+`airgap-bundle/` by default. It also materializes each active Python application plan,
+downloads the deduplicated wheel union, and emits exact platform locks and consumer
+contracts. A missing or stale plan fails before application collection.
 
 Lower-level collection from an explicit repository directory is still available:
 
@@ -196,7 +199,9 @@ The download step writes npm metadata and Git source metadata:
 - local bare Git mirrors under `git-mirrors/`
 - Git source records for offline publish
 - `python-seed-manifest.json`, `python-fetch-report.json`, and verified wheels under
-  `python-packages/` when Python target environments are configured
+  `python-packages/` when legacy Python target environments are configured
+- `python/application-index.json`, per-application plans/locks, and shared
+  content-addressed artifacts for schema-v2 applications
 
 By default, download uses `latestPolicy: "bundled"`: publish computes `latest` from
 `seed-manifest.json`, using the newest version already present in the bundle for each
@@ -241,9 +246,11 @@ airgap-sync bundle prune ./airgap-bundle --dry-run
 airgap-sync bundle prune ./airgap-bundle
 ```
 
-Pruning removes tarballs, wheels, and Git mirrors that are no longer referenced by the
-latest successful bundle documents. It refuses to run after an incomplete download and does
-not delete anything from Verdaccio or Gitea.
+Pruning removes tarballs, wheels, obsolete application plans, and Git mirrors that are
+no longer referenced by the latest successful bundle documents. Shared Python
+artifacts remain while any application references them. Prune refuses to run after an
+incomplete or partial target download and does not delete anything from Verdaccio or
+Gitea.
 
 Before transfer, inspect the bundle:
 
@@ -270,6 +277,7 @@ Copy the whole `./airgap-bundle` directory to the closed network, including:
 - Git source metadata
 - Git mirror fetch reports
 - `python-packages/`, `python-seed-manifest.json`, and Python reports when present
+- `python/` application plans, consumer contracts, locks, and shared artifacts
 
 Do not copy only tarballs. The JSON files are the audit trail and are required by later
 commands.
@@ -302,15 +310,20 @@ The offline publish step should:
 - preserve upstream owner/repository paths when possible;
 - create missing Gitea owners or repositories;
 - push local bare mirrors into Gitea using the provided Gitea token;
-- generate install configuration for consumer machines.
-- publish every bundled wheel under `pythonPublishOwner` through Gitea's PyPI upload
+- generate install configuration for consumer machines;
+- publish every bundled wheel under `python.publishOwner` through Gitea's PyPI upload
   API; a 409 is accepted only when the existing file has the same sha256.
+- publish application plans, locks, prerequisites, configuration, and optional
+  runtime/tool transfer artifacts through Gitea Generic Packages.
 
-For a public owner, consumers need no credentials:
+Use the exact command in each application consumer contract. For a public owner it
+needs no credentials:
 
 ```bash
-export PIP_INDEX_URL=http://gitea.local/api/packages/pypi/pypi/simple
-pip install --only-binary=:all: -r requirements.txt
+python3.11 -m pip install \
+  --index-url http://gitea.local/api/packages/pypi/pypi/simple \
+  --only-binary=:all: --no-deps --require-hashes \
+  -r lock/linux-glibc-x86_64--py311.requirements.lock
 ```
 
 Use this index as the primary `index-url`, not as an extra index, to avoid dependency
@@ -364,6 +377,11 @@ Run the normal package-manager install against Verdaccio:
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 ```
+
+Python consumer infrastructure separately provisions the plan's compatible CPython
+minor and system prerequisites, then runs the generated pip/uv command. `airgap-sync`
+does not create or manage that production environment. `verify install` can reproduce
+the flow in a temporary venv on a compatible machine and otherwise records a skip.
 
 pnpm v11 applies `minimumReleaseAge: 1440` by default and verifies loaded lockfiles
 unless `trustLockfile` is enabled. Because `airgap-sync` fills Verdaccio through
@@ -488,3 +506,15 @@ mirrors, or writing global Git config.
   `--ignore-scripts` when lifecycle scripts should not execute during verification.
 - Real-environment testing is still needed for large monorepositories, private source
   registries, private Git hosts, and authentication variants.
+- KTransformers import/CLI smoke testing requires suitable Linux hardware and remains
+  outside generic CI. Model weights use a separate application-data transfer workflow.
+
+Measure an actual large Python bundle directly on its removable-media mount:
+
+```bash
+npm run benchmark:python-bundle -- /media/USB/airgap-bundle --passes=2
+```
+
+The benchmark performs sequential reads plus SHA-256 validation. The first pass
+captures media and cold-cache effects; later passes may be served by the OS cache. It
+is a measurement report, not a hardware-independent pass/fail threshold.

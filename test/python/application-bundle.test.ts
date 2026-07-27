@@ -308,6 +308,70 @@ describe('Python application bundle', () => {
     });
   });
 
+  it('recovers from an interrupted multi-artifact download without activating a partial index', async () => {
+    const firstContent = wheelBuffer('1.0.0');
+    const secondContent = wheelBuffer('2.0.0');
+    const firstSha = createHash('sha256').update(firstContent).digest('hex');
+    const secondSha = createHash('sha256').update(secondContent).digest('hex');
+    const firstSource = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    const secondSource = path.join(tempDir, 'shared-2.0.0-py3-none-any.whl');
+    await fs.writeFile(firstSource, firstContent);
+    const bundleDir = path.join(tempDir, 'bundle');
+    const first = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(firstSource),
+        sha256: firstSha,
+        size: firstContent.byteLength,
+        sourceUrl: pathToFileURL(firstSource).toString(),
+      })
+    );
+    const second = activePlan(
+      createPlan({
+        application: 'second-app',
+        filename: path.basename(secondSource),
+        sha256: secondSha,
+        size: secondContent.byteLength,
+        sourceUrl: pathToFileURL(secondSource).toString(),
+        wheelVersion: '2.0.0',
+      })
+    );
+    const targets = [
+      { activePlan: first, targetId: first.manifest.targetId },
+      { activePlan: second, targetId: second.manifest.targetId },
+    ];
+
+    const interrupted = await downloadPythonApplicationPlans({
+      bundleDir,
+      targets,
+    });
+
+    expect(interrupted).toMatchObject({
+      downloaded: 1,
+      errors: [expect.objectContaining({ status: 'error' })],
+    });
+    expect(await readPythonApplicationBundleIndex(bundleDir)).toBeUndefined();
+
+    await fs.writeFile(secondSource, secondContent);
+    const recovered = await downloadPythonApplicationPlans({
+      bundleDir,
+      targets,
+    });
+
+    expect(recovered).toMatchObject({
+      downloaded: 1,
+      errors: [],
+      existing: 1,
+    });
+    expect(await readPythonApplicationBundleIndex(bundleDir)).toMatchObject({
+      summary: {
+        applications: 2,
+        artifacts: 2,
+      },
+    });
+    expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
+  });
+
   it('preserves unselected references during a partial target update', async () => {
     const oldContent = wheelBuffer('1.0.0');
     const oldSha = createHash('sha256').update(oldContent).digest('hex');

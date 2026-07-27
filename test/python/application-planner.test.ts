@@ -255,4 +255,46 @@ describe('Python application planner', () => {
       )
     ).toBe(true);
   });
+
+  it('reproduces the same semantic plan across runs with a fixed index cutoff', async () => {
+    const cutoff = '2026-07-27T00:00:00.000Z';
+    const coveragePolicy = normalizePlatformCoveragePolicy({
+      id: 'desktop-x64',
+      platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+    });
+    const firstResolver = new FixtureResolver();
+    const secondResolver = new FixtureResolver();
+    const first = await planPythonApplication({
+      cacheDir: '/cache/first',
+      coveragePolicy,
+      createdAt: '2026-07-27T01:00:00.000Z',
+      cutoff,
+      index: new FixtureIndex(),
+      intent,
+      plannerPolicy,
+      resolver: firstResolver,
+      uvPath: '/tools/uv',
+      workDir: '/work/first',
+    });
+    const second = await planPythonApplication({
+      cacheDir: '/cache/second',
+      coveragePolicy,
+      createdAt: '2026-07-28T01:00:00.000Z',
+      cutoff,
+      index: new FixtureIndex(),
+      intent,
+      plannerPolicy,
+      resolver: secondResolver,
+      uvPath: '/tools/uv',
+      workDir: '/work/second',
+    });
+
+    expect(second.plan.planId).toBe(first.plan.planId);
+    expect(second.plan.wheels).toEqual(first.plan.wheels);
+    expect(
+      [...firstResolver.requests, ...secondResolver.requests].every(
+        (request) => request.cutoff === cutoff
+      )
+    ).toBe(true);
+  });
 });

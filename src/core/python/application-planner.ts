@@ -13,6 +13,7 @@ import { getBuiltInPlatformFamily, type BuiltInPlatformFamilyId } from './platfo
 import { platformCoveragePolicyDigest, type PlatformCoveragePolicy } from './coverage-policy.js';
 import type { PythonApplicationIntent } from './application-intent.js';
 import {
+  assertPythonApplicationRecipeCurrent,
   pythonRecipeIncompatibilityReason,
   resolvePythonApplicationRecipe,
   type PythonApplicationRecipe,
@@ -529,6 +530,8 @@ async function resolveCandidate(
 export async function planPythonApplication(
   options: PlanPythonApplicationOptions
 ): Promise<PlanPythonApplicationResult> {
+  const createdAt = options.createdAt ?? new Date().toISOString();
+  assertPythonApplicationRecipeCurrent(options.recipe, createdAt);
   resolvePythonApplicationRecipe(options.recipe, options.intent);
   const rootProject = await options.index.getProject(options.intent.application.name);
   const versions = applicationVersions(rootProject, options.intent, options.recipe, options.cutoff);
@@ -581,7 +584,7 @@ export async function planPythonApplication(
         families,
         policy: options.coveragePolicy,
       },
-      createdAt: options.createdAt ?? new Date().toISOString(),
+      createdAt,
       intent: options.intent,
       platforms: resolved.branches.map((branch) => ({
         packages: branch.artifacts.packages,

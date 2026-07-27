@@ -22,6 +22,11 @@ family/version where applicable, and an installed Python version when one is fou
 They do not collect host identity, network addresses, serial numbers, or hardware
 inventory. Running them is never a prerequisite for planning.
 
+`recipes/` contains maintained application compatibility policy copied into new
+schema-v2 workspaces. Recipe digests are part of immutable plans; a workspace-local
+edit makes the active plan stale, and an expired recipe must be reviewed before
+planning.
+
 Copy the emitted JSON back to a machine with `airgap-sync` and compare it without
 retaining any host inventory:
 

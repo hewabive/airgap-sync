@@ -1,12 +1,13 @@
 # Architecture
 
-`airgap-sync` currently builds a transfer bundle that can populate Verdaccio
-through normal npm publishing commands.
+`airgap-sync` builds a transfer bundle that can populate Verdaccio and Gitea package
+registries through normal publication APIs.
 
 The product direction is broader: a portable airgap dependency sync tool for projects
-that combine Git repositories, npm registry dependencies, and npm Git dependencies.
-The npm/Verdaccio bundle, Git mirror transfer, fixed-point collection, and top-level
-publish orchestration are the main architectural layers.
+that combine Git repositories, npm registry dependencies, npm Git dependencies, and
+Python applications. The npm/Verdaccio bundle, Python application planner, Git mirror
+transfer, fixed-point collection, and top-level publish orchestration are the main
+architectural layers.
 
 ## Problem
 
@@ -25,6 +26,9 @@ contain Git dependencies such as `github:owner/repo#sha` or `git+https://...#sha
 - Mirroring the entire public npm registry.
 - Rewriting or updating project lockfiles.
 - Acting as a live proxy registry.
+- Installing or managing production Python runtimes and environments.
+- Inferring target coverage from the collector or maintaining detailed host inventory.
+- Transferring model weights as if they were Python package dependencies.
 - Mutating Verdaccio storage files directly.
 - Replacing Git with npm registry packages by repacking third-party tarballs by default.
 
@@ -39,6 +43,8 @@ workspace targets / package specs / package.json / package list
   -> inspect package manifests from tarballs
   -> fetch Git dependencies as bundle-local mirrors
   -> recurse dependencies
+  -> resolve each Python application for every requested platform family with pinned uv
+  -> collect the complete wheels-only closure and consumer contracts
   -> write airgap bundle
 
 airgap bundle
@@ -46,6 +52,8 @@ airgap bundle
   -> npm dist-tag add required tags
   -> create Gitea owners/repositories when using the Gitea provider
   -> push Git mirrors
+  -> publish Python wheels to Gitea PyPI
+  -> publish plans and locks to Gitea Generic Packages
 ```
 
 ## Target Airgap Flow
@@ -58,6 +66,8 @@ online removable media
   -> resolve Git dependency closure
   -> download npm tarballs
   -> mirror Git repositories
+  -> plan Python applications independently of collector OS/architecture
+  -> download content-addressed wheel closures
   -> scan manifests from newly mirrored Git dependencies
   -> repeat npm/Git collection until no new inputs are found
   -> write transfer bundle
@@ -68,8 +78,12 @@ closed network
   -> map Git sources to closed-network Git targets
   -> create missing Gitea owners/repositories when enabled
   -> push Git mirrors into the closed-network Git host
-  -> generate install configuration
+  -> publish Python wheels and application contracts
   -> verify install against closed-network services
+
+consumer infrastructure
+  -> provision the compatible CPython minor and system prerequisites
+  -> use generated standard pip/uv command against Gitea
 ```
 
 The Git side should use standard Git primitives where possible:
@@ -165,6 +179,39 @@ match local packages discovered in the same scan root are skipped for local
 
 Dry-run fetch uses the same traversal policy as a normal fetch, but reads dependency
 metadata from the source registry without downloading tarballs.
+
+## Python Application Policy
+
+The normal Python input is a `python-app` target: application intent plus bounded
+platform coverage. Initial coverage families are Windows x86-64 and glibc Linux
+x86-64. A family is package compatibility, not a distribution name or host record, so
+a Linux collector can plan Windows artifacts and future architectures can be added
+without executing on them.
+
+Planning uses a reviewed `uv` version with explicit Python/platform targets,
+wheels-only policy, isolated configuration, and an index-upload cutoff. A candidate is
+ready only when every requested platform branch resolves. The selected package
+versions are then expanded to all compatible wheel variants for the chosen Python and
+platform families. Linux glibc support is inferred from the actual closure;
+distribution names are optional explanation hints.
+
+Workspace-local recipes capture reviewed upstream application guidance, explicit
+features, known unsupported combinations, prerequisites, and health checks. Their
+normalized digest is part of the immutable plan. Recipes never inspect CPU/GPU
+inventory; accelerator intent is a target feature such as `accelerator=cuda`.
+
+One application plan contains:
+
+- one independent package environment with platform-specific locks;
+- a preferred common CPython minor when coverage permits;
+- shared content-addressed wheels and exact SHA-256;
+- external runtime/system prerequisites;
+- Gitea PyPI and Generic Package coordinates;
+- standard closed-index pip/uv consumer commands.
+
+`airgap-sync` publishes these objects but does not install the production application.
+`verify install` may reproduce the generated command in a temporary environment on a
+compatible verifier.
 
 ## Collection Fixed Point
 

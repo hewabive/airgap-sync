@@ -75,6 +75,24 @@ dist/cli.cjs
 Unit tests should cover resolver decisions without hitting the real npm registry.
 Network tests should be explicit integration tests and should not run by default.
 
+The live pinned-uv Python checks are explicit:
+
+```bash
+npm run e2e:python-planner
+npm run e2e:ktransformers
+```
+
+The KTransformers check first proves that broad Windows/Linux coverage fails with the
+reviewed native-Windows boundary, then plans the full Linux closure and verifies its
+runtime/consumer contracts. It does not install KTransformers or transfer model
+weights.
+
+To measure sequential read and SHA-256 performance on the actual removable medium:
+
+```bash
+npm run benchmark:python-bundle -- /media/USB/airgap-bundle --passes=2
+```
+
 Suggested test groups:
 
 - spec parsing with `npm-package-arg`;
@@ -84,6 +102,9 @@ Suggested test groups:
 - dependency graph traversal and cycle prevention;
 - bundle manifest generation;
 - npm publish command construction.
+- Python coverage/recipe/planner decisions against captured fixtures;
+- interrupted Python download/publication recovery and idempotent retries;
+- fixed-cutoff plan reproducibility and reference-safe application artifact pruning.
 
 ## Safety Rules
 

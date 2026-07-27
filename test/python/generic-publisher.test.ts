@@ -183,6 +183,54 @@ describe('publishPythonGenericArtifacts', () => {
     );
   });
 
+  it('resumes an interrupted publication and verifies already accepted artifacts', async () => {
+    const published = new Map<string, Buffer>();
+    let interruptPlanDiff = true;
+    const baseUrl = await listen((request, response) => {
+      const url = request.url ?? '';
+      if (request.method === 'GET') {
+        const content = published.get(url);
+        response.writeHead(content ? 200 : 404).end(content);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        if (interruptPlanDiff && url.endsWith('/plan-diff.json')) {
+          interruptPlanDiff = false;
+          response.writeHead(503).end('injected interruption');
+          return;
+        }
+        if (published.has(url)) {
+          response.writeHead(409).end('already exists');
+          return;
+        }
+        published.set(url, Buffer.concat(chunks));
+        response.writeHead(201).end();
+      });
+    });
+    await writeBundle(baseUrl);
+    const options = {
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      concurrency: 1,
+      giteaBaseUrl: baseUrl,
+    };
+
+    const interrupted = await publishPythonGenericArtifacts(options);
+    const recovered = await publishPythonGenericArtifacts(options);
+
+    expect(interrupted.published).toBe(4);
+    expect(interrupted.errors).toHaveLength(1);
+    expect(interrupted.errors[0]?.file).toContain('plan-diff.json');
+    expect(recovered).toMatchObject({
+      errors: [],
+      published: 1,
+      skipped: 4,
+    });
+    expect(published.size).toBe(5);
+  });
+
   it('produces a dry-run plan without credentials', async () => {
     await writeBundle();
     const report = await publishPythonGenericArtifacts({

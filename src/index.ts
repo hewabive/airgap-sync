@@ -66,6 +66,7 @@ export {
   PythonApplicationPlanningError,
 } from './core/python/application-planner.js';
 export {
+  assertPythonApplicationRecipeCurrent,
   normalizePythonApplicationRecipe,
   pythonRecipeIncompatibilityReason,
   resolvePythonApplicationRecipe,

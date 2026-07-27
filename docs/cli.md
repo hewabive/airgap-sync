@@ -4,7 +4,8 @@ The CLI keeps download and publish phases separate so the online and offline pha
 auditable.
 
 The preferred user workflow is workspace-based: initialize a directory on removable
-media, add Git/npm/PyPI targets once, then run `download` online and `publish` offline.
+media, add Git/npm/Python application targets once, plan Python applications, then run
+`download` online and `publish` offline.
 
 ## init
 
@@ -13,9 +14,11 @@ airgap-sync init
 airgap-sync init /media/USB/airgap-sync
 ```
 
-Creates `airgap-sync.json` plus the default workspace directories:
+Creates a schema-v2 `airgap-sync.json`, broad Windows/Linux x86-64 Python coverage,
+maintained workspace-local application recipes, and the default directories:
 
 ```text
+.airgap-sync/recipes/
 airgap-bundle/
 ```
 
@@ -26,6 +29,16 @@ The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 ```bash
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
+
+# Normal Python application workflow: Python is selected during planning.
+airgap-sync target add python-app ktransformers \
+  --coverage desktop-x64 \
+  --feature accelerator=cuda
+airgap-sync target add python-app orjson \
+  --platform windows-x86_64 \
+  --platform linux-glibc-x86_64
+
+# Advanced/legacy package seeding:
 airgap-sync target add pypi 'requests==2.32.4' \
   --python-resolution-mode approximate
 airgap-sync target add python-wheel \
@@ -44,11 +57,19 @@ airgap-sync target remove 1
 Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirrors into
 `airgap-bundle/git-mirrors/` during `download`. npm targets are treated as explicit root
 package specs.
-PyPI targets use PEP 508 requirement syntax and require `pythonTargetEnvironments` in
-`airgap-sync.json`. Git, PyPI, and exact root-wheel targets may set
+
+`python-app` is the normal Python target. `--coverage` references a named workspace
+policy; repeatable `--platform` creates target-local coverage instead. Python defaults
+to automatic selection. `--python` is an advanced version constraint, `--extra`
+selects package extras, `--feature name=value` records explicit application variants,
+and `--recipe` selects reviewed workspace-local compatibility policy. Known maintained
+applications may receive an installed recipe automatically.
+
+Raw PyPI targets use PEP 508 requirement syntax and require an exact legacy target
+environment. Git, PyPI, and exact root-wheel targets may set
 `--python-resolution-mode locked-only|approximate`. With no target override they inherit
 the workspace default. `target set-python-resolution <index> inherit` removes an
-existing override.
+existing override. These controls are under Advanced/Legacy in the interactive menu.
 
 ## menu
 
@@ -60,20 +81,21 @@ airgap-sync menu /media/USB/airgap-sync
 
 Opens an interactive prompt menu for common workspace actions. The top level keeps the
 regular workflow compact: targets, download, publish, install verification, diagnostics,
-and settings. Target management, Python/PyPI environments, bundle checks, bundle info,
-and saved credentials live in submenus.
+and settings. Target management, Python applications, Advanced/Legacy seeding, bundle
+checks, bundle info, and saved credentials live in submenus.
 
 Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
 specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
-`targetRegistry`, `giteaUrl`, bundle output, Python/PyPI settings, and default answers
-in `airgap-sync.json`. When the menu initializes a new workspace, it offers to enable
-Python/PyPI support and asks for at least one target environment when enabled.
-Existing workspaces can manage the source index, Gitea package owner, default resolution
-mode, and target environments under `Settings` → `Python / PyPI`. Target-specific
-resolution modes are managed under `Targets`. Adding a PyPI target with no environment
-configured offers to open the same setup flow.
+`targetRegistry`, `giteaUrl`, bundle output, Python application publication settings,
+coverage, and default answers in `airgap-sync.json`. Initialization asks only whether
+Python applications should cover Windows, Linux, or both; it does not ask for Python
+versions, distributions, wheel tags, CPU/GPU inventory, or a resolver.
+
+`Targets` → `Add Python application` is the normal flow. Raw PyPI targets, exact Python
+environments, and resolution modes are under Advanced/Legacy. Python application
+settings expose the source index, Gitea owners, and broad default coverage.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
@@ -82,6 +104,34 @@ the prompt for that action. `defaults.download.latestPolicy` is either `bundled`
 `defaults.download.prune` controls whether a successful download removes stale
 tarballs and Git mirrors from the local bundle.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
+
+## coverage, plan, and probe
+
+```bash
+airgap-sync coverage list
+airgap-sync coverage explain desktop-x64
+airgap-sync plan
+airgap-sync plan --update ktransformers
+airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z --json
+airgap-sync probe --compare .airgap-sync/python-plans/<target>/environment-plan.json
+```
+
+`coverage` describes desired registry coverage, not a host inventory. The initial
+families are Windows x86-64 and glibc Linux x86-64. Linux distribution names are
+presentation hints; compatibility is derived from wheel tags and an inferred glibc
+floor.
+
+`plan` acquires the pinned collector-native `uv`, resolves every requested target
+platform with wheels-only policy, selects a compatible CPython minor, and stores an
+immutable active plan under `.airgap-sync/python-plans/`. A fixed `--cutoff` excludes
+newer index uploads and makes repeated semantic plans reproducible. Planning succeeds
+only when every requested platform is complete. Unsupported coverage is reported with
+suggestions to narrow the target, select another application version, or supply a
+reviewed recipe/wheel.
+
+`probe` is optional consumer diagnostics. It compares one machine to an existing plan
+and collects only plan-referenced OS, architecture, libc/Python, and explicitly
+requested capability facts.
 
 ## secrets
 
@@ -139,6 +189,12 @@ clones or updates Git dependency mirrors, scans package manifests and lockfiles 
 those mirrors, and repeats until no new npm or Git inputs are found. It also writes
 `workspace-snapshot.json` with the configured targets and their bundle-local mirror
 paths for later verification.
+
+Every selected `python-app` target must have a current active plan. If the target,
+coverage policy, or workspace-local recipe changed, `download` refuses the stale plan
+and asks for `plan --update`. Wheels are stored once by content hash even when multiple
+applications reference them. Platform locks, consumer configuration, runtime
+prerequisites, and plan diffs remain application-specific.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
@@ -212,9 +268,10 @@ Use a lower value such as `4` on slow removable media or unstable network links.
 `--retry-delays-ms 1000,5000,15000,60000`.
 
 `--prune` removes stale local bundle objects after a successful fixed-point download.
-It deletes npm tarballs and Python wheels not referenced by the new manifests, and Git
-mirrors not referenced by the new `git-sources.json`. It is skipped when the download is
-incomplete. This only cleans the transfer bundle; it does not delete packages from
+It deletes npm tarballs, unreferenced content-addressed Python artifacts, obsolete
+application plans, and Git mirrors not referenced by the new indexes. It is skipped
+when the download is incomplete and partial target downloads never prune shared
+objects. This only cleans the transfer bundle; it does not delete packages from
 Verdaccio or repositories from Gitea.
 
 When a package manifest is in the same directory as a supported lockfile, `download`
@@ -353,9 +410,13 @@ before the offline import has run, are reported but do not fail the command.
 mirror into a temporary directory, detects the package manager from the lockfile, sets
 the npm registry, and uses a temporary Git config with source-host rewrites to the
 provided Gitea URL. It writes `verify-install-report.json`.
-When a local Python interpreter exactly matches a configured target environment, it
-also creates a temporary venv and installs exact bundled package versions from the
-anonymous Gitea index; otherwise it records a skip reason.
+For a schema-v2 Python application, verification chooses the matching local platform
+branch and compatible CPython minor, creates a temporary venv, fetches the published
+hash-complete lock from Gitea, installs from the closed PyPI index with wheels-only,
+no-dependency, and require-hashes controls, then runs `pip check` and reviewed recipe
+health checks. If no compatible interpreter is available, it records a clear skip.
+This is temporary verification; production Python provisioning and installation
+remain external to `airgap-sync`.
 
 When the detected package manager is pnpm, `verify install` sets `trustLockfile: true`
 for that verification process. This avoids false failures from pnpm v11's default
@@ -477,11 +538,15 @@ Publishes the whole bundle in the closed network: publish npm packages to an
 npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, create
 missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
 import reports. If `python-seed-manifest.json` exists, it also streams bundled wheels
-to Gitea's PyPI endpoint without requiring Python, pip, or twine.
+to Gitea's PyPI endpoint without requiring Python, pip, or twine. Schema-v2 application
+plans additionally publish environment plans, per-platform locks, prerequisite
+reports, consumer configuration, and optional runtime/tool transfer artifacts to
+Gitea Generic Packages. Existing immutable generic objects are skipped only after
+their downloaded content matches the local SHA-256.
 
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
-`--gitea`, `pythonPublishOwner` as `--python-owner`, the `gitOwnerStrategy` settings
+`--gitea`, `python.publishOwner` as `--python-owner`, the `gitOwnerStrategy` settings
 described below, and `defaults.publish` for public repositories and global Git rewrites.
 Passing `<bundle>`, `--registry`, `--gitea`, `--public`, or
 `--configure-git-global` overrides those defaults.
