@@ -77,12 +77,13 @@ Running `airgap-sync` without a subcommand opens the interactive menu. Use
 
 The menu covers the normal workflow:
 
-- **Targets**: add, remove, or download one Git/npm target.
+- **Targets**: add, remove, or download one Git/npm/PyPI target.
 - **Download updates**: run the online collection phase.
 - **Publish updates**: publish the bundle into the closed-network registry and Git host.
 - **Verify installs**: run package-manager installs for configured Git targets.
 - **Diagnostics**: inspect, validate, and summarize the bundle.
-- **Settings**: configure endpoints, defaults, and saved credentials.
+- **Settings**: configure endpoints, Python/PyPI target environments, defaults, and
+  saved credentials.
 
 The same workflow can be scripted:
 

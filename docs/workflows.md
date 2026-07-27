@@ -58,8 +58,10 @@ Operators who prefer prompts can run:
 airgap-sync
 ```
 
-The menu covers target management, endpoint configuration, online download, offline
-publish, verification, and bundle info.
+The menu covers target management, endpoint configuration, Python/PyPI target
+environments, online download, offline publish, verification, and bundle info. During
+interactive workspace initialization it offers to configure Python support. The same
+settings remain available later under `Settings` → `Python / PyPI`.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
@@ -79,9 +81,9 @@ If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
 
-Python support is enabled by adding explicit target environments. Full patch versions
-and Linux compatibility levels are required so wheel selection never guesses the
-consumer platform:
+Python support is enabled by adding explicit target environments through the menu or
+JSON. Full patch versions and Linux compatibility levels are required so wheel
+selection never guesses the consumer platform:
 
 ```json
 {

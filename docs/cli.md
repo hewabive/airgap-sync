@@ -53,15 +53,19 @@ airgap-sync menu /media/USB/airgap-sync
 
 Opens an interactive prompt menu for common workspace actions. The top level keeps the
 regular workflow compact: targets, download, publish, install verification, diagnostics,
-and settings. Target management, bundle checks, bundle info, and saved credentials
-live in submenus.
+and settings. Target management, Python/PyPI environments, bundle checks, bundle info,
+and saved credentials live in submenus.
 
 Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
 specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
-`targetRegistry`, `giteaUrl`, bundle output, and default answers in `airgap-sync.json`.
-When the menu initializes a new workspace, it asks for these values up front.
+`targetRegistry`, `giteaUrl`, bundle output, Python/PyPI settings, and default answers
+in `airgap-sync.json`. When the menu initializes a new workspace, it offers to enable
+Python/PyPI support and asks for at least one target environment when enabled.
+Existing workspaces can manage the source index, Gitea package owner, resolution mode,
+and target environments under `Settings` → `Python / PyPI`. Adding a PyPI target with
+no environment configured offers to open the same setup flow.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or

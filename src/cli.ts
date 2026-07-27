@@ -93,9 +93,24 @@ import type {
   WorkspaceConfig,
   WorkspacePromptBoolean,
 } from './index.js';
+import {
+  resolveTargetEnvironment,
+  type PythonTargetEnvironmentConfig,
+} from './core/python/environments.js';
+import {
+  parseLinuxWheelCompatibility,
+  parsePythonResolutionMode,
+  parsePythonTargetArch,
+  parsePythonTargetOs,
+  parsePythonVersion,
+  supportedPythonTargetArches,
+  validatePythonIndexUrl,
+} from './menu/python-settings.js';
 
 const defaultDistTagConcurrency = 4;
 const defaultPublishConcurrency = 4;
+const defaultPythonPublishOwner = 'pypi';
+const defaultPythonSourceIndex = 'https://pypi.org/simple/';
 
 interface FetchOptions {
   concurrency: number;
@@ -546,9 +561,34 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
     ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
     : target.type === 'python-wheel'
       ? `python-wheel ${target.url}#sha256=${target.sha256}`
-      : target.type === 'python-runtime'
-        ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
+    : target.type === 'python-runtime'
+      ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
       : `${target.type} ${target.spec}`;
+}
+
+function formatPythonTargetEnvironment(environment: PythonTargetEnvironmentConfig): string {
+  const platform =
+    environment.platformTags?.join(',') ??
+    environment.manylinux ??
+    environment.musllinux ??
+    (environment.os === 'macos' ? `macOS ${environment.macosVersion ?? '12.0'}` : undefined);
+  return `${environment.name}: Python ${environment.pythonVersion}, ${environment.os}/${environment.arch}${
+    platform ? `, ${platform}` : ''
+  }`;
+}
+
+function formatPythonTargetEnvironmentList(
+  environments: PythonTargetEnvironmentConfig[] | undefined
+): string {
+  if (!environments?.length) {
+    return 'No Python target environments configured.';
+  }
+
+  return environments
+    .map(
+      (environment, index) => `${String(index + 1)}. ${formatPythonTargetEnvironment(environment)}`
+    )
+    .join('\n');
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
@@ -559,7 +599,9 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
     `Python source index: ${config.pythonSourceIndex ?? '(disabled)'}`,
     `Python publish owner: ${config.pythonPublishOwner ?? '(not set)'}`,
-    `Python target environments: ${String(config.pythonTargetEnvironments?.length ?? 0)}`,
+    `Python resolution mode: ${config.pythonResolutionMode}`,
+    'Python target environments:',
+    formatPythonTargetEnvironmentList(config.pythonTargetEnvironments),
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
@@ -1277,6 +1319,233 @@ async function configureBundleDirectory(
   return nextConfig;
 }
 
+async function askPythonTargetEnvironment(
+  rl: ReadlineInterface,
+  current?: PythonTargetEnvironmentConfig
+): Promise<PythonTargetEnvironmentConfig> {
+  const pythonVersion = parsePythonVersion(
+    await ask(rl, 'Target Python version (MAJOR.MINOR.PATCH)', current?.pythonVersion)
+  );
+  const os = parsePythonTargetOs(
+    await ask(rl, 'Target OS (linux/windows/macos)', current?.os ?? 'linux')
+  );
+  const supportedArches = supportedPythonTargetArches(os);
+  const defaultArch =
+    current && supportedArches.includes(current.arch) ? current.arch : supportedArches[0];
+  const arch = parsePythonTargetArch(
+    await ask(rl, `Target architecture (${supportedArches.join('/')})`, defaultArch),
+    os
+  );
+  const defaultName = current?.name ?? `python-${pythonVersion}-${os}-${arch}`;
+  const name = await ask(rl, 'Environment name', defaultName);
+  if (!name.trim()) {
+    throw new Error('Python target environment name is required');
+  }
+
+  const baseConfig: PythonTargetEnvironmentConfig = {
+    arch,
+    name: name.trim(),
+    os,
+    pythonVersion,
+    ...(current?.markerOverrides ? { markerOverrides: current.markerOverrides } : {}),
+  };
+  let environment: PythonTargetEnvironmentConfig;
+  const currentPlatformTags =
+    current?.os === os && current.arch === arch ? current.platformTags : undefined;
+
+  if (currentPlatformTags) {
+    console.log(`Retaining custom platform tags: ${currentPlatformTags.join(', ')}`);
+    environment = {
+      ...baseConfig,
+      platformTags: currentPlatformTags,
+    };
+  } else if (os === 'linux') {
+    const currentCompatibility =
+      current?.os === 'linux'
+        ? (current.manylinux ?? current.musllinux ?? 'manylinux_2_17')
+        : 'manylinux_2_17';
+    const compatibility = parseLinuxWheelCompatibility(
+      await ask(
+        rl,
+        'Linux wheel compatibility (for example manylinux_2_17 or musllinux_1_2)',
+        currentCompatibility
+      )
+    );
+    environment = {
+      ...baseConfig,
+      ...compatibility,
+    };
+  } else if (os === 'macos') {
+    environment = {
+      ...baseConfig,
+      macosVersion: await ask(
+        rl,
+        'Minimum macOS version (MAJOR.MINOR)',
+        current?.os === 'macos' ? (current.macosVersion ?? '12.0') : '12.0'
+      ),
+    };
+  } else {
+    environment = baseConfig;
+  }
+
+  resolveTargetEnvironment(environment);
+  return environment;
+}
+
+function assertUniquePythonEnvironmentName(
+  environments: PythonTargetEnvironmentConfig[] | undefined,
+  name: string,
+  ignoredIndex?: number
+): void {
+  const duplicate = environments?.find(
+    (environment, index) => index !== ignoredIndex && environment.name === name
+  );
+  if (duplicate) {
+    throw new Error(`Duplicate Python target environment name: ${name}`);
+  }
+}
+
+async function configurePythonPackageSettings(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const pythonSourceIndex = validatePythonIndexUrl(
+    await ask(rl, 'Python source index', config.pythonSourceIndex ?? defaultPythonSourceIndex)
+  );
+  const pythonPublishOwner = await ask(
+    rl,
+    'Gitea Python package owner',
+    config.pythonPublishOwner ?? defaultPythonPublishOwner
+  );
+  if (!pythonPublishOwner.trim()) {
+    throw new Error('Gitea Python package owner is required');
+  }
+  console.log(
+    'locked-only accepts locked Python inputs; direct PyPI targets require approximate resolution.'
+  );
+  const pythonResolutionMode = parsePythonResolutionMode(
+    await ask(rl, 'Python resolution mode (locked-only/approximate)', config.pythonResolutionMode)
+  );
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    pythonPublishOwner: pythonPublishOwner.trim(),
+    pythonResolutionMode,
+    pythonSourceIndex,
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function addPythonTargetEnvironment(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const environment = await askPythonTargetEnvironment(rl);
+  assertUniquePythonEnvironmentName(config.pythonTargetEnvironments, environment.name);
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    pythonPublishOwner: config.pythonPublishOwner ?? defaultPythonPublishOwner,
+    pythonSourceIndex: config.pythonSourceIndex ?? defaultPythonSourceIndex,
+    pythonTargetEnvironments: [...(config.pythonTargetEnvironments ?? []), environment],
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+function parsePythonEnvironmentIndex(
+  value: string,
+  environments: PythonTargetEnvironmentConfig[]
+): number {
+  const index = parsePositiveInteger(value);
+  if (index > environments.length) {
+    throw new Error(
+      `Python target environment index must be between 1 and ${String(environments.length)}`
+    );
+  }
+  return index - 1;
+}
+
+async function editPythonTargetEnvironment(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const environments = config.pythonTargetEnvironments ?? [];
+  if (environments.length === 0) {
+    console.log('No Python target environments configured.');
+    return config;
+  }
+  console.log(formatPythonTargetEnvironmentList(environments));
+  const selectedIndex = parsePythonEnvironmentIndex(
+    await ask(rl, 'Environment index to edit'),
+    environments
+  );
+  const environment = await askPythonTargetEnvironment(rl, environments[selectedIndex]);
+  assertUniquePythonEnvironmentName(environments, environment.name, selectedIndex);
+  const nextEnvironments = [...environments];
+  nextEnvironments[selectedIndex] = environment;
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    pythonTargetEnvironments: nextEnvironments,
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function removePythonTargetEnvironment(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  const environments = config.pythonTargetEnvironments ?? [];
+  if (environments.length === 0) {
+    console.log('No Python target environments configured.');
+    return config;
+  }
+  console.log(formatPythonTargetEnvironmentList(environments));
+  const selectedIndex = parsePythonEnvironmentIndex(
+    await ask(rl, 'Environment index to remove'),
+    environments
+  );
+  const selected = environments[selectedIndex];
+  if (!selected) {
+    throw new Error('Python target environment index is out of range');
+  }
+  if (!(await askYesNo(rl, `Remove Python target environment "${selected.name}"?`, false))) {
+    return config;
+  }
+  if (
+    environments.length === 1 &&
+    config.targets.some((target) => target.type === 'pypi' || target.type === 'python-wheel')
+  ) {
+    throw new Error('Cannot remove the last Python target environment while PyPI targets exist');
+  }
+
+  const nextEnvironments = environments.filter((_, index) => index !== selectedIndex);
+  const nextConfig: WorkspaceConfig = { ...config };
+  if (nextEnvironments.length > 0) {
+    nextConfig.pythonTargetEnvironments = nextEnvironments;
+  } else {
+    delete nextConfig.pythonTargetEnvironments;
+  }
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureInitialPythonSettings(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  let nextConfig = await configurePythonPackageSettings(workspaceDir, rl, config);
+  do {
+    nextConfig = await addPythonTargetEnvironment(workspaceDir, rl, nextConfig);
+  } while (await askYesNo(rl, 'Add another Python target environment?', false));
+  return nextConfig;
+}
+
 async function configureDownloadDefaults(
   workspaceDir: string,
   rl: ReadlineInterface,
@@ -1384,8 +1653,16 @@ async function configureInitialWorkspace(
   console.log('Configure workspace defaults.');
   const withBundle = await configureBundleDirectory(workspaceDir, rl, config);
   const withConnections = await configureConnectionSettings(workspaceDir, rl, withBundle);
+  console.log('Configure Python/PyPI support.');
+  const withPythonSettings = (await askYesNo(rl, 'Enable Python/PyPI support?', false))
+    ? await configureInitialPythonSettings(workspaceDir, rl, withConnections)
+    : withConnections;
   console.log('Configure download defaults.');
-  const withDownloadDefaults = await configureDownloadDefaults(workspaceDir, rl, withConnections);
+  const withDownloadDefaults = await configureDownloadDefaults(
+    workspaceDir,
+    rl,
+    withPythonSettings
+  );
   console.log('Configure publish defaults.');
   const withPublishDefaults = await configurePublishDefaults(
     workspaceDir,
@@ -1465,6 +1742,19 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         break;
       }
       case '4': {
+        let config = await readMenuWorkspace(workspaceDir, rl);
+        if (!config.pythonTargetEnvironments?.length) {
+          console.log('A PyPI target requires at least one Python target environment.');
+          if (!(await askYesNo(rl, 'Configure Python/PyPI support now?', true))) {
+            break;
+          }
+          config = await configureInitialPythonSettings(workspaceDir, rl, config);
+        }
+        if (config.pythonResolutionMode === 'locked-only') {
+          console.log(
+            'Note: downloading a direct PyPI target requires approximate resolution or the --allow-approximate-python option.'
+          );
+        }
         const spec = await ask(rl, 'PyPI package requirement');
         if (spec) {
           await runSelfCommand(['target', 'add', 'pypi', spec, workspaceDir], workspaceDir);
@@ -1493,6 +1783,52 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
   }
 }
 
+async function configurePythonSettingsMenu(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<void> {
+  for (;;) {
+    const config = await readMenuWorkspace(workspaceDir, rl);
+    console.log('\nPython / PyPI settings');
+    console.log(`Source index: ${config.pythonSourceIndex ?? '(disabled)'}`);
+    console.log(`Publish owner: ${config.pythonPublishOwner ?? '(not set)'}`);
+    console.log(`Resolution mode: ${config.pythonResolutionMode}`);
+    console.log('Target environments:');
+    console.log(formatPythonTargetEnvironmentList(config.pythonTargetEnvironments));
+    console.log('Actions:');
+    console.log('1. Configure package settings');
+    console.log('2. Add target environment');
+    console.log('3. Edit target environment');
+    console.log('4. Remove target environment');
+    console.log('0. Back');
+
+    const choice = await ask(rl, 'Choose an action', '0');
+    switch (choice) {
+      case '0':
+        return;
+      case '1':
+        await configurePythonPackageSettings(workspaceDir, rl, config);
+        console.log('Saved Python/PyPI settings.');
+        break;
+      case '2':
+        await addPythonTargetEnvironment(workspaceDir, rl, config);
+        console.log('Saved Python target environment.');
+        break;
+      case '3':
+        await editPythonTargetEnvironment(workspaceDir, rl, config);
+        console.log('Saved Python target environment.');
+        break;
+      case '4':
+        await removePythonTargetEnvironment(workspaceDir, rl, config);
+        console.log('Updated Python target environments.');
+        break;
+      default:
+        console.log('Unknown menu item.');
+        break;
+    }
+  }
+}
+
 async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
   for (;;) {
     const config = await readMenuWorkspace(workspaceDir, rl);
@@ -1502,8 +1838,9 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
     console.log('3. Download defaults');
     console.log('4. Publish defaults');
     console.log('5. Verify install defaults');
-    console.log('6. Saved credentials');
-    console.log('7. Show current config');
+    console.log('6. Python / PyPI');
+    console.log('7. Saved credentials');
+    console.log('8. Show current config');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -1531,9 +1868,12 @@ async function configureWorkspaceMenu(workspaceDir: string, rl: ReadlineInterfac
         console.log('Saved workspace configuration.');
         break;
       case '6':
-        await configureCredentialsMenu(workspaceDir, rl);
+        await configurePythonSettingsMenu(workspaceDir, rl);
         break;
       case '7':
+        await configureCredentialsMenu(workspaceDir, rl);
+        break;
+      case '8':
         console.log(formatWorkspaceConfig(config));
         break;
       default:
