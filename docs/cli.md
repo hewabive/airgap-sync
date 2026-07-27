@@ -56,7 +56,9 @@ airgap-sync target remove 1
 
 Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirrors into
 `airgap-bundle/git-mirrors/` during `download`. npm targets are treated as explicit root
-package specs.
+package specs. Git projects that pin pnpm through `packageManager` or
+`devEngines.packageManager` automatically contribute `pnpm` and `@pnpm/exe` bootstrap
+requirements; no separate npm target is needed.
 
 `python-app` is the normal Python target. `--coverage` references a named workspace
 policy; repeatable `--platform` creates target-local coverage instead. Python defaults

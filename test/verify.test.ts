@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as tar from 'tar';
 import * as fs from '../src/core/fs.js';
+import { runGitCommand } from '../src/core/git-fetch.js';
 import { verifyBundle } from '../src/core/verify.js';
 import type {
   ApplyBundleReport,
@@ -238,6 +239,64 @@ async function writeValidBundle(): Promise<void> {
   });
 }
 
+async function writePackageManagerGitMirror(): Promise<void> {
+  const sourceDir = path.join(bundleDir, 'source');
+  const mirrorPath = path.join(bundleDir, 'git-mirrors/github.com/acme/arriero.git');
+  await runGitCommand({
+    args: ['init', '--initial-branch=main', sourceDir],
+  });
+  await fs.writeJson(
+    path.join(sourceDir, 'package.json'),
+    {
+      name: 'arriero',
+      packageManager: 'pnpm@11.17.0',
+      version: '0.1.0',
+    },
+    { spaces: 2 }
+  );
+  await fs.writeFile(path.join(sourceDir, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
+  await runGitCommand({
+    args: ['-C', sourceDir, 'add', 'package.json', 'pnpm-lock.yaml'],
+  });
+  await runGitCommand({
+    args: [
+      '-c',
+      'user.name=Airgap Sync Test',
+      '-c',
+      'user.email=airgap-sync@example.invalid',
+      '-C',
+      sourceDir,
+      'commit',
+      '-m',
+      'Add package manager pin',
+    ],
+  });
+  await fs.ensureDir(path.dirname(mirrorPath));
+  await runGitCommand({
+    args: ['clone', '--bare', sourceDir, mirrorPath],
+  });
+  await fs.writeJson(
+    path.join(bundleDir, 'git-sources.json'),
+    {
+      ...gitSources,
+      sources: [
+        {
+          committish: 'main',
+          host: 'github.com',
+          id: 'github.com/acme/arriero',
+          localMirrorPath: 'git-mirrors/github.com/acme/arriero.git',
+          owner: 'acme',
+          repo: 'arriero',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/arriero.git',
+          target: true,
+        },
+      ],
+    },
+    { spaces: 2 }
+  );
+}
+
 describe('verifyBundle', () => {
   beforeEach(async () => {
     bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-verify-'));
@@ -370,6 +429,28 @@ describe('verifyBundle', () => {
     expect(report.checks).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'git-mirrors', status: 'error' })])
     );
+  });
+
+  it('fails when a Git target package manager bootstrap is absent from the bundle', async () => {
+    await writeValidBundle();
+    await writePackageManagerGitMirror();
+
+    const report = await verifyBundle({ bundleDir });
+
+    expect(report.ok).toBe(false);
+    const packageManagerCheck = report.checks.find(
+      (item) => item.name === 'package-manager-requirements'
+    );
+    expect(packageManagerCheck).toMatchObject({
+      name: 'package-manager-requirements',
+      status: 'error',
+    });
+    const details = packageManagerCheck?.details as
+      | { missing: { name: string; specifier: string }[] }
+      | undefined;
+    expect(
+      details?.missing.map((requirement) => `${requirement.name}@${requirement.specifier}`)
+    ).toEqual(expect.arrayContaining(['pnpm@11.17.0', '@pnpm/exe@11.17.0']));
   });
 
   it('verifies Python wheel hashes, identities, and target-environment coverage', async () => {

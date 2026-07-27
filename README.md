@@ -124,6 +124,12 @@ npm exec -- airgap-sync verify install ./airgap-bundle \
 
 After a global install, omit the `npm exec --` prefix.
 
+When a project pins pnpm through `packageManager` or `devEngines.packageManager`,
+download also includes both the Node-based `pnpm` package and the standalone
+`@pnpm/exe` bootstrap closure. Toolchain declarations are scanned even when the
+adjacent `package.json` is otherwise covered by a lockfile. A pnpm lockfile's
+`packageManagerDependencies` remain authoritative for ranged `devEngines` declarations.
+
 For Windows operators who prefer a double-click workflow, optional launchers live in
 [`support/windows`](./support/windows). Copy them to the online and closed-network
 machines; they find the removable drive workspace automatically. The download launcher

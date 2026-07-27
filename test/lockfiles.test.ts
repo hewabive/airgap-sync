@@ -77,6 +77,52 @@ importers:
       },
     ]);
   });
+
+  it('keeps locked package manager dependencies as toolchain roots', () => {
+    const result = parsePnpmLockRequirementsFromContent(
+      `
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    packageManagerDependencies:
+      '@pnpm/exe':
+        specifier: 11.17.0
+        version: 11.17.0
+      pnpm:
+        specifier: 11.17.0
+        version: 11.17.0
+
+packages:
+  '@pnpm/exe@11.17.0':
+    resolution: {integrity: sha512-exe}
+  pnpm@11.17.0:
+    resolution: {integrity: sha512-pnpm}
+
+snapshots:
+  '@pnpm/exe@11.17.0': {}
+  pnpm@11.17.0: {}
+`,
+      'lockfile:pnpm-lock.yaml'
+    );
+
+    expect(result.requirements).toEqual([
+      {
+        name: '@pnpm/exe',
+        raw: '@pnpm/exe@11.17.0',
+        requiredBy: 'package-manager:lockfile:pnpm-lock.yaml',
+        specifier: '11.17.0',
+        type: 'version',
+      },
+      {
+        name: 'pnpm',
+        raw: 'pnpm@11.17.0',
+        requiredBy: 'package-manager:lockfile:pnpm-lock.yaml',
+        specifier: '11.17.0',
+        type: 'version',
+      },
+    ]);
+  });
 });
 
 describe('parseNpmLockRequirementsFromContent', () => {

@@ -8,6 +8,7 @@ import type {
   UnsupportedRootPackageRequirement,
 } from '../types.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
+import { parsePackageManagerRequirements } from './package-managers.js';
 
 const ignoredDirectoryNames = new Set([
   '.git',
@@ -106,9 +107,11 @@ function isLocalDependency(
 async function findProjectFiles(rootDir: string): Promise<{
   lockfileDirs: string[];
   packageJsonFiles: string[];
+  pnpmLockfileDirs: string[];
 }> {
   const lockfileDirs = new Set<string>();
   const packageJsonFiles: string[] = [];
+  const pnpmLockfileDirs = new Set<string>();
 
   async function walk(dir: string): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -130,12 +133,19 @@ async function findProjectFiles(rootDir: string): Promise<{
 
       if (entry.isFile() && supportedLockfileNames.has(entry.name)) {
         lockfileDirs.add(dir);
+        if (entry.name === 'pnpm-lock.yaml') {
+          pnpmLockfileDirs.add(dir);
+        }
       }
     }
   }
 
   await walk(rootDir);
-  return { lockfileDirs: [...lockfileDirs].sort(), packageJsonFiles: packageJsonFiles.sort() };
+  return {
+    lockfileDirs: [...lockfileDirs].sort(),
+    packageJsonFiles: packageJsonFiles.sort(),
+    pnpmLockfileDirs: [...pnpmLockfileDirs].sort(),
+  };
 }
 
 function isCoveredByLockfile(file: string, lockfileDirs: string[]): boolean {
@@ -146,7 +156,12 @@ function isCoveredByLockfile(file: string, lockfileDirs: string[]): boolean {
 async function manifestInputToFiles(
   manifestPath: string,
   options: ReadManifestRequirementsOptions
-): Promise<{ files: string[]; rootDir: string }> {
+): Promise<{
+  files: string[];
+  packageManagerFiles: string[];
+  pnpmLockfileDirs: string[];
+  rootDir: string;
+}> {
   const absolutePath = path.resolve(manifestPath);
   const stat = await fs.stat(absolutePath);
 
@@ -159,6 +174,8 @@ async function manifestInputToFiles(
               (file) => !isCoveredByLockfile(file, projectFiles.lockfileDirs)
             )
           : projectFiles.packageJsonFiles,
+      packageManagerFiles: projectFiles.packageJsonFiles,
+      pnpmLockfileDirs: projectFiles.pnpmLockfileDirs,
       rootDir: absolutePath,
     };
   }
@@ -173,6 +190,8 @@ async function manifestInputToFiles(
           !isCoveredByLockfile(file, projectFiles.lockfileDirs)
       )
       .sort(),
+    packageManagerFiles: [...new Set([absolutePath, ...projectFiles.packageJsonFiles])].sort(),
+    pnpmLockfileDirs: projectFiles.pnpmLockfileDirs,
     rootDir,
   };
 }
@@ -181,17 +200,42 @@ export async function readManifestRequirements(
   manifestPath: string,
   options: ReadManifestRequirementsOptions = {}
 ): Promise<ParseRootSpecsResult> {
-  const { files, rootDir } = await manifestInputToFiles(manifestPath, options);
-  const entries: ProjectManifestEntry[] = [];
+  const { files, packageManagerFiles, pnpmLockfileDirs, rootDir } = await manifestInputToFiles(
+    manifestPath,
+    options
+  );
+  const manifests = new Map<string, ProjectPackageManifest>();
 
-  for (const file of files) {
-    entries.push({
-      manifest: await fs.readJson<ProjectPackageManifest>(file),
-      path: file,
-    });
+  for (const file of packageManagerFiles) {
+    manifests.set(file, await fs.readJson<ProjectPackageManifest>(file));
   }
 
-  return parseManifestRequirementsFromEntries(entries, rootDir, options);
+  const entries = files.map((file) => ({
+    manifest: manifests.get(file)!,
+    path: file,
+  }));
+  const parsedManifests = parseManifestRequirementsFromEntries(entries, rootDir, options);
+  const parsedPackageManagers = parsePackageManagerRequirements(
+    packageManagerFiles
+      .map((file) => ({
+        manifest: manifests.get(file)!,
+        pnpmLockfileCovered: pnpmLockfileDirs.includes(path.dirname(file)),
+        requiredBy: manifestRequiredBy(
+          {
+            manifest: manifests.get(file)!,
+            path: file,
+          },
+          rootDir
+        ),
+      }))
+      .filter((entry) => !isComponentPackageManifest(entry.manifest))
+  );
+
+  return {
+    gitRequirements: [...parsedPackageManagers.gitRequirements, ...parsedManifests.gitRequirements],
+    requirements: [...parsedPackageManagers.requirements, ...parsedManifests.requirements],
+    unsupported: [...parsedPackageManagers.unsupported, ...parsedManifests.unsupported],
+  };
 }
 
 export function parseManifestRequirementsFromEntries(

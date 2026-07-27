@@ -135,6 +135,12 @@ By default, recursive traversal should include:
 - `dependencies`
 - `optionalDependencies`
 
+Project package-manager declarations are a separate input class rather than ordinary
+application dependencies. A pnpm declaration contributes both `pnpm` and `@pnpm/exe`
+bootstrap roots and must be read even when a lockfile covers the adjacent manifest.
+For ranged `devEngines.packageManager`, exact `packageManagerDependencies` recorded by
+pnpm-lock take precedence.
+
 `peerDependencies` are not installed automatically by all historical npm clients, but
 modern npm and pnpm may auto-install peers depending on settings. Peer handling should
 therefore be an explicit option before the first stable release.

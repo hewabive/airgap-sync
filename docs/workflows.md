@@ -166,6 +166,12 @@ configured npm targets as root package specs, and writes the transfer bundle und
 downloads the deduplicated wheel union, and emits exact platform locks and consumer
 contracts. A missing or stale plan fails before application collection.
 
+Pinned pnpm is part of that closure. A `packageManager: pnpm@<version>` declaration
+adds exact `pnpm` and `@pnpm/exe` roots. `devEngines.packageManager` ranges are resolved
+only when no adjacent pnpm lockfile exists; otherwise the lockfile's exact
+`packageManagerDependencies` entries are used. This scan is independent of the normal
+rule that lets a lockfile replace dependency scanning of its adjacent `package.json`.
+
 Lower-level collection from an explicit repository directory is still available:
 
 ```bash

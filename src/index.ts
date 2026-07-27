@@ -494,6 +494,7 @@ export type {
   ParseRootSpecsResult,
   PackageIdentity,
   ProjectPackageManifest,
+  ProjectPackageManagerEngine,
   PublishActionResult,
   PublishActionStatus,
   PublishTimings,

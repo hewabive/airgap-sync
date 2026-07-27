@@ -34,6 +34,10 @@
   package versions can skip source-registry metadata lookups.
 - Fixed download Git mirror reporting so changes from earlier fixed-point iterations
   are preserved in the final summary and `git-fetch-report.json`.
+- Added automatic pnpm toolchain collection for Git/local manifests that declare
+  `packageManager` or `devEngines.packageManager`. Both `pnpm` and the standalone
+  `@pnpm/exe` bootstrap package are included even when `package.json` is covered by a
+  lockfile, and bundle verification now reports missing bootstrap packages.
 - Fixed download npm reporting so packages downloaded in earlier fixed-point iterations
   are preserved in the final `fetch-report.json`.
 - Avoided repeated Git mirror fetches during download iterations when the Git source

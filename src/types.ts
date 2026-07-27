@@ -395,11 +395,21 @@ export interface PackageManifest {
   version: string;
 }
 
+export interface ProjectPackageManagerEngine {
+  name?: string;
+  onFail?: string;
+  version?: string;
+}
+
 export interface ProjectPackageManifest {
   dependencies?: Record<string, string>;
+  devEngines?: {
+    packageManager?: ProjectPackageManagerEngine | ProjectPackageManagerEngine[];
+  };
   devDependencies?: Record<string, string>;
   name?: string;
   optionalDependencies?: Record<string, string>;
+  packageManager?: string;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   private?: boolean;

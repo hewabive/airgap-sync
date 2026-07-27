@@ -7,6 +7,7 @@ import {
 } from './manifests.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
 import { parseLockfileRequirementsFromContent } from './lockfiles.js';
+import { parsePackageManagerRequirements } from './package-managers.js';
 import { runGitOutputCommand, type GitOutputCommandRunner } from './repos.js';
 import type { PythonDiscoveredInputs } from './python/input-types.js';
 import { discoverPythonInputsFromPaths, emptyPythonDiscoveredInputs } from './python/discovery.js';
@@ -193,10 +194,15 @@ export async function readGitSourceManifestRequirements(
   const unlockedManifestPaths = manifestPaths.filter(
     (manifestPath) => !isCoveredByLockfile(manifestPath, lockfilePaths)
   );
-  const entries: ProjectManifestEntry[] = [];
+  const pnpmLockfileDirs = new Set(
+    lockfilePaths
+      .filter((lockfilePath) => path.posix.basename(lockfilePath) === 'pnpm-lock.yaml')
+      .map(directoryName)
+  );
+  const entriesByPath = new Map<string, ProjectManifestEntry>();
 
-  for (const manifestPath of unlockedManifestPaths) {
-    entries.push({
+  for (const manifestPath of manifestPaths) {
+    entriesByPath.set(manifestPath, {
       manifest: await readPackageJsonFromGit({
         filePath: manifestPath,
         mirrorPath,
@@ -206,10 +212,24 @@ export async function readGitSourceManifestRequirements(
       path: manifestPath,
     });
   }
+  const entries = unlockedManifestPaths.map((manifestPath) => entriesByPath.get(manifestPath)!);
   const parsedManifests = parseManifestRequirementsFromEntries(entries, subdir, {
     includeDev: options.includeDev === true,
     includePeer: options.includePeer === true,
   });
+  const parsedPackageManagers = parsePackageManagerRequirements(
+    manifestPaths.map((manifestPath) => {
+      const entry = entriesByPath.get(manifestPath)!;
+      return {
+        manifest: entry.manifest,
+        pnpmLockfileCovered: pnpmLockfileDirs.has(directoryName(manifestPath)),
+        requiredBy:
+          entry.manifest.name && entry.manifest.version
+            ? `${entry.manifest.name}@${entry.manifest.version}`
+            : (entry.manifest.name ?? `manifest:${manifestPath}`),
+      };
+    })
+  );
   const parsedLockfiles: ParseRootSpecsResult[] = [];
   for (const lockfilePath of lockfilePaths) {
     parsedLockfiles.push(
@@ -241,14 +261,17 @@ export async function readGitSourceManifestRequirements(
 
   return {
     gitRequirements: [
+      ...parsedPackageManagers.gitRequirements,
       ...parsedManifests.gitRequirements,
       ...parsedLockfiles.flatMap((result) => result.gitRequirements),
     ],
     requirements: [
+      ...parsedPackageManagers.requirements,
       ...parsedManifests.requirements,
       ...parsedLockfiles.flatMap((result) => result.requirements),
     ],
     unsupported: [
+      ...parsedPackageManagers.unsupported,
       ...parsedManifests.unsupported,
       ...parsedLockfiles.flatMap((result) => result.unsupported),
     ],

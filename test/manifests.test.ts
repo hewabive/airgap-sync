@@ -120,6 +120,68 @@ describe('readManifestRequirements', () => {
     ]);
   });
 
+  it('keeps pinned pnpm toolchain requirements when a manifest is covered by a lockfile', async () => {
+    await writePackageJson('apps/arriero/package.json', {
+      name: 'arriero',
+      packageManager: 'pnpm@11.17.0+sha512.0123456789abcdef',
+      dependencies: {
+        hono: '^4.12.0',
+      },
+      version: '0.1.0',
+    });
+    await fs.writeFile(
+      path.join(tempDir, 'apps/arriero/pnpm-lock.yaml'),
+      "lockfileVersion: '9.0'\n"
+    );
+
+    const result = await readManifestRequirements(tempDir, {
+      skipManifestsCoveredByLockfiles: true,
+    });
+
+    expect(
+      result.requirements.filter((requirement) =>
+        requirement.requiredBy.startsWith('package-manager:')
+      )
+    ).toEqual([
+      {
+        name: 'pnpm',
+        raw: 'pnpm@11.17.0',
+        requiredBy: 'package-manager:arriero@0.1.0',
+        specifier: '11.17.0',
+        type: 'version',
+      },
+      {
+        name: '@pnpm/exe',
+        raw: '@pnpm/exe@11.17.0',
+        requiredBy: 'package-manager:arriero@0.1.0',
+        specifier: '11.17.0',
+        type: 'version',
+      },
+    ]);
+    expect(result.requirements.some((requirement) => requirement.name === 'hono')).toBe(false);
+  });
+
+  it('uses devEngines.packageManager when no pnpm lockfile pins the selected version', async () => {
+    await writePackageJson('tools/unlocked/package.json', {
+      devEngines: {
+        packageManager: {
+          name: 'pnpm',
+          onFail: 'download',
+          version: '>=11.0.0 <12',
+        },
+      },
+      name: 'unlocked-tool',
+    });
+
+    const result = await readManifestRequirements(tempDir);
+
+    expect(
+      result.requirements
+        .filter((requirement) => requirement.requiredBy === 'package-manager:unlocked-tool')
+        .map((requirement) => `${requirement.name}@${requirement.specifier}`)
+    ).toEqual(['pnpm@>=11.0.0 <12', '@pnpm/exe@>=11.0.0 <12']);
+  });
+
   it('skips component package manifests that are not npm packages', async () => {
     await writePackageJson('components/sha256/package.json', {
       name: 'sha256',

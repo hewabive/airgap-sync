@@ -55,6 +55,7 @@ interface PnpmImporterEntry {
   dependencies?: Record<string, PnpmImporterDependencyEntry | string>;
   devDependencies?: Record<string, PnpmImporterDependencyEntry | string>;
   optionalDependencies?: Record<string, PnpmImporterDependencyEntry | string>;
+  packageManagerDependencies?: Record<string, PnpmImporterDependencyEntry | string>;
 }
 
 function registryRequirement(
@@ -236,6 +237,14 @@ export function parsePnpmLockRequirementsFromContent(
   }
 
   for (const importer of Object.values(parsed?.importers ?? {})) {
+    for (const [name, entry] of Object.entries(importer.packageManagerDependencies ?? {})) {
+      const version = typeof entry === 'string' ? entry : entry.version;
+      addRequirement(
+        requirements,
+        seen,
+        version ? registryRequirement(name, version, `package-manager:${requiredBy}`) : undefined
+      );
+    }
     visitDependencyMap(importer.dependencies);
     visitDependencyMap(importer.devDependencies);
     visitDependencyMap(importer.optionalDependencies);

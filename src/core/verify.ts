@@ -1,4 +1,5 @@
 import path from 'node:path';
+import semver from 'semver';
 import * as fs from './fs.js';
 import { readBundleManifest, readDistTagsManifest, writeVerifyReport } from './bundle.js';
 import { readPackageManifest } from './tarball.js';
@@ -10,6 +11,7 @@ import type {
   DistTagsManifest,
   FetchReport,
   GitSourcesManifest,
+  RootPackageRequirement,
   VerifyCheck,
   VerifyCheckStatus,
   VerifyReport,
@@ -22,6 +24,8 @@ import {
   type PythonApplicationDownloadReport,
 } from './python/application-bundle.js';
 import { pythonApplicationIndexPath } from './python/application-paths.js';
+import { readGitSourceManifestRequirements } from './git-manifests.js';
+import { isPackageManagerRequirement } from './package-managers.js';
 
 export interface VerifyBundleOptions {
   bundleDir: string;
@@ -135,6 +139,91 @@ async function verifyGitMirrors(
     'git-mirrors',
     'ok',
     `${String(gitSources.sources.length)}/${String(gitSources.sources.length)} Git mirrors are present`
+  );
+}
+
+function packageManagerRequirementIsPresent(
+  manifest: BundleManifest,
+  requirement: RootPackageRequirement
+): boolean {
+  return manifest.packages.some((pkg) => {
+    if (pkg.name !== requirement.name) {
+      return false;
+    }
+
+    if (requirement.type === 'version') {
+      return pkg.version === requirement.specifier;
+    }
+
+    if (requirement.type === 'range') {
+      return semver.satisfies(pkg.version, requirement.specifier, {
+        includePrerelease: true,
+      });
+    }
+
+    return false;
+  });
+}
+
+async function verifyPackageManagerRequirements(
+  bundleDir: string,
+  gitSources: GitSourcesManifest | undefined,
+  manifest: BundleManifest | undefined
+): Promise<VerifyCheck | undefined> {
+  if (!gitSources || !manifest || gitSources.sources.length === 0) {
+    return undefined;
+  }
+
+  const requirements: RootPackageRequirement[] = [];
+  const scanErrors: { error: string; sourceId: string }[] = [];
+
+  for (const source of gitSources.sources) {
+    const sourceMirrorPath = mirrorPath(bundleDir, source.localMirrorPath);
+    if (!(await fs.pathExists(sourceMirrorPath))) {
+      continue;
+    }
+
+    try {
+      const parsed = await readGitSourceManifestRequirements({
+        mirrorPath: sourceMirrorPath,
+        source,
+      });
+      requirements.push(...parsed.requirements.filter(isPackageManagerRequirement));
+    } catch (error) {
+      scanErrors.push({
+        error: (error as Error).message,
+        sourceId: source.id,
+      });
+    }
+  }
+
+  if (scanErrors.length > 0) {
+    return check(
+      'package-manager-requirements',
+      'error',
+      `${String(scanErrors.length)} Git sources could not be checked for package manager requirements`,
+      { errors: scanErrors }
+    );
+  }
+
+  const missing = requirements.filter(
+    (requirement) => !packageManagerRequirementIsPresent(manifest, requirement)
+  );
+  if (missing.length > 0) {
+    return check(
+      'package-manager-requirements',
+      'error',
+      `${String(missing.length)}/${String(requirements.length)} package manager requirements are missing from the bundle`,
+      { missing }
+    );
+  }
+
+  return check(
+    'package-manager-requirements',
+    'ok',
+    requirements.length === 0
+      ? 'Git sources declare no pnpm package manager bootstrap requirements'
+      : `${String(requirements.length)}/${String(requirements.length)} package manager requirements are present`
   );
 }
 
@@ -399,6 +488,14 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
     path.join(bundleDir, 'git-sources.json')
   );
   checks.push(await verifyGitMirrors(bundleDir, gitSources));
+  const packageManagerCheck = await verifyPackageManagerRequirements(
+    bundleDir,
+    gitSources,
+    manifest
+  );
+  if (packageManagerCheck) {
+    checks.push(packageManagerCheck);
+  }
 
   const applyReport = await readOptionalJson<ApplyBundleReport>(
     path.join(bundleDir, 'apply-report.json')

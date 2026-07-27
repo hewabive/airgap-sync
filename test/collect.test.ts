@@ -475,6 +475,98 @@ describe('collectBundle', () => {
     ]);
   });
 
+  it('collects a pinned pnpm bootstrap from a lockfile-covered Git manifest', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+
+    const report = await collectBundle({
+      generatedAt: '2026-07-27T00:00:00.000Z',
+      initialGitSources: [
+        {
+          committish: 'main',
+          host: 'github.com',
+          id: 'github.com/acme/arriero',
+          localMirrorPath: 'git-mirrors/github.com/acme/arriero.git',
+          owner: 'acme',
+          repo: 'arriero',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/arriero.git',
+          target: true,
+        },
+      ],
+      maxIterations: 5,
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          expect(['pnpm', '@pnpm/exe']).toContain(name);
+          return Promise.resolve(packageMetadata(name, ['11.17.0'], '11.17.0'));
+        },
+      },
+      registryUrl: 'https://registry.example',
+      async runGitCommand(invocation): Promise<undefined> {
+        if (invocation.args[0] === 'init') {
+          await fs.ensureDir(invocation.args.at(-1) ?? '');
+        }
+        return undefined;
+      },
+      runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: ['package.json', 'pnpm-lock.yaml'].join('\n'),
+          });
+        }
+        if (gitCommand(invocation) === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'arriero',
+              packageManager: 'pnpm@11.17.0',
+              version: '0.1.0',
+            }),
+          });
+        }
+        if (gitCommand(invocation) === 'show main:pnpm-lock.yaml') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: "lockfileVersion: '9.0'\n",
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(report).toMatchObject({
+      fetch: {
+        errors: [],
+        resolved: 2,
+      },
+      fixedPoint: true,
+      iterations: [
+        {
+          addedRequirements: 2,
+          iteration: 1,
+          resolved: 0,
+        },
+        {
+          addedRequirements: 0,
+          iteration: 2,
+          resolved: 2,
+        },
+      ],
+      wroteBundle: true,
+    });
+    const seed = await fs.readJson<{ packages: { name: string; version: string }[] }>(
+      path.join(outputDir, 'seed-manifest.json')
+    );
+    expect(seed.packages.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(
+      expect.arrayContaining(['pnpm@11.17.0', '@pnpm/exe@11.17.0'])
+    );
+  });
+
   it('reports Git mirror changes from any fixed-point iteration', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');

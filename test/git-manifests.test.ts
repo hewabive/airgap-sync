@@ -246,6 +246,15 @@ describe('readGitSourceManifestRequirements', () => {
           });
         }
 
+        if (gitCommand(invocation) === 'show main:tools/ui/package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'ui',
+            }),
+          });
+        }
+
         throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
       },
     });
@@ -258,6 +267,64 @@ describe('readGitSourceManifestRequirements', () => {
         raw: '@ungap/structured-clone@1.3.0',
         requiredBy: 'lockfile:tools/ui/package-lock.json',
         specifier: '1.3.0',
+        type: 'version',
+      },
+    ]);
+  });
+
+  it('reads a pinned pnpm toolchain from a package.json covered by pnpm-lock.yaml', async () => {
+    const result = await readGitSourceManifestRequirements({
+      mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+      source,
+      runner(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: ['package.json', 'pnpm-lock.yaml'].join('\n'),
+          });
+        }
+
+        if (gitCommand(invocation) === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'arriero',
+              packageManager: 'pnpm@11.17.0',
+              version: '0.1.0',
+            }),
+          });
+        }
+
+        if (gitCommand(invocation) === 'show main:pnpm-lock.yaml') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: "lockfileVersion: '9.0'\n",
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(result.manifestPaths).toEqual([]);
+    expect(result.lockfilePaths).toEqual(['pnpm-lock.yaml']);
+    expect(result.requirements).toEqual([
+      {
+        name: 'pnpm',
+        raw: 'pnpm@11.17.0',
+        requiredBy: 'package-manager:arriero@0.1.0',
+        specifier: '11.17.0',
+        type: 'version',
+      },
+      {
+        name: '@pnpm/exe',
+        raw: '@pnpm/exe@11.17.0',
+        requiredBy: 'package-manager:arriero@0.1.0',
+        specifier: '11.17.0',
         type: 'version',
       },
     ]);
