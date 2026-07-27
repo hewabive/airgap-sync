@@ -1,5 +1,6 @@
 import path from 'node:path';
 import * as fs from './fs.js';
+import { semanticDigest } from './canonical-json.js';
 import { createGitSourceFromUrl } from './git-sources.js';
 import type {
   GitSource,
@@ -18,6 +19,15 @@ import type { PythonRequirementInput } from './python/input-types.js';
 import type { PythonRootWheelInput } from './python/input-types.js';
 import type { PythonRuntimeArtifactInput } from './python/runtime-artifacts.js';
 import { isPythonResolutionMode, type PythonResolutionMode } from './python/resolution-policy.js';
+import {
+  normalizeInlinePlatformCoveragePolicy,
+  normalizePlatformCoveragePolicy,
+  type InlinePlatformCoveragePolicy,
+  type PlatformCoveragePolicy,
+} from './python/coverage-policy.js';
+import type { PythonRuntimePolicy } from './python/application-intent.js';
+import { isValidPackageName, normalizePackageName } from './python/names.js';
+import { isValidSpecifierSet } from './python/pep440.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
 
 export type { PythonResolutionMode } from './python/resolution-policy.js';
@@ -27,6 +37,7 @@ export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
 const defaultWorkspacePythonSourceIndex = 'https://pypi.org/simple/';
+export const workspacePythonPlannerVersion = '0.11.16';
 
 export interface WorkspaceGitTarget {
   branch?: string;
@@ -60,10 +71,24 @@ export interface WorkspacePythonRuntimeTarget {
   url: string;
 }
 
+export interface WorkspacePythonApplicationTarget {
+  application: {
+    extras: string[];
+    features: Record<string, string>;
+    recipe?: string;
+    version?: string;
+  };
+  coverage: InlinePlatformCoveragePolicy | string;
+  python: PythonRuntimePolicy;
+  spec: string;
+  type: 'python-app';
+}
+
 export type WorkspaceTarget =
   | WorkspaceGitTarget
   | WorkspaceNpmTarget
   | WorkspacePypiTarget
+  | WorkspacePythonApplicationTarget
   | WorkspacePythonWheelTarget
   | WorkspacePythonRuntimeTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
@@ -86,7 +111,31 @@ export interface WorkspaceDefaults {
   };
 }
 
+export interface WorkspacePythonLegacySeedConfig {
+  resolutionMode: PythonResolutionMode;
+  targetEnvironments?: PythonTargetEnvironmentConfig[];
+}
+
+export interface WorkspacePythonConfig {
+  applicationArtifactOwner?: string;
+  legacySeed?: WorkspacePythonLegacySeedConfig;
+  planner: {
+    engine: 'uv';
+    version: typeof workspacePythonPlannerVersion;
+  };
+  publishOwner?: string;
+  sourceIndex: string;
+}
+
+export interface WorkspaceLegacyPythonSettings {
+  publishOwner?: string;
+  resolutionMode: PythonResolutionMode;
+  sourceIndex?: string;
+  targetEnvironments?: PythonTargetEnvironmentConfig[];
+}
+
 export interface WorkspaceConfig {
+  coveragePolicies?: PlatformCoveragePolicy[];
   defaults: WorkspaceDefaults;
   giteaUrl?: string;
   gitOwnerStrategy: GitOwnerStrategy;
@@ -94,10 +143,11 @@ export interface WorkspaceConfig {
   gitPublishOwnerKind?: GitPublishOwnerKind;
   output: string;
   pythonPublishOwner?: string;
-  pythonResolutionMode: PythonResolutionMode;
+  pythonResolutionMode?: PythonResolutionMode;
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
-  schemaVersion: 1;
+  python?: WorkspacePythonConfig;
+  schemaVersion: 1 | 2;
   sourceRegistry: string;
   targetRegistry?: string;
   targets: WorkspaceTarget[];
@@ -142,10 +192,13 @@ interface WorkspacePythonRuntimeTargetSnapshot {
   url: string;
 }
 
+interface WorkspacePythonApplicationTargetSnapshot extends WorkspacePythonApplicationTarget {}
+
 export type WorkspaceTargetSnapshot =
   | WorkspaceGitTargetSnapshot
   | WorkspaceNpmTargetSnapshot
   | WorkspacePypiTargetSnapshot
+  | WorkspacePythonApplicationTargetSnapshot
   | WorkspacePythonWheelTargetSnapshot
   | WorkspacePythonRuntimeTargetSnapshot;
 
@@ -159,7 +212,9 @@ export interface WorkspaceSnapshot {
   pythonResolutionMode?: PythonResolutionMode;
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
-  schemaVersion: 1;
+  python?: WorkspacePythonConfig;
+  coveragePolicies?: PlatformCoveragePolicy[];
+  schemaVersion: 1 | 2;
   sourceRegistry: string;
   targets: WorkspaceTargetSnapshot[];
 }
@@ -239,6 +294,115 @@ export function workspaceSecretsPath(workspaceDir: string): string {
   return path.join(path.resolve(workspaceDir), workspaceSecretsFileName);
 }
 
+function normalizePythonRuntimePolicy(value: unknown): PythonRuntimePolicy {
+  if (value === undefined) {
+    return { policy: 'auto' };
+  }
+  if (!isRecord(value) || (value.policy !== 'auto' && value.policy !== 'constrained')) {
+    throw new Error('python-app target python policy must be auto or constrained');
+  }
+  if (value.policy === 'auto') {
+    return { policy: 'auto' };
+  }
+  if (
+    typeof value.version !== 'string' ||
+    !value.version.trim() ||
+    !isValidSpecifierSet(value.version.trim())
+  ) {
+    throw new Error('constrained python-app target requires a valid Python version specifier');
+  }
+  return {
+    policy: 'constrained',
+    version: value.version.trim(),
+  };
+}
+
+function normalizeStringMap(value: unknown, description: string): Record<string, string> {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${description} must be an object`);
+  }
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawItem] of Object.entries(value)) {
+    const key = rawKey.trim();
+    if (!key || typeof rawItem !== 'string' || !rawItem.trim()) {
+      throw new Error(`${description} keys and values must be non-empty strings`);
+    }
+    normalized[key] = rawItem.trim();
+  }
+  return normalized;
+}
+
+function normalizePythonApplicationTarget(
+  value: Record<string, unknown>
+): WorkspacePythonApplicationTarget {
+  if (typeof value.spec !== 'string' || !value.spec.trim()) {
+    throw new Error('python-app target must include a non-empty spec');
+  }
+  const parsed = parseRequirement(value.spec.trim());
+  if (!parsed.ok || parsed.requirement.url || parsed.requirement.marker) {
+    const reason = parsed.ok
+      ? parsed.requirement.url
+        ? 'direct URLs are not supported'
+        : 'environment markers are not supported'
+      : parsed.reason;
+    throw new Error(`Invalid python-app target: ${reason}`);
+  }
+
+  const application = isRecord(value.application) ? value.application : {};
+  const explicitVersion =
+    typeof application.version === 'string' && application.version.trim()
+      ? application.version.trim()
+      : undefined;
+  if (explicitVersion && parsed.requirement.specifier) {
+    throw new Error(
+      'python-app target version must be set either in spec or application.version, not both'
+    );
+  }
+  const version = explicitVersion ?? (parsed.requirement.specifier || undefined);
+  if (version && !isValidSpecifierSet(version)) {
+    throw new Error('python-app application.version must be a valid version specifier');
+  }
+
+  let extras = parsed.requirement.extras;
+  if (application.extras !== undefined) {
+    if (
+      !Array.isArray(application.extras) ||
+      !application.extras.every(
+        (extra): extra is string => typeof extra === 'string' && isValidPackageName(extra.trim())
+      )
+    ) {
+      throw new Error('python-app application.extras must contain valid extra names');
+    }
+    extras = application.extras.map((extra) => normalizePackageName(extra.trim()));
+  }
+  extras = [...new Set(extras)].sort();
+
+  let coverage: InlinePlatformCoveragePolicy | string;
+  if (typeof value.coverage === 'string' && value.coverage.trim()) {
+    coverage = value.coverage.trim();
+  } else {
+    coverage = normalizeInlinePlatformCoveragePolicy(value.coverage);
+  }
+
+  return {
+    application: {
+      extras,
+      features: normalizeStringMap(application.features, 'python-app application.features'),
+      ...(typeof application.recipe === 'string' && application.recipe.trim()
+        ? { recipe: application.recipe.trim() }
+        : {}),
+      ...(version ? { version } : {}),
+    },
+    coverage,
+    python: normalizePythonRuntimePolicy(value.python),
+    spec: parsed.requirement.name,
+    type: 'python-app',
+  };
+}
+
 function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
   if (!isRecord(value) || typeof value.type !== 'string') {
     throw new Error('Workspace target must be an object with a type');
@@ -288,6 +452,10 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
       };
     }
     return { spec: value.spec.trim(), type: 'npm' };
+  }
+
+  if (value.type === 'python-app') {
+    return normalizePythonApplicationTarget(value);
   }
 
   if (value.type === 'python-wheel') {
@@ -500,35 +668,141 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   };
 }
 
+function normalizeCoveragePolicies(value: unknown): PlatformCoveragePolicy[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('coveragePolicies must be an array');
+  }
+  const policies = value.map(normalizePlatformCoveragePolicy);
+  const ids = new Set<string>();
+  for (const policy of policies) {
+    if (ids.has(policy.id)) {
+      throw new Error(`Duplicate coverage policy id: ${policy.id}`);
+    }
+    ids.add(policy.id);
+  }
+  return policies;
+}
+
+function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
+  if (!isRecord(value)) {
+    throw new Error('python settings must be an object');
+  }
+  const sourceIndex = normalizeHttpUrl(
+    optionalString(value.sourceIndex) ?? defaultWorkspacePythonSourceIndex,
+    'python.sourceIndex'
+  );
+  const publishOwner = optionalString(value.publishOwner);
+  const applicationArtifactOwner = optionalString(value.applicationArtifactOwner);
+  const planner = isRecord(value.planner) ? value.planner : {};
+  if (planner.engine !== undefined && planner.engine !== 'uv') {
+    throw new Error('python.planner.engine must be uv');
+  }
+  if (
+    planner.version !== undefined &&
+    planner.version !== workspacePythonPlannerVersion &&
+    planner.version !== 'pinned-by-airgap-sync'
+  ) {
+    throw new Error(
+      `python.planner.version must use the airgap-sync pin (${workspacePythonPlannerVersion})`
+    );
+  }
+
+  let legacySeed: WorkspacePythonLegacySeedConfig | undefined;
+  if (value.legacySeed !== undefined) {
+    if (!isRecord(value.legacySeed)) {
+      throw new Error('python.legacySeed must be an object');
+    }
+    const targetEnvironments = normalizePythonTargetEnvironments(
+      value.legacySeed.targetEnvironments
+    );
+    const resolutionMode: PythonResolutionMode =
+      value.legacySeed.resolutionMode === 'approximate' ? 'approximate' : 'locked-only';
+    legacySeed = {
+      resolutionMode,
+      ...(targetEnvironments ? { targetEnvironments } : {}),
+    };
+  }
+
+  return {
+    ...(applicationArtifactOwner ? { applicationArtifactOwner } : {}),
+    ...(legacySeed ? { legacySeed } : {}),
+    planner: {
+      engine: 'uv',
+      version: workspacePythonPlannerVersion,
+    },
+    ...(publishOwner ? { publishOwner } : {}),
+    sourceIndex,
+  };
+}
+
 function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   if (!isRecord(value)) {
     throw new Error(`${workspaceConfigFileName} must contain a JSON object`);
   }
 
-  if (value.schemaVersion !== 1) {
-    throw new Error(`${workspaceConfigFileName} schemaVersion must be 1`);
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
+    throw new Error(`${workspaceConfigFileName} schemaVersion must be 1 or 2`);
   }
 
+  const schemaVersion = value.schemaVersion;
+  const coveragePolicies =
+    schemaVersion === 2 ? normalizeCoveragePolicies(value.coveragePolicies) : [];
   const targets = Array.isArray(value.targets)
     ? value.targets.map((target) => normalizeWorkspaceTarget(target))
     : [];
+  if (schemaVersion === 1 && targets.some((target) => target.type === 'python-app')) {
+    throw new Error('python-app targets require workspace schemaVersion 2');
+  }
+  const coveragePolicyIds = new Set(coveragePolicies.map((policy) => policy.id));
+  for (const target of targets) {
+    if (
+      target.type === 'python-app' &&
+      typeof target.coverage === 'string' &&
+      !coveragePolicyIds.has(target.coverage)
+    ) {
+      throw new Error(`python-app target references unknown coverage policy: ${target.coverage}`);
+    }
+  }
+
   const giteaUrl = optionalString(value.giteaUrl);
   const targetRegistry = optionalString(value.targetRegistry);
-  const pythonTargetEnvironments = normalizePythonTargetEnvironments(
-    value.pythonTargetEnvironments
-  );
-  const pythonSourceIndexValue = optionalString(value.pythonSourceIndex);
-  const pythonSourceIndex = pythonTargetEnvironments
-    ? normalizeHttpUrl(
-        pythonSourceIndexValue ?? defaultWorkspacePythonSourceIndex,
-        'pythonSourceIndex'
-      )
-    : pythonSourceIndexValue
-      ? normalizeHttpUrl(pythonSourceIndexValue, 'pythonSourceIndex')
+  const pythonTargetEnvironments =
+    schemaVersion === 1
+      ? normalizePythonTargetEnvironments(value.pythonTargetEnvironments)
       : undefined;
-  const pythonPublishOwner = optionalString(value.pythonPublishOwner);
-  const pythonResolutionMode: PythonResolutionMode =
-    value.pythonResolutionMode === 'approximate' ? 'approximate' : 'locked-only';
+  const pythonSourceIndexValue =
+    schemaVersion === 1 ? optionalString(value.pythonSourceIndex) : undefined;
+  const pythonSourceIndex =
+    schemaVersion === 1
+      ? pythonTargetEnvironments
+        ? normalizeHttpUrl(
+            pythonSourceIndexValue ?? defaultWorkspacePythonSourceIndex,
+            'pythonSourceIndex'
+          )
+        : pythonSourceIndexValue
+          ? normalizeHttpUrl(pythonSourceIndexValue, 'pythonSourceIndex')
+          : undefined
+      : undefined;
+  const pythonPublishOwner =
+    schemaVersion === 1 ? optionalString(value.pythonPublishOwner) : undefined;
+  const pythonResolutionMode: PythonResolutionMode | undefined =
+    schemaVersion === 1
+      ? value.pythonResolutionMode === 'approximate'
+        ? 'approximate'
+        : 'locked-only'
+      : undefined;
+  const python =
+    schemaVersion === 2 &&
+    (value.python !== undefined ||
+      targets.some(
+        (target) =>
+          target.type === 'python-app' || target.type === 'pypi' || target.type === 'python-wheel'
+      ))
+      ? normalizeWorkspacePythonConfig(value.python ?? {})
+      : undefined;
   const gitOwnerStrategy: GitOwnerStrategy =
     value.gitOwnerStrategy === 'authenticated-user' || value.gitOwnerStrategy === 'fixed-owner'
       ? value.gitOwnerStrategy
@@ -545,7 +819,8 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   }
   if (
     targets.some((target) => target.type === 'pypi' || target.type === 'python-wheel') &&
-    (!pythonTargetEnvironments || pythonTargetEnvironments.length === 0)
+    !(schemaVersion === 1 ? pythonTargetEnvironments : python?.legacySeed?.targetEnvironments)
+      ?.length
   ) {
     throw new Error('pypi targets require pythonTargetEnvironments');
   }
@@ -561,10 +836,12 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
         ? value.output.trim()
         : defaultWorkspaceOutputDir,
     ...(pythonPublishOwner ? { pythonPublishOwner } : {}),
-    pythonResolutionMode,
+    ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
     ...(pythonSourceIndex ? { pythonSourceIndex } : {}),
     ...(pythonTargetEnvironments ? { pythonTargetEnvironments } : {}),
-    schemaVersion: 1,
+    ...(python ? { python } : {}),
+    ...(schemaVersion === 2 ? { coveragePolicies } : {}),
+    schemaVersion,
     sourceRegistry:
       typeof value.sourceRegistry === 'string' && value.sourceRegistry.trim().length > 0
         ? value.sourceRegistry.trim()
@@ -607,6 +884,113 @@ export async function readWorkspaceConfig(workspaceDir: string): Promise<Workspa
   return normalizeWorkspaceConfig(await fs.readJson(workspaceConfigPath(workspaceDir)));
 }
 
+export function workspaceLegacyPythonSettings(
+  config: WorkspaceConfig
+): WorkspaceLegacyPythonSettings {
+  if (config.schemaVersion === 2) {
+    return {
+      ...(config.python?.publishOwner ? { publishOwner: config.python.publishOwner } : {}),
+      resolutionMode: config.python?.legacySeed?.resolutionMode ?? 'locked-only',
+      ...(config.python?.sourceIndex ? { sourceIndex: config.python.sourceIndex } : {}),
+      ...(config.python?.legacySeed?.targetEnvironments
+        ? { targetEnvironments: config.python.legacySeed.targetEnvironments }
+        : {}),
+    };
+  }
+  return {
+    ...(config.pythonPublishOwner ? { publishOwner: config.pythonPublishOwner } : {}),
+    resolutionMode: config.pythonResolutionMode ?? 'locked-only',
+    ...(config.pythonSourceIndex ? { sourceIndex: config.pythonSourceIndex } : {}),
+    ...(config.pythonTargetEnvironments
+      ? { targetEnvironments: config.pythonTargetEnvironments }
+      : {}),
+  };
+}
+
+export function withWorkspaceLegacyPythonSettings(
+  config: WorkspaceConfig,
+  settings: WorkspaceLegacyPythonSettings
+): WorkspaceConfig {
+  if (config.schemaVersion === 1) {
+    const nextConfig: WorkspaceConfig = {
+      ...config,
+      ...(settings.publishOwner ? { pythonPublishOwner: settings.publishOwner } : {}),
+      pythonResolutionMode: settings.resolutionMode,
+      ...(settings.sourceIndex ? { pythonSourceIndex: settings.sourceIndex } : {}),
+    };
+    if (settings.targetEnvironments) {
+      nextConfig.pythonTargetEnvironments = settings.targetEnvironments;
+    } else {
+      delete nextConfig.pythonTargetEnvironments;
+    }
+    return nextConfig;
+  }
+
+  return {
+    ...config,
+    python: {
+      ...(config.python?.applicationArtifactOwner
+        ? { applicationArtifactOwner: config.python.applicationArtifactOwner }
+        : {}),
+      legacySeed: {
+        resolutionMode: settings.resolutionMode,
+        ...(settings.targetEnvironments ? { targetEnvironments: settings.targetEnvironments } : {}),
+      },
+      planner: config.python?.planner ?? {
+        engine: 'uv',
+        version: workspacePythonPlannerVersion,
+      },
+      ...(settings.publishOwner ? { publishOwner: settings.publishOwner } : {}),
+      sourceIndex:
+        settings.sourceIndex ?? config.python?.sourceIndex ?? defaultWorkspacePythonSourceIndex,
+    },
+  };
+}
+
+export function previewWorkspaceConfigMigration(config: WorkspaceConfig): WorkspaceConfig {
+  const normalized = normalizeWorkspaceConfig(config);
+  if (normalized.schemaVersion === 2) {
+    return normalized;
+  }
+
+  const {
+    pythonPublishOwner,
+    pythonResolutionMode,
+    pythonSourceIndex,
+    pythonTargetEnvironments,
+    ...common
+  } = normalized;
+  const hasLegacyPythonIntent =
+    pythonPublishOwner !== undefined ||
+    pythonSourceIndex !== undefined ||
+    pythonTargetEnvironments !== undefined ||
+    normalized.targets.some(
+      (target) => target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
+    );
+  const migrated: WorkspaceConfig = {
+    ...common,
+    coveragePolicies: [],
+    ...(hasLegacyPythonIntent
+      ? {
+          python: {
+            legacySeed: {
+              resolutionMode: pythonResolutionMode ?? 'locked-only',
+              ...(pythonTargetEnvironments ? { targetEnvironments: pythonTargetEnvironments } : {}),
+            },
+            planner: {
+              engine: 'uv',
+              version: workspacePythonPlannerVersion,
+            },
+            ...(pythonPublishOwner ? { publishOwner: pythonPublishOwner } : {}),
+            sourceIndex: pythonSourceIndex ?? defaultWorkspacePythonSourceIndex,
+          },
+        }
+      : {}),
+    schemaVersion: 2,
+  };
+  return normalizeWorkspaceConfig(migrated);
+}
+
 export async function readWorkspaceSecrets(workspaceDir: string): Promise<WorkspaceSecrets> {
   const secretsPath = workspaceSecretsPath(workspaceDir);
   if (!(await fs.pathExists(secretsPath))) {
@@ -620,7 +1004,9 @@ export async function writeWorkspaceConfig(
   workspaceDir: string,
   config: WorkspaceConfig
 ): Promise<void> {
-  await fs.writeJson(workspaceConfigPath(workspaceDir), config, { spaces: 2 });
+  await fs.writeJson(workspaceConfigPath(workspaceDir), normalizeWorkspaceConfig(config), {
+    spaces: 2,
+  });
 }
 
 export async function writeWorkspaceSecrets(
@@ -658,9 +1044,19 @@ export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<Wo
 function targetKey(target: WorkspaceTarget): string {
   return target.type === 'git'
     ? ['git', target.url, target.branch ?? ''].join('\0')
-    : target.type === 'python-wheel' || target.type === 'python-runtime'
-      ? [target.type, target.url, target.sha256].join('\0')
-      : [target.type, target.spec].join('\0');
+    : target.type === 'python-app'
+      ? [
+          target.type,
+          target.spec,
+          semanticDigest({
+            application: target.application,
+            coverage: target.coverage,
+            python: target.python,
+          }),
+        ].join('\0')
+      : target.type === 'python-wheel' || target.type === 'python-runtime'
+        ? [target.type, target.url, target.sha256].join('\0')
+        : [target.type, target.spec].join('\0');
 }
 
 export async function addWorkspaceTarget(
@@ -670,7 +1066,11 @@ export async function addWorkspaceTarget(
   const config = await readWorkspaceConfig(workspaceDir);
   if (
     (target.type === 'pypi' || target.type === 'python-wheel') &&
-    !config.pythonTargetEnvironments?.length
+    !(
+      config.schemaVersion === 1
+        ? config.pythonTargetEnvironments
+        : config.python?.legacySeed?.targetEnvironments
+    )?.length
   ) {
     throw new Error('pypi targets require pythonTargetEnvironments');
   }
@@ -842,6 +1242,9 @@ export function createWorkspaceSnapshot(
   const gitSourcesByUrl = new Map(
     createWorkspaceGitSources(options.config).map((source) => [source.sourceUrl, source])
   );
+  const legacyPython = workspaceLegacyPythonSettings(options.config);
+  const hasLegacyPython =
+    options.config.schemaVersion === 1 || options.config.python?.legacySeed !== undefined;
 
   return {
     createdAt: options.createdAt ?? new Date().toISOString(),
@@ -851,17 +1254,21 @@ export function createWorkspaceSnapshot(
       ? { gitPublishOwnerKind: options.config.gitPublishOwnerKind }
       : {}),
     output: options.config.output,
-    ...(options.config.pythonPublishOwner
-      ? { pythonPublishOwner: options.config.pythonPublishOwner }
+    ...(hasLegacyPython && legacyPython.publishOwner
+      ? { pythonPublishOwner: legacyPython.publishOwner }
       : {}),
-    pythonResolutionMode: options.config.pythonResolutionMode,
-    ...(options.config.pythonSourceIndex
-      ? { pythonSourceIndex: options.config.pythonSourceIndex }
+    ...(hasLegacyPython ? { pythonResolutionMode: legacyPython.resolutionMode } : {}),
+    ...(hasLegacyPython && legacyPython.sourceIndex
+      ? { pythonSourceIndex: legacyPython.sourceIndex }
       : {}),
-    ...(options.config.pythonTargetEnvironments
-      ? { pythonTargetEnvironments: options.config.pythonTargetEnvironments }
+    ...(legacyPython.targetEnvironments
+      ? { pythonTargetEnvironments: legacyPython.targetEnvironments }
       : {}),
-    schemaVersion: 1,
+    ...(options.config.python ? { python: options.config.python } : {}),
+    ...(options.config.coveragePolicies
+      ? { coveragePolicies: options.config.coveragePolicies }
+      : {}),
+    schemaVersion: options.config.schemaVersion,
     sourceRegistry: options.config.sourceRegistry,
     targets: options.config.targets.map((target) => {
       if (target.type === 'npm') {
@@ -898,6 +1305,16 @@ export function createWorkspaceSnapshot(
           sha256: target.sha256,
           type: target.type,
           url: target.url,
+        };
+      }
+
+      if (target.type === 'python-app') {
+        return {
+          application: target.application,
+          coverage: target.coverage,
+          python: target.python,
+          spec: target.spec,
+          type: target.type,
         };
       }
 

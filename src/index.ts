@@ -24,6 +24,25 @@ export { applyBundle } from './core/apply.js';
 export { collectBundle } from './core/collect.js';
 export { HttpPythonIndexClient } from './core/python/index-client.js';
 export { publishPythonBundle } from './core/python/publisher.js';
+export { canonicalizeJson, canonicalJson, semanticDigest } from './core/canonical-json.js';
+export {
+  pythonApplicationPlanDirectory,
+  pythonApplicationPlanPath,
+  pythonApplicationTargetId,
+  pythonApplicationsDirectory,
+} from './core/python/application-paths.js';
+export {
+  createPythonEnvironmentPlan,
+  pythonEnvironmentPlanId,
+  pythonEnvironmentPlanSemanticContent,
+  serializePythonEnvironmentPlan,
+} from './core/python/environment-plan.js';
+export {
+  normalizeInlinePlatformCoveragePolicy,
+  normalizePlatformCoveragePolicy,
+  platformCoveragePolicyDigest,
+} from './core/python/coverage-policy.js';
+export { isBuiltInPlatformFamilyId } from './core/python/platform-family.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
 export { resolveGitPublishTargets } from './core/git-publish-targets.js';
 export type {
@@ -84,6 +103,7 @@ export {
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
   initWorkspace,
+  previewWorkspaceConfigMigration,
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
@@ -92,8 +112,11 @@ export {
   setWorkspaceTargetPythonResolutionMode,
   workspaceConfigFileName,
   workspaceConfigPath,
+  workspaceLegacyPythonSettings,
   workspaceSecretsFileName,
   workspaceSecretsPath,
+  workspacePythonPlannerVersion,
+  withWorkspaceLegacyPythonSettings,
   writeWorkspaceConfig,
   writeWorkspaceSecrets,
 } from './core/workspace.js';
@@ -190,10 +213,14 @@ export type {
   WorkspaceConfig,
   WorkspaceDefaults,
   WorkspaceGitTarget,
+  WorkspaceLegacyPythonSettings,
   WorkspaceNpmTarget,
   WorkspacePypiTarget,
   WorkspacePromptBoolean,
   WorkspacePythonWheelTarget,
+  WorkspacePythonApplicationTarget,
+  WorkspacePythonConfig,
+  WorkspacePythonLegacySeedConfig,
   WorkspacePythonRuntimeTarget,
   WorkspaceSecrets,
   WorkspaceSnapshot,
@@ -203,6 +230,43 @@ export type {
 } from './core/workspace.js';
 
 export type { DownloadedTarball } from './core/tarball.js';
+export type { CanonicalJsonPrimitive, CanonicalJsonValue } from './core/canonical-json.js';
+export type {
+  BuiltInPlatformFamilyId,
+  PlatformArchitecture,
+  PlatformFamily,
+  PlatformFamilyStatus,
+  PlatformLibcFamily,
+  PlatformOsFamily,
+} from './core/python/platform-family.js';
+export type {
+  InlinePlatformCoveragePolicy,
+  LinuxCoverageConstraint,
+  PlatformCoveragePolicy,
+  PythonWheelCollectionStrategy,
+} from './core/python/coverage-policy.js';
+export type {
+  DistributionHint,
+  DistributionHintCatalog,
+} from './core/python/distribution-hints.js';
+export type {
+  PythonApplicationIntent,
+  PythonApplicationSelection,
+  PythonRuntimePolicy,
+} from './core/python/application-intent.js';
+export type {
+  PythonApplicationRecipe,
+  PythonApplicationRecipeCompatibility,
+  PythonApplicationRecipeFeature,
+} from './core/python/application-recipe.js';
+export type {
+  PythonEnvironmentPlan,
+  PythonEnvironmentPlanInput,
+  PythonEnvironmentPlanPresentation,
+  PythonLockedPackagePlan,
+  PythonPlanWheel,
+  PythonPlatformPlan,
+} from './core/python/environment-plan.js';
 
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
 export type {

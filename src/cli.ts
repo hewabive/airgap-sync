@@ -33,6 +33,7 @@ import {
   packageName,
   packageVersion,
   parseRootSpecs,
+  previewWorkspaceConfigMigration,
   publishBundle,
   pruneBundle,
   readBundleInfo,
@@ -68,6 +69,8 @@ import {
   writePublishRunHistory,
   workspaceSecretsFileName,
   workspaceConfigFileName,
+  workspaceLegacyPythonSettings,
+  withWorkspaceLegacyPythonSettings,
   provisionGiteaRepositories,
 } from './index.js';
 import type { GiteaClient } from './index.js';
@@ -621,16 +624,17 @@ function formatPythonTargetEnvironmentList(
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
+  const legacyPython = workspaceLegacyPythonSettings(config);
   return [
     `Bundle directory: ${config.output}`,
     `Source registry: ${config.sourceRegistry}`,
     `Target registry: ${config.targetRegistry ?? '(not set)'}`,
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
-    `Python source index: ${config.pythonSourceIndex ?? '(disabled)'}`,
-    `Python publish owner: ${config.pythonPublishOwner ?? '(not set)'}`,
-    `Default Python resolution mode: ${config.pythonResolutionMode}`,
+    `Python source index: ${legacyPython.sourceIndex ?? '(disabled)'}`,
+    `Python publish owner: ${legacyPython.publishOwner ?? '(not set)'}`,
+    `Default Python resolution mode: ${legacyPython.resolutionMode}`,
     'Python target environments:',
-    formatPythonTargetEnvironmentList(config.pythonTargetEnvironments),
+    formatPythonTargetEnvironmentList(legacyPython.targetEnvironments),
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
     `Download peerDependencies: ${promptBooleanToString(config.defaults.download.includePeer)}`,
     `Latest policy: ${config.defaults.download.latestPolicy}`,
@@ -1446,13 +1450,14 @@ async function configurePythonPackageSettings(
   rl: ReadlineInterface,
   config: WorkspaceConfig
 ): Promise<WorkspaceConfig> {
+  const current = workspaceLegacyPythonSettings(config);
   const pythonSourceIndex = validatePythonIndexUrl(
-    await ask(rl, 'Python source index', config.pythonSourceIndex ?? defaultPythonSourceIndex)
+    await ask(rl, 'Python source index', current.sourceIndex ?? defaultPythonSourceIndex)
   );
   const pythonPublishOwner = await ask(
     rl,
     'Gitea Python package owner',
-    config.pythonPublishOwner ?? defaultPythonPublishOwner
+    current.publishOwner ?? defaultPythonPublishOwner
   );
   if (!pythonPublishOwner.trim()) {
     throw new Error('Gitea Python package owner is required');
@@ -1464,15 +1469,15 @@ async function configurePythonPackageSettings(
     await ask(
       rl,
       'Default Python resolution mode (locked-only/approximate)',
-      config.pythonResolutionMode
+      current.resolutionMode
     )
   );
-  const nextConfig: WorkspaceConfig = {
-    ...config,
-    pythonPublishOwner: pythonPublishOwner.trim(),
-    pythonResolutionMode,
-    pythonSourceIndex,
-  };
+  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
+    ...current,
+    publishOwner: pythonPublishOwner.trim(),
+    resolutionMode: pythonResolutionMode,
+    sourceIndex: pythonSourceIndex,
+  });
   await saveWorkspaceConfig(workspaceDir, nextConfig);
   return nextConfig;
 }
@@ -1482,14 +1487,15 @@ async function addPythonTargetEnvironment(
   rl: ReadlineInterface,
   config: WorkspaceConfig
 ): Promise<WorkspaceConfig> {
+  const current = workspaceLegacyPythonSettings(config);
   const environment = await askPythonTargetEnvironment(rl);
-  assertUniquePythonEnvironmentName(config.pythonTargetEnvironments, environment.name);
-  const nextConfig: WorkspaceConfig = {
-    ...config,
-    pythonPublishOwner: config.pythonPublishOwner ?? defaultPythonPublishOwner,
-    pythonSourceIndex: config.pythonSourceIndex ?? defaultPythonSourceIndex,
-    pythonTargetEnvironments: [...(config.pythonTargetEnvironments ?? []), environment],
-  };
+  assertUniquePythonEnvironmentName(current.targetEnvironments, environment.name);
+  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
+    ...current,
+    publishOwner: current.publishOwner ?? defaultPythonPublishOwner,
+    sourceIndex: current.sourceIndex ?? defaultPythonSourceIndex,
+    targetEnvironments: [...(current.targetEnvironments ?? []), environment],
+  });
   await saveWorkspaceConfig(workspaceDir, nextConfig);
   return nextConfig;
 }
@@ -1512,7 +1518,8 @@ async function editPythonTargetEnvironment(
   rl: ReadlineInterface,
   config: WorkspaceConfig
 ): Promise<WorkspaceConfig> {
-  const environments = config.pythonTargetEnvironments ?? [];
+  const current = workspaceLegacyPythonSettings(config);
+  const environments = current.targetEnvironments ?? [];
   if (environments.length === 0) {
     console.log('No Python target environments configured.');
     return config;
@@ -1526,10 +1533,10 @@ async function editPythonTargetEnvironment(
   assertUniquePythonEnvironmentName(environments, environment.name, selectedIndex);
   const nextEnvironments = [...environments];
   nextEnvironments[selectedIndex] = environment;
-  const nextConfig: WorkspaceConfig = {
-    ...config,
-    pythonTargetEnvironments: nextEnvironments,
-  };
+  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
+    ...current,
+    targetEnvironments: nextEnvironments,
+  });
   await saveWorkspaceConfig(workspaceDir, nextConfig);
   return nextConfig;
 }
@@ -1539,7 +1546,8 @@ async function removePythonTargetEnvironment(
   rl: ReadlineInterface,
   config: WorkspaceConfig
 ): Promise<WorkspaceConfig> {
-  const environments = config.pythonTargetEnvironments ?? [];
+  const current = workspaceLegacyPythonSettings(config);
+  const environments = current.targetEnvironments ?? [];
   if (environments.length === 0) {
     console.log('No Python target environments configured.');
     return config;
@@ -1564,12 +1572,12 @@ async function removePythonTargetEnvironment(
   }
 
   const nextEnvironments = environments.filter((_, index) => index !== selectedIndex);
-  const nextConfig: WorkspaceConfig = { ...config };
-  if (nextEnvironments.length > 0) {
-    nextConfig.pythonTargetEnvironments = nextEnvironments;
-  } else {
-    delete nextConfig.pythonTargetEnvironments;
-  }
+  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
+    ...(current.publishOwner ? { publishOwner: current.publishOwner } : {}),
+    resolutionMode: current.resolutionMode,
+    ...(current.sourceIndex ? { sourceIndex: current.sourceIndex } : {}),
+    ...(nextEnvironments.length > 0 ? { targetEnvironments: nextEnvironments } : {}),
+  });
   await saveWorkspaceConfig(workspaceDir, nextConfig);
   return nextConfig;
 }
@@ -1787,7 +1795,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
       }
       case '4': {
         let config = await readMenuWorkspace(workspaceDir, rl);
-        if (!config.pythonTargetEnvironments?.length) {
+        if (!workspaceLegacyPythonSettings(config).targetEnvironments?.length) {
           console.log('A PyPI target requires at least one Python target environment.');
           if (!(await askYesNo(rl, 'Configure Python/PyPI support now?', true))) {
             break;
@@ -1874,12 +1882,13 @@ async function configurePythonSettingsMenu(
 ): Promise<void> {
   for (;;) {
     const config = await readMenuWorkspace(workspaceDir, rl);
+    const legacyPython = workspaceLegacyPythonSettings(config);
     console.log('\nPython / PyPI settings');
-    console.log(`Source index: ${config.pythonSourceIndex ?? '(disabled)'}`);
-    console.log(`Publish owner: ${config.pythonPublishOwner ?? '(not set)'}`);
-    console.log(`Default resolution mode: ${config.pythonResolutionMode}`);
+    console.log(`Source index: ${legacyPython.sourceIndex ?? '(disabled)'}`);
+    console.log(`Publish owner: ${legacyPython.publishOwner ?? '(not set)'}`);
+    console.log(`Default resolution mode: ${legacyPython.resolutionMode}`);
     console.log('Target environments:');
-    console.log(formatPythonTargetEnvironmentList(config.pythonTargetEnvironments));
+    console.log(formatPythonTargetEnvironmentList(legacyPython.targetEnvironments));
     console.log('Actions:');
     console.log('1. Configure package settings');
     console.log('2. Add target environment');
@@ -2304,6 +2313,21 @@ program
     }
   });
 
+program
+  .command('migrate')
+  .description('Preview migration of a workspace to the current schema')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .requiredOption('--dry-run', 'Print the schema-v2 workspace without writing it')
+  .action(async (workspace: string) => {
+    try {
+      const config = await readWorkspaceConfig(workspace);
+      console.log(JSON.stringify(previewWorkspaceConfigMigration(config), null, 2));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
 const targetCommand = program.command('target').description('Manage workspace sync targets');
 
 targetCommand
@@ -2584,7 +2608,8 @@ targetCommand
       );
       console.log(
         `Updated target: ${formatTargetValue(result.target)}\nPython resolution mode: ${
-          pythonResolutionMode ?? `inherit (${result.config.pythonResolutionMode})`
+          pythonResolutionMode ??
+          `inherit (${workspaceLegacyPythonSettings(result.config).resolutionMode})`
         }`
       );
     } catch (error) {
@@ -2670,6 +2695,7 @@ program
             ? selectWorkspaceTargets(config, options.target)
             : undefined;
         const activeConfig = targetSelection?.config ?? config;
+        const legacyPython = workspaceLegacyPythonSettings(activeConfig);
         if (targetSelection) {
           console.error(
             `[download] selected targets: ${targetSelection.selectedIndexes.join(', ')}`
@@ -2712,8 +2738,8 @@ program
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
           })
         );
-        const pythonIndex = activeConfig.pythonSourceIndex
-          ? new HttpPythonIndexClient(activeConfig.pythonSourceIndex, {
+        const pythonIndex = legacyPython.sourceIndex
+          ? new HttpPythonIndexClient(legacyPython.sourceIndex, {
               ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             })
           : undefined;
@@ -2740,12 +2766,10 @@ program
           onProgress: createCollectProgressLogger(),
           outputDir,
           ...(pythonIndex ? { pythonIndex } : {}),
-          ...(activeConfig.pythonSourceIndex
-            ? { pythonSourceIndex: activeConfig.pythonSourceIndex }
-            : {}),
-          pythonResolutionMode: activeConfig.pythonResolutionMode,
-          ...(activeConfig.pythonTargetEnvironments
-            ? { pythonTargetEnvironments: activeConfig.pythonTargetEnvironments }
+          ...(legacyPython.sourceIndex ? { pythonSourceIndex: legacyPython.sourceIndex } : {}),
+          pythonResolutionMode: legacyPython.resolutionMode,
+          ...(legacyPython.targetEnvironments
+            ? { pythonTargetEnvironments: legacyPython.targetEnvironments }
             : {}),
           registry,
           registryUrl,

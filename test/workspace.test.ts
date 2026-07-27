@@ -11,6 +11,7 @@ import {
   createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   initWorkspace,
+  previewWorkspaceConfigMigration,
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
@@ -18,6 +19,8 @@ import {
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
   workspaceSecretsFileName,
+  workspaceLegacyPythonSettings,
+  writeWorkspaceConfig,
 } from '../src/core/workspace.js';
 
 let tempDir: string;
@@ -548,5 +551,182 @@ describe('workspace config', () => {
         },
       ],
     });
+  });
+
+  it('normalizes and round-trips schema-v2 Python application intents', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        coveragePolicies: [
+          {
+            id: 'desktop-x64',
+            platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+            wheelStrategy: 'all-compatible',
+          },
+        ],
+        output: './airgap-bundle',
+        python: {
+          applicationArtifactOwner: ' python-apps ',
+          planner: {
+            engine: 'uv',
+            version: 'pinned-by-airgap-sync',
+          },
+          publishOwner: ' pypi ',
+          sourceIndex: 'https://pypi.org/simple',
+        },
+        schemaVersion: 2,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [
+          {
+            coverage: 'desktop-x64',
+            spec: 'ktransformers',
+            type: 'python-app',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+
+    const config = await readWorkspaceConfig(tempDir);
+    expect(config).toMatchObject({
+      coveragePolicies: [
+        {
+          id: 'desktop-x64',
+          platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+          version: 1,
+          wheelStrategy: 'all-compatible',
+        },
+      ],
+      python: {
+        applicationArtifactOwner: 'python-apps',
+        planner: {
+          engine: 'uv',
+          version: '0.11.16',
+        },
+        publishOwner: 'pypi',
+        sourceIndex: 'https://pypi.org/simple',
+      },
+      schemaVersion: 2,
+      targets: [
+        {
+          application: {
+            extras: [],
+            features: {},
+          },
+          coverage: 'desktop-x64',
+          python: {
+            policy: 'auto',
+          },
+          spec: 'ktransformers',
+          type: 'python-app',
+        },
+      ],
+    });
+
+    await writeWorkspaceConfig(tempDir, config);
+    expect(await readWorkspaceConfig(tempDir)).toEqual(config);
+  });
+
+  it('previews schema-v1 migration without changing the workspace', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.pythonPublishOwner = 'pypi';
+    config.pythonSourceIndex = 'https://pypi.org/simple/';
+    config.pythonTargetEnvironments = [
+      {
+        arch: 'x86_64',
+        manylinux: 'manylinux_2_17',
+        name: 'prod-linux',
+        os: 'linux',
+        pythonVersion: '3.11.9',
+      },
+    ];
+    config.targets.push(
+      {
+        branch: 'main',
+        type: 'git',
+        url: 'https://github.com/acme/app.git',
+      },
+      {
+        spec: 'eslint@latest',
+        type: 'npm',
+      },
+      {
+        spec: 'requests==2.32.3',
+        type: 'pypi',
+      },
+      {
+        sha256: 'a'.repeat(64),
+        type: 'python-wheel',
+        url: 'https://example.test/packages/demo-1.0.0-py3-none-any.whl',
+      },
+      {
+        pythonVersion: '3.11.9',
+        sha256: 'b'.repeat(64),
+        type: 'python-runtime',
+        url: 'https://example.test/runtimes/cpython-3.11.9.tar.gz',
+      }
+    );
+
+    const migrated = previewWorkspaceConfigMigration(config);
+
+    expect(migrated).toMatchObject({
+      coveragePolicies: [],
+      python: {
+        legacySeed: {
+          resolutionMode: 'locked-only',
+          targetEnvironments: config.pythonTargetEnvironments,
+        },
+        planner: {
+          engine: 'uv',
+          version: '0.11.16',
+        },
+        publishOwner: 'pypi',
+        sourceIndex: 'https://pypi.org/simple/',
+      },
+      schemaVersion: 2,
+      targets: config.targets,
+    });
+    expect(migrated).not.toHaveProperty('pythonResolutionMode');
+    expect(migrated).not.toHaveProperty('pythonTargetEnvironments');
+    expect(workspaceLegacyPythonSettings(migrated)).toEqual({
+      publishOwner: 'pypi',
+      resolutionMode: 'locked-only',
+      sourceIndex: 'https://pypi.org/simple/',
+      targetEnvironments: config.pythonTargetEnvironments,
+    });
+    expect(
+      createWorkspaceSnapshot({
+        config: migrated,
+        createdAt: '2026-07-27T00:00:00.000Z',
+      })
+    ).toMatchObject({
+      pythonResolutionMode: 'locked-only',
+      pythonTargetEnvironments: config.pythonTargetEnvironments,
+      schemaVersion: 2,
+    });
+    expect((await readWorkspaceConfig(tempDir)).schemaVersion).toBe(1);
+    expect(previewWorkspaceConfigMigration(migrated)).toEqual(migrated);
+  });
+
+  it('rejects schema-v2 application intents with unknown coverage', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        coveragePolicies: [],
+        output: './airgap-bundle',
+        schemaVersion: 2,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [
+          {
+            coverage: 'missing',
+            spec: 'demo-app',
+            type: 'python-app',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+
+    await expect(readWorkspaceConfig(tempDir)).rejects.toThrow('unknown coverage policy: missing');
   });
 });
