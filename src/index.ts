@@ -38,11 +38,28 @@ export {
   serializePythonEnvironmentPlan,
 } from './core/python/environment-plan.js';
 export {
+  builtInDistributionHintCatalog,
+  normalizeDistributionHintCatalog,
+} from './core/python/distribution-hints.js';
+export {
+  compareCompatibilityVersions,
+  explainPlatformCoveragePolicy,
+} from './core/python/coverage-explain.js';
+export {
+  compareMachineToPythonEnvironmentPlan,
+  normalizeMachineProbeFacts,
+  probeMachine,
+} from './core/python/probe.js';
+export {
   normalizeInlinePlatformCoveragePolicy,
   normalizePlatformCoveragePolicy,
   platformCoveragePolicyDigest,
 } from './core/python/coverage-policy.js';
-export { isBuiltInPlatformFamilyId } from './core/python/platform-family.js';
+export {
+  getBuiltInPlatformFamily,
+  isBuiltInPlatformFamilyId,
+  listBuiltInPlatformFamilies,
+} from './core/python/platform-family.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
 export { resolveGitPublishTargets } from './core/git-publish-targets.js';
 export type {
@@ -249,6 +266,20 @@ export type {
   DistributionHint,
   DistributionHintCatalog,
 } from './core/python/distribution-hints.js';
+export type {
+  PlatformCoverageExplanation,
+  PlatformCoveragePolicyExplanation,
+} from './core/python/coverage-explain.js';
+export type {
+  MachineProbeFacts,
+  ProbeArchitecture,
+  ProbeCheck,
+  ProbeCommandResult,
+  ProbeCommandRunner,
+  ProbeComparison,
+  ProbeMachineOptions,
+  ProbeOsFamily,
+} from './core/python/probe.js';
 export type {
   PythonApplicationIntent,
   PythonApplicationSelection,

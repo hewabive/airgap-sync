@@ -1,0 +1,13 @@
+{
+  "os": "linux",
+  "architecture": "x86_64",
+  "capabilities": {},
+  "libc": {
+    "family": "musl",
+    "version": "1.2"
+  },
+  "python": {
+    "command": "python3",
+    "version": "3.11.9"
+  }
+}

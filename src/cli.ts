@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
@@ -13,7 +13,9 @@ import {
   captureBundleState,
   clearWorkspaceGiteaToken,
   collectBundle,
+  compareMachineToPythonEnvironmentPlan,
   configureGitRewrites,
+  createPythonEnvironmentPlan,
   createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
@@ -26,14 +28,19 @@ import {
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
   fetchSeedBundle,
+  explainPlatformCoveragePolicy,
+  getBuiltInPlatformFamily,
   HttpGiteaClient,
   HttpRegistryClient,
   HttpPythonIndexClient,
   initWorkspace,
+  listBuiltInPlatformFamilies,
+  normalizeMachineProbeFacts,
   packageName,
   packageVersion,
   parseRootSpecs,
   previewWorkspaceConfigMigration,
+  probeMachine,
   publishBundle,
   pruneBundle,
   readBundleInfo,
@@ -87,6 +94,7 @@ import type {
   GitOwnerStrategy,
   GitPublishOwnerKind,
   LatestPolicy,
+  PlatformCoveragePolicy,
   PythonResolutionMode,
   PublishProgressEvent,
   PublishProgressPhase,
@@ -97,6 +105,7 @@ import type {
   VerifyInstallReport,
   WorkspaceConfig,
   WorkspacePromptBoolean,
+  PythonEnvironmentPlanInput,
 } from './index.js';
 import {
   resolveTargetEnvironment,
@@ -221,6 +230,17 @@ interface MenuOptions {
   once?: boolean;
 }
 
+interface CoverageOptions {
+  json?: boolean;
+}
+
+interface ProbeOptions {
+  capability: string[];
+  compare: string;
+  facts?: string;
+  json?: boolean;
+}
+
 function parsePositiveInteger(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -245,6 +265,27 @@ function parseRetryDelaysMs(value: string): number[] {
 
 function collectNumbers(value: string, previous: number[]): number[] {
   return [...previous, parsePositiveInteger(value)];
+}
+
+function collectStrings(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function parseCapabilities(values: string[]): Record<string, string> {
+  const capabilities: Record<string, string> = {};
+  for (const value of values) {
+    const separator = value.indexOf('=');
+    if (separator < 1 || separator === value.length - 1) {
+      throw new Error(`Expected capability in name=value form, got: ${value}`);
+    }
+    const name = value.slice(0, separator).trim();
+    const capabilityValue = value.slice(separator + 1).trim();
+    if (!name || !capabilityValue) {
+      throw new Error(`Expected capability in name=value form, got: ${value}`);
+    }
+    capabilities[name] = capabilityValue;
+  }
+  return capabilities;
 }
 
 function parseLatestPolicy(value: string): LatestPolicy {
@@ -647,6 +688,67 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     '',
     'Targets:',
     formatTargetList(config.targets),
+  ].join('\n');
+}
+
+function findCoveragePolicy(config: WorkspaceConfig, id: string): PlatformCoveragePolicy {
+  const policy = config.coveragePolicies?.find((candidate) => candidate.id === id);
+  if (policy) {
+    return policy;
+  }
+  const family = getBuiltInPlatformFamily(id);
+  if (family) {
+    return {
+      id: family.id,
+      platforms: [family.id as PlatformCoveragePolicy['platforms'][number]],
+      version: 1,
+      wheelStrategy: 'all-compatible',
+    };
+  }
+  throw new Error(`Unknown coverage policy or platform family: ${id}`);
+}
+
+function formatCoverageExplanation(policy: PlatformCoveragePolicy): string {
+  const explanation = explainPlatformCoveragePolicy(policy);
+  const lines = [`Coverage: ${policy.id}`, `Wheel strategy: ${policy.wheelStrategy}`];
+  for (const platform of explanation.platforms) {
+    lines.push(`${platform.family.id}: ${platform.family.os}/${platform.family.architecture}`);
+    if (platform.glibc?.source === 'inferred-during-planning') {
+      lines.push('  glibc minimum: inferred from the resolved wheel closure');
+    } else if (platform.glibc?.source === 'advanced-constraint') {
+      lines.push(`  glibc minimum: ${platform.glibc.minimum}`);
+      const compatible = platform.glibc.knownCompatibleExamples
+        .map((hint) => `${hint.aliases[0] ?? hint.distributionId} ${hint.release}`)
+        .join(', ');
+      const incompatible = platform.glibc.knownIncompatibleExamples
+        .map((hint) => `${hint.aliases[0] ?? hint.distributionId} ${hint.release}`)
+        .join(', ');
+      if (compatible) {
+        lines.push(`  known compatible examples: ${compatible}`);
+      }
+      if (incompatible) {
+        lines.push(`  known incompatible examples: ${incompatible}`);
+      }
+    }
+  }
+  lines.push(
+    `Distribution hints: ${explanation.catalog.version}, reviewed ${explanation.catalog.lastReviewedAt}`
+  );
+  return lines.join('\n');
+}
+
+function formatProbeComparison(
+  comparison: ReturnType<typeof compareMachineToPythonEnvironmentPlan>
+): string {
+  return [
+    `Probe status: ${comparison.status}`,
+    `Detected: ${comparison.facts.os}/${comparison.facts.architecture}`,
+    ...comparison.checks.map(
+      (check) =>
+        `${check.status.toUpperCase()} ${check.name}: ${check.message}${
+          check.actual ? ` (actual: ${check.actual})` : ''
+        }${check.required ? ` (required: ${check.required})` : ''}`
+    ),
   ].join('\n');
 }
 
@@ -2322,6 +2424,133 @@ program
     try {
       const config = await readWorkspaceConfig(workspace);
       console.log(JSON.stringify(previewWorkspaceConfigMigration(config), null, 2));
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const coverageCommand = program
+  .command('coverage')
+  .description('Inspect broad Python platform coverage');
+
+coverageCommand
+  .command('list')
+  .description('List built-in platform families and workspace coverage policies')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--json', 'Print machine-readable JSON')
+  .action(async (workspace: string, options: CoverageOptions) => {
+    try {
+      const config = await readWorkspaceConfig(workspace);
+      const result = {
+        platformFamilies: listBuiltInPlatformFamilies(),
+        policies: config.coveragePolicies ?? [],
+      };
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log('Built-in platform families:');
+        for (const family of result.platformFamilies) {
+          console.log(`- ${family.id}: ${family.os}/${family.architecture}`);
+        }
+        console.log('Workspace coverage policies:');
+        if (result.policies.length === 0) {
+          console.log('- none');
+        } else {
+          for (const policy of result.policies) {
+            console.log(`- ${policy.id}: ${policy.platforms.join(', ')}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+coverageCommand
+  .command('show')
+  .description('Show a platform family or workspace coverage policy')
+  .argument('<id>', 'Platform family or coverage policy id')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--json', 'Print machine-readable JSON')
+  .action(async (id: string, workspace: string, options: CoverageOptions) => {
+    try {
+      const config = await readWorkspaceConfig(workspace);
+      const policy = config.coveragePolicies?.find((candidate) => candidate.id === id);
+      const family = policy ? undefined : getBuiltInPlatformFamily(id);
+      if (!policy && !family) {
+        throw new Error(`Unknown coverage policy or platform family: ${id}`);
+      }
+      const result = policy ? { kind: 'policy', policy } : { family, kind: 'platform-family' };
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (policy) {
+        console.log(formatCoverageExplanation(policy));
+      } else {
+        console.log(
+          `${family!.id}: ${family!.os}/${family!.architecture}\nStatus: ${family!.status}\nWheel platform families: ${family!.wheelPlatformFamilies.join(', ')}`
+        );
+      }
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+coverageCommand
+  .command('explain')
+  .description('Explain a coverage policy with optional distribution examples')
+  .argument('<id>', 'Platform family or coverage policy id')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--json', 'Print machine-readable JSON')
+  .action(async (id: string, workspace: string, options: CoverageOptions) => {
+    try {
+      const config = await readWorkspaceConfig(workspace);
+      const explanation = explainPlatformCoveragePolicy(findCoveragePolicy(config, id));
+      console.log(
+        options.json
+          ? JSON.stringify(explanation, null, 2)
+          : formatCoverageExplanation(findCoveragePolicy(config, id))
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('probe')
+  .description('Compare this machine with a Python environment plan')
+  .requiredOption('--compare <plan>', 'Environment plan JSON path')
+  .option(
+    '--capability <name=value>',
+    'Declare an explicitly requested feature capability',
+    collectStrings,
+    []
+  )
+  .option('--facts <json>', 'Read facts emitted by a standalone probe script')
+  .option('--json', 'Print machine-readable JSON')
+  .action(async (options: ProbeOptions) => {
+    try {
+      const rawPlan = JSON.parse(
+        await readFile(path.resolve(options.compare), 'utf8')
+      ) as PythonEnvironmentPlanInput;
+      const plan = createPythonEnvironmentPlan(rawPlan);
+      const capabilities = parseCapabilities(options.capability);
+      const facts = options.facts
+        ? normalizeMachineProbeFacts(
+            JSON.parse(await readFile(path.resolve(options.facts), 'utf8'))
+          )
+        : await probeMachine({ capabilities });
+      Object.assign(facts.capabilities, capabilities);
+      const comparison = compareMachineToPythonEnvironmentPlan(facts, plan);
+      console.log(
+        options.json ? JSON.stringify(comparison, null, 2) : formatProbeComparison(comparison)
+      );
+      if (comparison.status === 'incompatible') {
+        process.exitCode = 1;
+      }
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;

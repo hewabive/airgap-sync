@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.07",
+  "lastReviewedAt": "2026-07-27",
+  "provenance": [
+    {
+      "title": "Ubuntu package index: libc6",
+      "url": "https://packages.ubuntu.com/search?keywords=libc6&searchon=names"
+    },
+    {
+      "title": "Debian package index: libc6",
+      "url": "https://packages.debian.org/en/libc6"
+    },
+    {
+      "title": "Rocky Linux 8 BaseOS repository",
+      "url": "https://download.rockylinux.org/pub/rocky/8/BaseOS/x86_64/os/Packages/g/"
+    },
+    {
+      "title": "Rocky Linux 9 BaseOS repository",
+      "url": "https://download.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/Packages/g/"
+    }
+  ],
+  "entries": [
+    {
+      "distributionId": "ubuntu",
+      "aliases": ["Ubuntu"],
+      "release": "22.04",
+      "libc": {
+        "family": "glibc",
+        "version": "2.35"
+      }
+    },
+    {
+      "distributionId": "ubuntu",
+      "aliases": ["Ubuntu"],
+      "release": "24.04",
+      "libc": {
+        "family": "glibc",
+        "version": "2.39"
+      }
+    },
+    {
+      "distributionId": "debian",
+      "aliases": ["Debian GNU/Linux"],
+      "release": "11",
+      "libc": {
+        "family": "glibc",
+        "version": "2.31"
+      }
+    },
+    {
+      "distributionId": "debian",
+      "aliases": ["Debian GNU/Linux"],
+      "release": "12",
+      "libc": {
+        "family": "glibc",
+        "version": "2.36"
+      }
+    },
+    {
+      "distributionId": "rocky",
+      "aliases": ["Rocky Linux"],
+      "release": "8",
+      "libc": {
+        "family": "glibc",
+        "version": "2.28"
+      }
+    },
+    {
+      "distributionId": "rocky",
+      "aliases": ["Rocky Linux"],
+      "release": "9",
+      "libc": {
+        "family": "glibc",
+        "version": "2.34"
+      }
+    }
+  ]
+}

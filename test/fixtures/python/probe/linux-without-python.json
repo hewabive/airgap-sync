@@ -1,0 +1,9 @@
+{
+  "os": "linux",
+  "architecture": "x86_64",
+  "capabilities": {},
+  "libc": {
+    "family": "glibc",
+    "version": "2.39"
+  }
+}
