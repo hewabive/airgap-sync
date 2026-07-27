@@ -82,6 +82,10 @@ npm exec -- airgap-sync
 Running `airgap-sync` without a subcommand opens the interactive menu. Use
 `airgap-sync -h` for command help.
 
+Existing schema-v1 workspaces are validated and migrated automatically when opened.
+The exact original configuration is retained as `airgap-sync.json.v1.backup`; no
+manual migration command is required.
+
 The menu covers the normal workflow:
 
 - **Targets**: add, remove, configure, or download one Git/npm/Python application

@@ -679,16 +679,17 @@ candidate matrix and low-level packaging details.
 
 This must be an incremental refactor, not a flag-day rewrite.
 
-- Config schema v2 reads schema v1 and maps it to explicit `legacy-python-seed`
-  intents.
+- Opening a workspace automatically migrates schema v1 to schema v2 and maps its
+  Python configuration to explicit `legacy-python-seed` intents.
 - Existing `git`, `pypi`, `python-wheel`, and `python-runtime` targets continue to
   work during the migration.
 - Existing `python-seed-manifest.json` and Gitea publication remain supported.
 - `pythonTargetEnvironments`, `pythonResolutionMode`, and
   `--allow-approximate-python` are marked legacy only after `python-app` reaches
   end-to-end parity.
-- `airgap-sync migrate --dry-run` shows the proposed schema-v2 configuration without
-  writing it.
+- `airgap-sync migrate --dry-run` remains an optional non-writing preview; normal
+  workspace opening applies the validated migration automatically after creating a
+  backup.
 - Existing explicit Python environments map to advanced legacy coverage constraints
   without inventing distro names or widening their platform scope.
 - Migration may suggest an equivalent built-in coverage family, but applying that
@@ -728,12 +729,13 @@ platform locks from Gitea.
   `PythonApplicationIntent`, `PythonApplicationRecipe`, `PythonPlatformPlan`, and
   `PythonEnvironmentPlan` modules.
 - Add canonical serialization and semantic digests.
-- Add workspace schema-v2 normalization and schema-v1 compatibility reading.
+- Add workspace schema-v2 normalization and an automatic, backed-up schema-v1
+  migration boundary.
 - Add coverage-policy and plan paths without changing current download behavior.
-- Add migration preview and round-trip tests.
+- Add migration preview, idempotence, backup, and round-trip tests.
 
-Exit criterion: old workspaces read unchanged; new intents and plans round-trip
-deterministically.
+Exit criterion: old workspace behavior survives automatic schema migration; new intents
+and plans round-trip deterministically.
 
 ### Phase 2 — Coverage families and optional platform diagnostics
 

@@ -10,6 +10,7 @@ coverage/
 .env.*
 !.env.example
 airgap-sync.json
+airgap-sync.json.*.backup
 airgap-sync.secrets.json
 cache/
 reports/

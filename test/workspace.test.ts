@@ -11,7 +11,9 @@ import {
   createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   initWorkspace,
+  migrateWorkspaceConfig,
   previewWorkspaceConfigMigration,
+  previewWorkspaceMigration,
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
@@ -20,6 +22,7 @@ import {
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
   workspaceSecretsFileName,
+  workspaceConfigV1BackupFileName,
   workspaceLegacyPythonSettings,
   writeWorkspaceConfig,
 } from '../src/core/workspace.js';
@@ -240,17 +243,23 @@ describe('workspace config', () => {
     );
 
     expect(await readWorkspaceConfig(tempDir)).toMatchObject({
-      pythonPublishOwner: 'pypi',
-      pythonSourceIndex: 'https://packages.example/simple',
-      pythonTargetEnvironments: [
-        {
-          arch: 'x86_64',
-          manylinux: 'manylinux_2_17',
-          name: 'prod-linux',
-          os: 'linux',
-          pythonVersion: '3.11.9',
+      python: {
+        legacySeed: {
+          resolutionMode: 'locked-only',
+          targetEnvironments: [
+            {
+              arch: 'x86_64',
+              manylinux: 'manylinux_2_17',
+              name: 'prod-linux',
+              os: 'linux',
+              pythonVersion: '3.11.9',
+            },
+          ],
         },
-      ],
+        publishOwner: 'pypi',
+        sourceIndex: 'https://packages.example/simple',
+      },
+      schemaVersion: 2,
       targets: [
         {
           pythonResolutionMode: 'approximate',
@@ -797,8 +806,75 @@ describe('workspace config', () => {
       pythonTargetEnvironments: config.pythonTargetEnvironments,
       schemaVersion: 2,
     });
-    expect((await readWorkspaceConfig(tempDir)).schemaVersion).toBe(1);
+    expect(
+      (await fs.readJson<{ schemaVersion: number }>(path.join(tempDir, 'airgap-sync.json')))
+        .schemaVersion
+    ).toBe(1);
     expect(previewWorkspaceConfigMigration(migrated)).toEqual(migrated);
+  });
+
+  it('automatically migrates schema v1 once with an exact backup', async () => {
+    const legacy = await initWorkspace({ legacy: true, workspaceDir: tempDir });
+    legacy.pythonSourceIndex = 'https://packages.example/simple/';
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), legacy, { spaces: 2 });
+    const original = await fs.readFile(path.join(tempDir, 'airgap-sync.json'), 'utf8');
+
+    expect((await previewWorkspaceMigration(tempDir)).schemaVersion).toBe(2);
+    expect(
+      (await fs.readJson<{ schemaVersion: number }>(path.join(tempDir, 'airgap-sync.json')))
+        .schemaVersion
+    ).toBe(1);
+
+    const first = await migrateWorkspaceConfig(tempDir);
+
+    expect(first.appliedMigrationIds).toEqual(['0001-workspace-schema-v2']);
+    expect(first.config).toMatchObject({
+      python: {
+        legacySeed: {
+          resolutionMode: 'locked-only',
+        },
+        sourceIndex: 'https://packages.example/simple/',
+      },
+      schemaVersion: 2,
+    });
+    expect(await fs.readFile(path.join(tempDir, workspaceConfigV1BackupFileName), 'utf8')).toBe(
+      original
+    );
+    expect(
+      await fs.pathExists(
+        path.join(tempDir, '.airgap-sync', 'recipes', 'ktransformers-0.6.1.post1.json')
+      )
+    ).toBe(true);
+
+    const second = await migrateWorkspaceConfig(tempDir);
+
+    expect(second.appliedMigrationIds).toEqual([]);
+    expect(second.backupPath).toBeUndefined();
+    expect(await fs.readFile(path.join(tempDir, workspaceConfigV1BackupFileName), 'utf8')).toBe(
+      original
+    );
+  });
+
+  it('does not create a backup when legacy configuration is invalid', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        output: './airgap-bundle',
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [{ spec: 'requests', type: 'pypi' }],
+      },
+      { spaces: 2 }
+    );
+
+    await expect(readWorkspaceConfig(tempDir)).rejects.toThrow(
+      'pypi targets require pythonTargetEnvironments'
+    );
+    expect(await fs.pathExists(path.join(tempDir, workspaceConfigV1BackupFileName))).toBe(false);
+    expect(
+      (await fs.readJson<{ schemaVersion: number }>(path.join(tempDir, 'airgap-sync.json')))
+        .schemaVersion
+    ).toBe(1);
   });
 
   it('rejects schema-v2 application intents with unknown coverage', async () => {

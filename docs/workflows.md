@@ -80,6 +80,11 @@ If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
 
+Opening an older schema-v1 workspace automatically migrates it to the current schema
+before the menu or command continues. The original file is retained as
+`airgap-sync.json.v1.backup`, and reopening the workspace is a no-op. Use
+`airgap-sync migrate --dry-run` only when a non-writing preview is useful.
+
 New workspaces use application-first schema v2:
 
 ```json

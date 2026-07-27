@@ -35,6 +35,7 @@ import { installMaintainedPythonApplicationRecipes } from './python/maintained-r
 export type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
+export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
@@ -237,6 +238,12 @@ export interface InitWorkspaceOptions {
   workspaceDir: string;
 }
 
+export interface WorkspaceConfigMigrationResult {
+  appliedMigrationIds: string[];
+  backupPath?: string;
+  config: WorkspaceConfig;
+}
+
 export interface CreateWorkspaceSnapshotOptions {
   config: WorkspaceConfig;
   createdAt?: string;
@@ -344,6 +351,10 @@ function normalizeTargetPythonResolutionMode(
 
 export function workspaceConfigPath(workspaceDir: string): string {
   return path.join(path.resolve(workspaceDir), workspaceConfigFileName);
+}
+
+export function workspaceConfigV1BackupPath(workspaceDir: string): string {
+  return path.join(path.resolve(workspaceDir), workspaceConfigV1BackupFileName);
 }
 
 export function workspaceSecretsPath(workspaceDir: string): string {
@@ -953,8 +964,12 @@ export async function initWorkspace(options: InitWorkspaceOptions): Promise<Work
   return config;
 }
 
-export async function readWorkspaceConfig(workspaceDir: string): Promise<WorkspaceConfig> {
+async function readWorkspaceConfigWithoutMigration(workspaceDir: string): Promise<WorkspaceConfig> {
   return normalizeWorkspaceConfig(await fs.readJson(workspaceConfigPath(workspaceDir)));
+}
+
+export async function readWorkspaceConfig(workspaceDir: string): Promise<WorkspaceConfig> {
+  return (await migrateWorkspaceConfig(workspaceDir)).config;
 }
 
 export function workspaceLegacyPythonSettings(
@@ -1113,6 +1128,62 @@ export function previewWorkspaceConfigMigration(config: WorkspaceConfig): Worksp
   return normalizeWorkspaceConfig(migrated);
 }
 
+interface WorkspaceConfigMigration {
+  apply: (config: WorkspaceConfig) => WorkspaceConfig;
+  id: string;
+  isApplied: (config: WorkspaceConfig) => boolean;
+}
+
+const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
+  {
+    apply: previewWorkspaceConfigMigration,
+    id: '0001-workspace-schema-v2',
+    isApplied: (config) => config.schemaVersion === 2,
+  },
+];
+
+export async function previewWorkspaceMigration(workspaceDir: string): Promise<WorkspaceConfig> {
+  let config = await readWorkspaceConfigWithoutMigration(workspaceDir);
+  for (const migration of workspaceConfigMigrations) {
+    if (!migration.isApplied(config)) {
+      config = migration.apply(config);
+    }
+  }
+  return config;
+}
+
+export async function migrateWorkspaceConfig(
+  workspaceDir: string
+): Promise<WorkspaceConfigMigrationResult> {
+  const configPath = workspaceConfigPath(workspaceDir);
+  let config = await readWorkspaceConfigWithoutMigration(workspaceDir);
+  const appliedMigrationIds: string[] = [];
+
+  for (const migration of workspaceConfigMigrations) {
+    if (migration.isApplied(config)) {
+      continue;
+    }
+    config = migration.apply(config);
+    appliedMigrationIds.push(migration.id);
+  }
+
+  if (appliedMigrationIds.length === 0) {
+    return { appliedMigrationIds, config };
+  }
+
+  const backupPath = workspaceConfigV1BackupPath(workspaceDir);
+  if (!(await fs.pathExists(backupPath))) {
+    await fs.writeFileAtomic(backupPath, await fs.readFile(configPath, 'utf8'));
+  }
+  await installMaintainedPythonApplicationRecipes(workspaceDir);
+  await fs.writeJsonAtomic(configPath, config, { spaces: 2 });
+  return {
+    appliedMigrationIds,
+    backupPath,
+    config,
+  };
+}
+
 export async function readWorkspaceSecrets(workspaceDir: string): Promise<WorkspaceSecrets> {
   const secretsPath = workspaceSecretsPath(workspaceDir);
   if (!(await fs.pathExists(secretsPath))) {
@@ -1126,7 +1197,7 @@ export async function writeWorkspaceConfig(
   workspaceDir: string,
   config: WorkspaceConfig
 ): Promise<void> {
-  await fs.writeJson(workspaceConfigPath(workspaceDir), normalizeWorkspaceConfig(config), {
+  await fs.writeJsonAtomic(workspaceConfigPath(workspaceDir), normalizeWorkspaceConfig(config), {
     spaces: 2,
   });
 }

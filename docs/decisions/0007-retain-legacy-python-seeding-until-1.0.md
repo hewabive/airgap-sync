@@ -4,7 +4,11 @@ Date: 2026-07-27
 
 ## Status
 
-Accepted
+Accepted, amended by
+[ADR 0008](0008-automatic-workspace-migrations.md).
+
+ADR 0008 supersedes decision 1 below: schema-v1 files are now migrated automatically
+when opened. Decisions retaining the legacy target types and resolver remain active.
 
 ## Context
 
@@ -20,7 +24,8 @@ schema-v2 representation without changing the workspace.
 
 ## Decision
 
-1. Keep reading and executing schema-v1 Python configuration for every `0.x` release.
+1. Keep executing migrated schema-v1 Python intent for every `0.x` release. Persisted
+   schema-v1 workspaces are upgraded to schema v2 when opened.
 2. Keep `pypi`, `python-wheel`, `python-runtime`, and
    `--allow-approximate-python` available as Advanced/Legacy operations during that
    period.
@@ -28,7 +33,7 @@ schema-v2 representation without changing the workspace.
    goes to `python-app`.
 4. The earliest release allowed to remove legacy seeding is `1.0.0`.
 5. Removal still requires a separate ADR and all of these prerequisites:
-   - a write-capable, backed-up schema migration command;
+   - a write-capable, backed-up schema migration path;
    - at least two published `0.x` releases with `python-app` as the default workflow;
    - application recipes or exact-wheel escape hatches for known production inputs;
    - documentation for legacy cases that cannot be represented automatically;
@@ -38,7 +43,8 @@ schema-v2 representation without changing the workspace.
 
 ## Consequences
 
-- Existing removable-media workspaces continue to run unchanged.
+- Existing removable-media workspace behavior is preserved after an automatic,
+  backed-up schema migration.
 - New workspaces use schema v2 and application-first defaults.
 - The code temporarily carries both planners and bundle compatibility manifests.
 - `1.0.0` is an eligibility boundary, not an automatic deletion date.

@@ -21,6 +21,8 @@
   coverage, removable-media bundle benchmarking, and a Python application security
   review.
 - Added workspace targets for repeatable removable-media workflows.
+- Added automatic, backed-up, atomic workspace migration from schema v1 to schema v2
+  when a workspace is opened.
 - Added partial workspace downloads for selected targets.
 - Made `publish` workspace-aware so it can use `airgap-sync.json` defaults when run
   without bundle, registry, or Gitea arguments.

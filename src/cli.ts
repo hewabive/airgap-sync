@@ -41,6 +41,7 @@ import {
   initWorkspace,
   installMaintainedPythonApplicationRecipe,
   listBuiltInPlatformFamilies,
+  migrateWorkspaceConfig,
   normalizeMachineProbeFacts,
   normalizePythonApplicationRecipe,
   packageName,
@@ -50,7 +51,7 @@ import {
   platformCoveragePolicyDigest,
   pythonApplicationTargetId,
   PythonApplicationPlanningError,
-  previewWorkspaceConfigMigration,
+  previewWorkspaceMigration,
   probeMachine,
   publishBundle,
   pruneBundle,
@@ -2134,8 +2135,17 @@ async function configureInitialWorkspace(
 
 async function readMenuWorkspace(workspaceDir: string, rl: ReadlineInterface) {
   try {
-    return await readWorkspaceConfig(workspaceDir);
+    const migration = await migrateWorkspaceConfig(workspaceDir);
+    if (migration.appliedMigrationIds.length > 0) {
+      console.log(
+        `[migration] applied ${migration.appliedMigrationIds.join(', ')}; backup: ${migration.backupPath ?? '(not created)'}`
+      );
+    }
+    return migration.config;
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
     if (
       !(await askYesNo(rl, `${workspaceConfigFileName} not found. Initialize workspace?`, true))
     ) {
@@ -2202,15 +2212,14 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         break;
       }
       case '4': {
-        const config = await readMenuWorkspace(workspaceDir, rl);
-        if (config.schemaVersion !== 2) {
-          throw new Error(
-            'Python application targets require workspace schemaVersion 2; preview migration with airgap-sync migrate --dry-run'
-          );
+        let config = await readMenuWorkspace(workspaceDir, rl);
+        if (!config.coveragePolicies?.[0]) {
+          console.log('Configure platform coverage for Python applications.');
+          config = await configureApplicationCoverage(workspaceDir, rl, config);
         }
         const defaultCoverage = config.coveragePolicies?.[0]?.id;
         if (!defaultCoverage) {
-          throw new Error('Configure a Python application coverage policy first');
+          throw new Error('Python application coverage was not configured');
         }
         const spec = await ask(rl, 'Python application package');
         const coverage = await ask(rl, 'Platform coverage policy', defaultCoverage);
@@ -2819,8 +2828,7 @@ program
   .requiredOption('--dry-run', 'Print the schema-v2 workspace without writing it')
   .action(async (workspace: string) => {
     try {
-      const config = await readWorkspaceConfig(workspace);
-      console.log(JSON.stringify(previewWorkspaceConfigMigration(config), null, 2));
+      console.log(JSON.stringify(await previewWorkspaceMigration(workspace), null, 2));
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
