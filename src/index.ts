@@ -38,6 +38,21 @@ export {
   serializePythonEnvironmentPlan,
 } from './core/python/environment-plan.js';
 export {
+  defaultPythonPlannerPolicy,
+  generatePythonPlannerCandidates,
+  planPythonApplication,
+  PythonApplicationPlanningError,
+} from './core/python/application-planner.js';
+export {
+  classifyUvResolutionFailure,
+  createUvCompileInvocation,
+  defaultUvCommandRunner,
+  UvApplicationResolver,
+  UvResolutionError,
+  uvPlatformTarget,
+} from './core/python/uv-adapter.js';
+export { acquireUv, uvCollectorAssetKey, uvToolManifest } from './core/python/uv-tool.js';
+export {
   builtInDistributionHintCatalog,
   normalizeDistributionHintCatalog,
 } from './core/python/distribution-hints.js';
@@ -124,6 +139,7 @@ export {
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
+  resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
@@ -227,6 +243,7 @@ export type {
 export type {
   InitWorkspaceOptions,
   PythonResolutionMode,
+  ResolvedWorkspacePythonApplication,
   WorkspaceConfig,
   WorkspaceDefaults,
   WorkspaceGitTarget,
@@ -248,6 +265,24 @@ export type {
 
 export type { DownloadedTarball } from './core/tarball.js';
 export type { CanonicalJsonPrimitive, CanonicalJsonValue } from './core/canonical-json.js';
+export type {
+  PlanPythonApplicationOptions,
+  PlanPythonApplicationResult,
+  PythonPlannerCandidate,
+  PythonPlannerEvidence,
+  PythonPlannerPolicy,
+  PythonPlannerRejection,
+} from './core/python/application-planner.js';
+export type {
+  PythonApplicationResolver,
+  UvCommandInvocation,
+  UvCommandResult,
+  UvCommandRunner,
+  UvResolveRequest,
+  UvResolutionErrorKind,
+  UvResolutionEvidence,
+} from './core/python/uv-adapter.js';
+export type { AcquireUvOptions, UvToolAsset, UvToolManifest } from './core/python/uv-tool.js';
 export type {
   BuiltInPlatformFamilyId,
   PlatformArchitecture,

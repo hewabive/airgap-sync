@@ -8,7 +8,7 @@ export interface PythonPlanWheel {
   package: string;
   platforms: string[];
   sha256: string;
-  size: number;
+  size?: number;
   url: string;
   version: string;
 }

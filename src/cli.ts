@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 import {
   addWorkspaceTarget,
+  acquireUv,
   applyBundle,
   applyGitSources,
   CachedRegistryClient,
@@ -39,6 +41,8 @@ import {
   packageName,
   packageVersion,
   parseRootSpecs,
+  planPythonApplication,
+  PythonApplicationPlanningError,
   previewWorkspaceConfigMigration,
   probeMachine,
   publishBundle,
@@ -54,10 +58,12 @@ import {
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
+  resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
   updateRepositories,
+  UvApplicationResolver,
   verifyBundle,
   verifyInstall,
   writeBundleDocuments,
@@ -106,6 +112,8 @@ import type {
   WorkspaceConfig,
   WorkspacePromptBoolean,
   PythonEnvironmentPlanInput,
+  PythonApplicationRecipe,
+  WorkspacePythonApplicationTarget,
 } from './index.js';
 import {
   resolveTargetEnvironment,
@@ -239,6 +247,13 @@ interface ProbeOptions {
   compare: string;
   facts?: string;
   json?: boolean;
+}
+
+interface PlanOptions {
+  cutoff?: string;
+  json?: boolean;
+  update?: string;
+  uvBin?: string;
 }
 
 function parsePositiveInteger(value: string): number {
@@ -750,6 +765,60 @@ function formatProbeComparison(
         }${check.required ? ` (required: ${check.required})` : ''}`
     ),
   ].join('\n');
+}
+
+function formatPythonApplicationPlan(plan: {
+  application: { name: string; version: string };
+  platforms: {
+    platformFamilyId: string;
+    pythonMinor: string;
+    status: string;
+    supportBoundary?: { glibc?: string };
+  }[];
+  wheels: unknown[];
+}): string {
+  return [
+    `Application: ${plan.application.name} ${plan.application.version}`,
+    ...plan.platforms.map(
+      (platform) =>
+        `${platform.platformFamilyId}: ${platform.status}, CPython ${platform.pythonMinor}${
+          platform.supportBoundary?.glibc ? `, glibc >= ${platform.supportBoundary.glibc}` : ''
+        }`
+    ),
+    `Wheel variants: ${String(plan.wheels.length)}`,
+    'Status: ready to download',
+  ].join('\n');
+}
+
+async function readWorkspacePythonRecipe(
+  workspaceDir: string,
+  target: WorkspacePythonApplicationTarget
+): Promise<PythonApplicationRecipe | undefined> {
+  if (!target.application.recipe) {
+    return undefined;
+  }
+  const workspaceRoot = path.resolve(workspaceDir);
+  const recipePath = path.resolve(workspaceRoot, target.application.recipe);
+  if (recipePath !== workspaceRoot && !recipePath.startsWith(`${workspaceRoot}${path.sep}`)) {
+    throw new Error('python-app recipe must be inside the workspace');
+  }
+  const value: unknown = JSON.parse(await readFile(recipePath, 'utf8'));
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    !('schemaVersion' in value) ||
+    value.schemaVersion !== 1 ||
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !('application' in value) ||
+    typeof value.application !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'string'
+  ) {
+    throw new Error(`Invalid Python application recipe: ${recipePath}`);
+  }
+  return value as PythonApplicationRecipe;
 }
 
 interface GitFetchOptions {
@@ -2516,6 +2585,104 @@ coverageCommand
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
+    }
+  });
+
+program
+  .command('plan')
+  .description('Resolve Python applications for their requested platform coverage')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--update <target>', 'Replan one target by one-based index or package name')
+  .option('--cutoff <timestamp>', 'Ignore artifacts uploaded after this ISO timestamp')
+  .option('--uv-bin <path>', 'Use an existing pinned uv executable')
+  .option('--json', 'Print machine-readable environment plans')
+  .action(async (workspace: string, options: PlanOptions) => {
+    const workspaceDir = path.resolve(workspace);
+    let plannerWorkDir: string | undefined;
+    try {
+      const config = await readWorkspaceConfig(workspaceDir);
+      const targets = config.targets.flatMap((target, index) =>
+        target.type === 'python-app' ? [{ index: index + 1, target }] : []
+      );
+      if (targets.length === 0) {
+        throw new Error('No python-app targets are configured');
+      }
+      const selected = options.update
+        ? targets.filter(
+            ({ index, target }) =>
+              String(index) === options.update || target.spec === options.update
+          )
+        : targets;
+      if (selected.length === 0) {
+        throw new Error(`No python-app target matches: ${options.update ?? ''}`);
+      }
+      const cutoff = options.cutoff ?? new Date().toISOString();
+      if (!Number.isFinite(Date.parse(cutoff))) {
+        throw new Error(`Invalid planning cutoff: ${cutoff}`);
+      }
+      const createdAt = new Date().toISOString();
+      const configuredUv = options.uvBin ?? process.env.UV_BIN;
+      const uvPath = await acquireUv({
+        cacheDir: path.join(workspaceDir, '.airgap-sync', 'tool-cache'),
+        ...(configuredUv ? { uvBin: configuredUv } : {}),
+      });
+      plannerWorkDir = await mkdtemp(path.join(os.tmpdir(), 'airgap-sync-plan-'));
+      const resolver = new UvApplicationResolver();
+      const results = [];
+      for (const { index, target } of selected) {
+        const application = resolveWorkspacePythonApplication(config, target);
+        const sourceIndex = application.intent.source.indexUrl ?? 'https://pypi.org/simple/';
+        const recipe = await readWorkspacePythonRecipe(workspaceDir, target);
+        const result = await planPythonApplication({
+          cacheDir: path.join(workspaceDir, '.airgap-sync', 'uv-cache'),
+          coveragePolicy: application.coveragePolicy,
+          createdAt,
+          cutoff,
+          index: new HttpPythonIndexClient(sourceIndex),
+          intent: application.intent,
+          ...(recipe ? { recipe } : {}),
+          resolver,
+          uvPath,
+          workDir: path.join(plannerWorkDir, String(index)),
+        });
+        results.push({
+          index,
+          plan: result.plan,
+          rejectedCandidates: result.rejectedCandidates,
+        });
+      }
+      if (options.json) {
+        console.log(JSON.stringify(results, null, 2));
+      } else {
+        console.log(
+          results
+            .map(
+              (result) =>
+                `Target ${String(result.index)}\n${formatPythonApplicationPlan(result.plan)}`
+            )
+            .join('\n\n')
+        );
+      }
+    } catch (error) {
+      if (error instanceof PythonApplicationPlanningError) {
+        console.error(
+          `Error: ${error.message}\n${error.rejectedCandidates
+            .map(
+              (rejection) =>
+                `- ${rejection.applicationVersion} / Python ${rejection.pythonMinor}${
+                  rejection.platformFamilyId ? ` / ${rejection.platformFamilyId}` : ''
+                }: ${rejection.reason}`
+            )
+            .join('\n')}`
+        );
+      } else {
+        console.error(`Error: ${(error as Error).message}`);
+      }
+      process.exitCode = 1;
+    } finally {
+      if (plannerWorkDir) {
+        await rm(plannerWorkDir, { force: true, recursive: true });
+      }
     }
   });
 

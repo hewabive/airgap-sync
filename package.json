@@ -34,6 +34,7 @@
     "knip": "KNIP_DISABLE_RAW_TRANSFER=1 knip",
     "lint": "eslint .",
     "e2e:local": "node ./scripts/e2e-local.mjs",
+    "e2e:python-planner": "npm run build && node ./scripts/python-planner-e2e.mjs",
     "registry:start": "verdaccio --config ./verdaccio/config.yaml",
     "spike:python-planner": "node ./scripts/python-planner-spike.mjs",
     "test": "vitest",

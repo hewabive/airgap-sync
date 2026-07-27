@@ -15,6 +15,7 @@ import {
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
+  resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
@@ -625,6 +626,31 @@ describe('workspace config', () => {
 
     await writeWorkspaceConfig(tempDir, config);
     expect(await readWorkspaceConfig(tempDir)).toEqual(config);
+    expect(
+      resolveWorkspacePythonApplication(
+        config,
+        config.targets[0] as Extract<(typeof config.targets)[number], { type: 'python-app' }>
+      )
+    ).toMatchObject({
+      coveragePolicy: {
+        id: 'desktop-x64',
+      },
+      intent: {
+        application: {
+          name: 'ktransformers',
+        },
+        coverage: {
+          policyId: 'desktop-x64',
+        },
+        python: {
+          policy: 'auto',
+        },
+        source: {
+          indexUrl: 'https://pypi.org/simple',
+          type: 'pypi',
+        },
+      },
+    });
   });
 
   it('previews schema-v1 migration without changing the workspace', async () => {

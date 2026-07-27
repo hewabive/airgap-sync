@@ -22,10 +22,11 @@ import { isPythonResolutionMode, type PythonResolutionMode } from './python/reso
 import {
   normalizeInlinePlatformCoveragePolicy,
   normalizePlatformCoveragePolicy,
+  platformCoveragePolicyDigest,
   type InlinePlatformCoveragePolicy,
   type PlatformCoveragePolicy,
 } from './python/coverage-policy.js';
-import type { PythonRuntimePolicy } from './python/application-intent.js';
+import type { PythonApplicationIntent, PythonRuntimePolicy } from './python/application-intent.js';
 import { isValidPackageName, normalizePackageName } from './python/names.js';
 import { isValidSpecifierSet } from './python/pep440.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
@@ -132,6 +133,12 @@ export interface WorkspaceLegacyPythonSettings {
   resolutionMode: PythonResolutionMode;
   sourceIndex?: string;
   targetEnvironments?: PythonTargetEnvironmentConfig[];
+}
+
+export interface ResolvedWorkspacePythonApplication {
+  coveragePolicy: PlatformCoveragePolicy;
+  intent: PythonApplicationIntent;
+  target: WorkspacePythonApplicationTarget;
 }
 
 export interface WorkspaceConfig {
@@ -944,6 +951,52 @@ export function withWorkspaceLegacyPythonSettings(
       sourceIndex:
         settings.sourceIndex ?? config.python?.sourceIndex ?? defaultWorkspacePythonSourceIndex,
     },
+  };
+}
+
+export function resolveWorkspacePythonApplication(
+  config: WorkspaceConfig,
+  target: WorkspacePythonApplicationTarget
+): ResolvedWorkspacePythonApplication {
+  if (config.schemaVersion !== 2) {
+    throw new Error('python-app targets require workspace schemaVersion 2');
+  }
+  const parsed = parseRequirement(target.spec);
+  if (!parsed.ok || parsed.requirement.url || parsed.requirement.marker) {
+    throw new Error(`Invalid python-app target: ${target.spec}`);
+  }
+  const coveragePolicy =
+    typeof target.coverage === 'string'
+      ? config.coveragePolicies?.find((policy) => policy.id === target.coverage)
+      : {
+          id: `inline-${platformCoveragePolicyDigest(target.coverage).slice(0, 12)}`,
+          ...target.coverage,
+        };
+  if (!coveragePolicy) {
+    throw new Error(`Unknown coverage policy: ${target.coverage as string}`);
+  }
+  return {
+    coveragePolicy,
+    intent: {
+      application: {
+        extras: target.application.extras,
+        features: target.application.features,
+        name: parsed.requirement.normalizedName,
+        ...(target.application.recipe ? { recipe: target.application.recipe } : {}),
+        ...(target.application.version ? { version: target.application.version } : {}),
+      },
+      coverage:
+        typeof target.coverage === 'string'
+          ? { policyId: target.coverage }
+          : { inline: target.coverage },
+      python: target.python,
+      source: {
+        ...(config.python?.sourceIndex ? { indexUrl: config.python.sourceIndex } : {}),
+        type: 'pypi',
+      },
+      updatePolicy: 'manual',
+    },
+    target,
   };
 }
 
