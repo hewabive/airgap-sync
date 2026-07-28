@@ -31,12 +31,18 @@ import { isValidPackageName, normalizePackageName } from './python/names.js';
 import { isValidSpecifierSet } from './python/pep440.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
 import { installMaintainedPythonApplicationRecipes } from './python/maintained-recipes.js';
+import {
+  defaultPythonPublicationProfile,
+  normalizePythonPublicationProfile,
+  type PythonPublicationProfile,
+} from './python/publication-targets.js';
 
 export type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
 export const workspaceConfigPythonPublicationBackupFileName = `${workspaceConfigFileName}.before-0002-python-publication.backup`;
+export const workspaceConfigPythonPublicationProfileBackupFileName = `${workspaceConfigFileName}.before-0003-python-publication-profile.backup`;
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
@@ -133,6 +139,7 @@ export interface WorkspacePythonConfig {
     engine: 'uv';
     version: typeof workspacePythonPlannerVersion;
   };
+  publication?: PythonPublicationProfile;
   publishOwner?: string;
   sourceIndex: string;
 }
@@ -298,6 +305,7 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
           engine: 'uv',
           version: workspacePythonPlannerVersion,
         },
+        publication: defaultPythonPublicationProfile(),
         publishOwner: defaultWorkspacePythonPublishOwner,
         sourceIndex: defaultWorkspacePythonSourceIndex,
       },
@@ -766,6 +774,10 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
   );
   const publishOwner = optionalString(value.publishOwner);
   const applicationArtifactOwner = optionalString(value.applicationArtifactOwner);
+  const publication =
+    value.publication !== undefined
+      ? normalizePythonPublicationProfile(value.publication)
+      : undefined;
   let artifactTransfer: WorkspacePythonConfig['artifactTransfer'];
   if (value.artifactTransfer !== undefined) {
     if (!isRecord(value.artifactTransfer)) {
@@ -817,6 +829,7 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
       engine: 'uv',
       version: workspacePythonPlannerVersion,
     },
+    ...(publication ? { publication } : {}),
     ...(publishOwner ? { publishOwner } : {}),
     sourceIndex,
   };
@@ -1034,6 +1047,7 @@ export function withWorkspaceLegacyPythonSettings(
         engine: 'uv',
         version: workspacePythonPlannerVersion,
       },
+      ...(config.python?.publication ? { publication: config.python.publication } : {}),
       ...(settings.publishOwner ? { publishOwner: settings.publishOwner } : {}),
       sourceIndex:
         settings.sourceIndex ?? config.python?.sourceIndex ?? defaultWorkspacePythonSourceIndex,
@@ -1158,6 +1172,31 @@ function addWorkspacePythonPublicationDefaults(config: WorkspaceConfig): Workspa
   });
 }
 
+function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): WorkspaceConfig {
+  const normalized = normalizeWorkspaceConfig(config);
+  if (normalized.schemaVersion !== 2 || normalized.python?.publication) {
+    return normalized;
+  }
+  const publishOwner = normalized.python?.publishOwner;
+  const applicationArtifactOwner = normalized.python?.applicationArtifactOwner;
+  if (
+    publishOwner !== defaultWorkspacePythonPublishOwner ||
+    applicationArtifactOwner !== defaultWorkspacePythonApplicationArtifactOwner
+  ) {
+    throw new Error(
+      'Custom legacy Python publication owners cannot be migrated safely. Configure ' +
+        'python.publication.owner with an explicit strategy and owner kind.'
+    );
+  }
+  return normalizeWorkspaceConfig({
+    ...normalized,
+    python: {
+      ...normalized.python,
+      publication: defaultPythonPublicationProfile(),
+    },
+  });
+}
+
 const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
   {
     apply: previewWorkspaceConfigMigration,
@@ -1172,6 +1211,12 @@ const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
     isApplied: (config) =>
       config.schemaVersion !== 2 ||
       Boolean(config.python?.applicationArtifactOwner && config.python.publishOwner),
+  },
+  {
+    apply: addWorkspacePythonPublicationProfile,
+    backupFileName: workspaceConfigPythonPublicationProfileBackupFileName,
+    id: '0003-python-publication-profile',
+    isApplied: (config) => config.schemaVersion !== 2 || Boolean(config.python?.publication),
   },
 ];
 

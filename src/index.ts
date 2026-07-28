@@ -139,6 +139,15 @@ export type {
   GiteaOwnerVisibility,
   ResolvedGiteaOwner,
 } from './core/gitea-owners.js';
+export {
+  defaultPythonPublicationProfile,
+  normalizePythonPublicationProfile,
+  resolvePythonPublicationProfile,
+} from './core/python/publication-targets.js';
+export type {
+  PythonPublicationProfile,
+  ResolvedPythonPublicationProfile,
+} from './core/python/publication-targets.js';
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
@@ -206,6 +215,7 @@ export {
   workspaceConfigFileName,
   workspaceConfigPath,
   workspaceConfigPythonPublicationBackupFileName,
+  workspaceConfigPythonPublicationProfileBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceConfigV1BackupPath,
   workspaceLegacyPythonSettings,

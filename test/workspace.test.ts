@@ -22,6 +22,7 @@ import {
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
   workspaceConfigPythonPublicationBackupFileName,
+  workspaceConfigPythonPublicationProfileBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceLegacyPythonSettings,
   workspaceSecretsFileName,
@@ -75,6 +76,14 @@ describe('workspace config', () => {
         planner: {
           engine: 'uv',
           version: '0.11.16',
+        },
+        publication: {
+          owner: {
+            kind: 'organization',
+            name: 'airgap-packages',
+            strategy: 'fixed-owner',
+          },
+          visibility: 'public',
         },
         publishOwner: 'pypi',
         sourceIndex: 'https://pypi.org/simple/',
@@ -831,12 +840,21 @@ describe('workspace config', () => {
     expect(first.appliedMigrationIds).toEqual([
       '0001-workspace-schema-v2',
       '0002-python-application-publication',
+      '0003-python-publication-profile',
     ]);
     expect(first.config).toMatchObject({
       python: {
         applicationArtifactOwner: 'python-apps',
         legacySeed: {
           resolutionMode: 'locked-only',
+        },
+        publication: {
+          owner: {
+            kind: 'organization',
+            name: 'airgap-packages',
+            strategy: 'fixed-owner',
+          },
+          visibility: 'public',
         },
         publishOwner: 'pypi',
         sourceIndex: 'https://packages.example/simple/',
@@ -864,17 +882,29 @@ describe('workspace config', () => {
   it('adds missing Python publication defaults to schema v2 once', async () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     delete config.python!.applicationArtifactOwner;
+    delete config.python!.publication;
     await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
     const original = await fs.readFile(path.join(tempDir, 'airgap-sync.json'), 'utf8');
 
     const first = await migrateWorkspaceConfig(tempDir);
 
-    expect(first.appliedMigrationIds).toEqual(['0002-python-application-publication']);
+    expect(first.appliedMigrationIds).toEqual([
+      '0002-python-application-publication',
+      '0003-python-publication-profile',
+    ]);
     expect(first.backupPath).toBe(
       path.join(tempDir, workspaceConfigPythonPublicationBackupFileName)
     );
     expect(first.config.python).toMatchObject({
       applicationArtifactOwner: 'python-apps',
+      publication: {
+        owner: {
+          kind: 'organization',
+          name: 'airgap-packages',
+          strategy: 'fixed-owner',
+        },
+        visibility: 'public',
+      },
       publishOwner: 'pypi',
       sourceIndex: 'https://pypi.org/simple/',
     });
@@ -886,6 +916,20 @@ describe('workspace config', () => {
 
     expect(second.appliedMigrationIds).toEqual([]);
     expect(second.backupPath).toBeUndefined();
+  });
+
+  it('requires an explicit owner kind for custom legacy Python owners', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    delete config.python!.publication;
+    config.python!.publishOwner = 'custom-pypi';
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
+
+    await expect(migrateWorkspaceConfig(tempDir)).rejects.toThrow(
+      'Configure python.publication.owner with an explicit strategy and owner kind'
+    );
+    expect(
+      await fs.pathExists(path.join(tempDir, workspaceConfigPythonPublicationProfileBackupFileName))
+    ).toBe(false);
   });
 
   it('does not create a backup when legacy configuration is invalid', async () => {
