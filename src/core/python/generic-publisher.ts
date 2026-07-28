@@ -61,6 +61,11 @@ interface GenericFile {
   version: string;
 }
 
+interface IndexedGenericFile {
+  file: GenericFile;
+  index: number;
+}
+
 function normalizeBaseUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
@@ -285,6 +290,19 @@ function optionalArtifactFiles(
   });
 }
 
+function groupFilesByPackage(files: GenericFile[]): IndexedGenericFile[][] {
+  const groups = new Map<string, IndexedGenericFile[]>();
+  for (const [index, file] of files.entries()) {
+    // Gitea creates the package row lazily, so concurrent first uploads for one
+    // case-insensitive package name can race on its database unique constraint.
+    const key = `${file.owner.toLowerCase()}\0${file.package.toLowerCase()}`;
+    const group = groups.get(key) ?? [];
+    group.push({ file, index });
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 export async function publishPythonGenericArtifacts(
   options: PublishPythonGenericArtifactsOptions
 ): Promise<PythonGenericPublishReport> {
@@ -377,77 +395,79 @@ export async function publishPythonGenericArtifacts(
       }))
     );
   }
-  let cursor = 0;
+  const fileGroups = groupFilesByPackage(files);
+  let groupCursor = 0;
   let completed = 0;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 4));
   if (actions.length === 0) {
     await Promise.all(
-      Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+      Array.from({ length: Math.min(concurrency, fileGroups.length) }, async () => {
         for (;;) {
-          const index = cursor++;
-          const file = files[index];
-          if (!file) {
+          const group = fileGroups[groupCursor++];
+          if (!group) {
             return;
           }
-          if (dryRun) {
-            actions[index] = {
-              file: file.file,
-              owner: file.owner,
-              package: file.package,
-              status: 'planned',
-              version: file.version,
-            };
+          for (const { file, index } of group) {
+            if (dryRun) {
+              actions[index] = {
+                file: file.file,
+                owner: file.owner,
+                package: file.package,
+                status: 'planned',
+                version: file.version,
+              };
+              completed += 1;
+              options.onProgress?.({
+                current: completed,
+                detail: `planned ${file.filename}`,
+                status: 'progress',
+                total: files.length,
+              });
+              continue;
+            }
+            const onFileProgress = options.onProgress
+              ? createPythonFilePublishProgress({
+                  current: () => completed,
+                  filename: file.filename,
+                  onProgress: options.onProgress,
+                  total: files.length,
+                })
+              : undefined;
+            try {
+              actions[index] = {
+                file: file.file,
+                owner: file.owner,
+                package: file.package,
+                status: await publishFile({
+                  ...(options.auth ? { auth: options.auth } : {}),
+                  baseUrl: normalizeBaseUrl(options.giteaBaseUrl),
+                  bundleDir,
+                  fetch: options.fetch ?? globalThis.fetch,
+                  file,
+                  ...(onFileProgress ? { onProgress: onFileProgress } : {}),
+                  timeoutMs: options.timeoutMs ?? 300_000,
+                }),
+                version: file.version,
+              };
+            } catch (error) {
+              actions[index] = {
+                error: (error as Error).message,
+                file: file.file,
+                owner: file.owner,
+                package: file.package,
+                status: 'error',
+                version: file.version,
+              };
+            }
             completed += 1;
+            const action = actions[index];
             options.onProgress?.({
               current: completed,
-              detail: `planned ${file.filename}`,
+              detail: `${action.status} ${file.filename}${action.error ? `: ${action.error}` : ''}`,
               status: 'progress',
               total: files.length,
             });
-            continue;
           }
-          const onFileProgress = options.onProgress
-            ? createPythonFilePublishProgress({
-                current: () => completed,
-                filename: file.filename,
-                onProgress: options.onProgress,
-                total: files.length,
-              })
-            : undefined;
-          try {
-            actions[index] = {
-              file: file.file,
-              owner: file.owner,
-              package: file.package,
-              status: await publishFile({
-                ...(options.auth ? { auth: options.auth } : {}),
-                baseUrl: normalizeBaseUrl(options.giteaBaseUrl),
-                bundleDir,
-                fetch: options.fetch ?? globalThis.fetch,
-                file,
-                ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-                timeoutMs: options.timeoutMs ?? 300_000,
-              }),
-              version: file.version,
-            };
-          } catch (error) {
-            actions[index] = {
-              error: (error as Error).message,
-              file: file.file,
-              owner: file.owner,
-              package: file.package,
-              status: 'error',
-              version: file.version,
-            };
-          }
-          completed += 1;
-          const action = actions[index];
-          options.onProgress?.({
-            current: completed,
-            detail: `${action.status} ${file.filename}${action.error ? `: ${action.error}` : ''}`,
-            status: 'progress',
-            total: files.length,
-          });
         }
       })
     );

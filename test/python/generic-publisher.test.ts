@@ -262,6 +262,52 @@ describe('publishPythonGenericArtifacts', () => {
     expect(published.size).toBe(7);
   });
 
+  it('serializes initial uploads to the same Gitea package', async () => {
+    const activePackages = new Set<string>();
+    const published = new Map<string, Buffer>();
+    let packageRace = false;
+    const baseUrl = await listen((request, response) => {
+      const url = request.url ?? '';
+      if (request.method === 'GET') {
+        const content = published.get(url);
+        response.writeHead(content ? 200 : 404).end(content);
+        return;
+      }
+      const packageKey = url.split('/').slice(0, -2).join('/').toLowerCase();
+      if (activePackages.has(packageKey)) {
+        packageRace = true;
+        request.resume();
+        response
+          .writeHead(500)
+          .end('pq: duplicate key value violates unique constraint "UQE_package_s"');
+        return;
+      }
+      activePackages.add(packageKey);
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        setTimeout(() => {
+          published.set(url, Buffer.concat(chunks));
+          activePackages.delete(packageKey);
+          response.writeHead(201).end();
+        }, 10);
+      });
+    });
+    const publicationManifest = await writeBundle(baseUrl);
+
+    const report = await publishPythonGenericArtifacts({
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      concurrency: 4,
+      giteaBaseUrl: baseUrl,
+      publicationManifest,
+    });
+
+    expect(packageRace).toBe(false);
+    expect(report).toMatchObject({ errors: [], published: 7 });
+    expect(published.size).toBe(7);
+  });
+
   it('produces a dry-run plan without credentials', async () => {
     const publicationManifest = await writeBundle();
     const report = await publishPythonGenericArtifacts({
