@@ -163,4 +163,22 @@ describe('publishPythonBundle', () => {
     });
     expect(report).toMatchObject({ planned: 1, published: 0, skipped: 0 });
   });
+
+  it('explains a Gitea package-registry 404', async () => {
+    const baseUrl = await listen((request, response) => {
+      request.resume();
+      response.writeHead(404).end('Not found');
+    });
+
+    const report = await publishPythonBundle(manifest(), {
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      owner: 'public',
+    });
+
+    expect(report.errors[0]?.error).toContain(
+      'verify Gitea [packages] ENABLED=true and that the token has package write permission'
+    );
+  });
 });

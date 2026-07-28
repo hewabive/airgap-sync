@@ -214,8 +214,7 @@ async function verifyExistingFile(options: {
   }
   const hash = createHash('sha256');
   const contentLengthHeader = response.headers.get('content-length');
-  const contentLength =
-    contentLengthHeader === null ? undefined : Number(contentLengthHeader);
+  const contentLength = contentLengthHeader === null ? undefined : Number(contentLengthHeader);
   const totalBytes =
     contentLength !== undefined && Number.isFinite(contentLength) && contentLength >= 0
       ? contentLength
@@ -239,6 +238,9 @@ function errorMessage(status: number, body: string): string {
   }
   if (status === 403 && /quota|size/i.test(body)) {
     return `Gitea rejected the wheel because of a package quota or size limit (HTTP 403)${suffix}`;
+  }
+  if (status === 404) {
+    return `Gitea PyPI upload failed with HTTP 404; verify Gitea [packages] ENABLED=true and that the token has package write permission${suffix}`;
   }
   return `Gitea PyPI upload failed with HTTP ${String(status)}${suffix}`;
 }

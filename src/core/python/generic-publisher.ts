@@ -214,6 +214,11 @@ async function publishFile(options: {
     throw new Error('Gitea reports a conflict, but the existing generic artifact differs');
   }
   const detail = (await response.text()).trim().slice(0, 500);
+  if (response.status === 404) {
+    throw new Error(
+      `Gitea Generic Package upload failed with HTTP 404; verify Gitea [packages] ENABLED=true and that the token has package write permission${detail ? `: ${detail}` : ''}`
+    );
+  }
   throw new Error(
     `Gitea Generic Package upload failed with HTTP ${String(response.status)}${detail ? `: ${detail}` : ''}`
   );

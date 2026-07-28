@@ -273,4 +273,23 @@ describe('publishPythonGenericArtifacts', () => {
 
     expect(report).toMatchObject({ errors: [], planned: 7, published: 0, skipped: 0 });
   });
+
+  it('explains a Gitea package-registry 404', async () => {
+    const baseUrl = await listen((request, response) => {
+      request.resume();
+      response.writeHead(404).end('Not found');
+    });
+    const publicationManifest = await writeBundle(baseUrl);
+
+    const report = await publishPythonGenericArtifacts({
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      publicationManifest,
+    });
+
+    expect(report.errors[0]?.error).toContain(
+      'verify Gitea [packages] ENABLED=true and that the token has package write permission'
+    );
+  });
 });

@@ -557,6 +557,11 @@ resolves `python.publication`, creates missing organization owners, and only the
 starts package uploads. A user owner must equal the authenticated token user and is
 never created automatically.
 
+If an upload still returns HTTP 404 after owner provisioning, check the Gitea server
+setting `[packages] ENABLED = true` and ensure the access token has package write
+permission. Gitea enables the Package Registry by default, but administrators can
+disable it globally.
+
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
 `--gitea`, `python.publication` as the PyPI/Generic owner profile, the
