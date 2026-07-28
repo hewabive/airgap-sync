@@ -12,6 +12,13 @@ import {
   gitSourceTargetUrl,
   normalizeBaseUrl,
 } from './git-targets.js';
+import {
+  mergeGiteaOwnerRequirements,
+  type GiteaOwnerKind,
+  type GiteaOwnerPurpose,
+  type GiteaOwnerRequirement,
+  type GiteaOwnerVisibility,
+} from './gitea-owners.js';
 
 export interface GiteaClient {
   createOrganization(options: {
@@ -54,6 +61,35 @@ export interface AssumeGiteaRepositoriesExistOptions {
   giteaBaseUrl: string;
   manifest: GitSourcesManifest;
   private?: boolean;
+}
+
+export type GiteaOwnerProvisionStatus = 'planned' | 'exists' | 'created' | 'error';
+
+export interface GiteaOwnerProvisionAction {
+  error?: string;
+  kind: GiteaOwnerKind;
+  name: string;
+  purposes: GiteaOwnerPurpose[];
+  status: GiteaOwnerProvisionStatus;
+  visibility: GiteaOwnerVisibility;
+}
+
+export interface GiteaOwnerProvisionReport {
+  actions: GiteaOwnerProvisionAction[];
+  created: number;
+  dryRun: boolean;
+  errors: GiteaOwnerProvisionAction[];
+  exists: number;
+  generatedAt: string;
+  planned: number;
+}
+
+export interface ProvisionGiteaOwnersOptions {
+  authenticatedUser?: string;
+  client: GiteaClient;
+  dryRun?: boolean;
+  generatedAt?: string;
+  requirements: GiteaOwnerRequirement[];
 }
 
 function encodePathPart(value: string): string {
@@ -103,6 +139,18 @@ function uniqueOwners(manifest: GitSourcesManifest): string[] {
         .map(gitSourcePublishOwner)
     ),
   ].sort();
+}
+
+function gitOwnerRequirements(
+  manifest: GitSourcesManifest,
+  visibility: GiteaOwnerVisibility
+): GiteaOwnerRequirement[] {
+  return uniqueOwners(manifest).map((name) => ({
+    kind: 'organization',
+    name,
+    purposes: ['git'],
+    visibility,
+  }));
 }
 
 export class HttpGiteaClient implements GiteaClient {
@@ -199,18 +247,16 @@ export class HttpGiteaClient implements GiteaClient {
     private: boolean;
   }): Promise<void> {
     await this.#request(
-      options.ownerKind === 'user'
-        ? '/user/repos'
-        : `/orgs/${encodePathPart(options.owner)}/repos`,
+      options.ownerKind === 'user' ? '/user/repos' : `/orgs/${encodePathPart(options.owner)}/repos`,
       {
-      body: {
-        auto_init: false,
-        description: options.description,
-        name: options.name,
-        private: options.private,
-      },
-      method: 'POST',
-      validStatuses: new Set([201]),
+        body: {
+          auto_init: false,
+          description: options.description,
+          name: options.name,
+          private: options.private,
+        },
+        method: 'POST',
+        validStatuses: new Set([201]),
       }
     );
   }
@@ -231,37 +277,68 @@ export class HttpGiteaClient implements GiteaClient {
   }
 }
 
-async function provisionOrganization(
-  owner: string,
-  options: ProvisionGiteaRepositoriesOptions,
-  isPrivate: boolean
-): Promise<GiteaOrganizationActionResult> {
-  try {
-    const exists = await options.client.organizationExists(owner);
-    if (exists) {
-      return {
-        owner,
-        status: 'exists',
-      };
+export async function provisionGiteaOwners(
+  options: ProvisionGiteaOwnersOptions
+): Promise<GiteaOwnerProvisionReport> {
+  const requirements = mergeGiteaOwnerRequirements(options.requirements);
+  const actions: GiteaOwnerProvisionAction[] = [];
+  for (const requirement of requirements) {
+    if (requirement.kind === 'user') {
+      if (!options.authenticatedUser || requirement.name !== options.authenticatedUser) {
+        actions.push({
+          ...requirement,
+          error: `Gitea user owner ${requirement.name} must match the authenticated user`,
+          status: 'error',
+        });
+      } else {
+        actions.push({
+          ...requirement,
+          status: 'exists',
+        });
+      }
+      continue;
     }
-
-    await options.client.createOrganization({
-      fullName: `airgap-sync mirror owner for ${owner}`,
-      name: owner,
-      visibility: isPrivate ? 'private' : 'public',
-    });
-
-    return {
-      owner,
-      status: 'created',
-    };
-  } catch (error) {
-    return {
-      error: errorMessage(error),
-      owner,
-      status: 'error',
-    };
+    if (options.dryRun === true) {
+      actions.push({
+        ...requirement,
+        status: 'planned',
+      });
+      continue;
+    }
+    try {
+      if (await options.client.organizationExists(requirement.name)) {
+        actions.push({
+          ...requirement,
+          status: 'exists',
+        });
+        continue;
+      }
+      await options.client.createOrganization({
+        fullName: `airgap-sync managed owner for ${requirement.purposes.join(', ')}`,
+        name: requirement.name,
+        visibility: requirement.visibility,
+      });
+      actions.push({
+        ...requirement,
+        status: 'created',
+      });
+    } catch (error) {
+      actions.push({
+        ...requirement,
+        error: errorMessage(error),
+        status: 'error',
+      });
+    }
   }
+  return {
+    actions,
+    created: actions.filter((action) => action.status === 'created').length,
+    dryRun: options.dryRun === true,
+    errors: actions.filter((action) => action.status === 'error'),
+    exists: actions.filter((action) => action.status === 'exists').length,
+    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    planned: actions.filter((action) => action.status === 'planned').length,
+  };
 }
 
 async function provisionRepository(
@@ -349,16 +426,22 @@ export async function provisionGiteaRepositories(
   const actions: GiteaRepositoryActionResult[] = [];
   const organizationActions: GiteaOrganizationActionResult[] = [];
   const organizationActionsByOwner = new Map<string, GiteaOrganizationActionResult>();
-  const owners = uniqueOwners(options.manifest);
 
   if (options.dryRun === true) {
-    for (const owner of owners) {
+    const ownerReport = await provisionGiteaOwners({
+      client: options.client,
+      dryRun: true,
+      ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
+      requirements: gitOwnerRequirements(options.manifest, isPrivate ? 'private' : 'public'),
+    });
+    for (const ownerAction of ownerReport.actions) {
       const action: GiteaOrganizationActionResult = {
-        owner,
-        status: 'planned',
+        ...(ownerAction.error ? { error: ownerAction.error } : {}),
+        owner: ownerAction.name,
+        status: ownerAction.status,
       };
       organizationActions.push(action);
-      organizationActionsByOwner.set(owner, action);
+      organizationActionsByOwner.set(ownerAction.name, action);
     }
 
     for (const source of options.manifest.sources) {
@@ -407,13 +490,23 @@ export async function provisionGiteaRepositories(
       }
     }
 
-    for (const owner of uniqueOwners({ ...options.manifest, sources: missingSources })) {
-      if (organizationActionsByOwner.has(owner)) {
+    const missingManifest = { ...options.manifest, sources: missingSources };
+    const ownerReport = await provisionGiteaOwners({
+      client: options.client,
+      ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
+      requirements: gitOwnerRequirements(missingManifest, isPrivate ? 'private' : 'public'),
+    });
+    for (const ownerAction of ownerReport.actions) {
+      if (organizationActionsByOwner.has(ownerAction.name)) {
         continue;
       }
-      const action = await provisionOrganization(owner, options, isPrivate);
+      const action: GiteaOrganizationActionResult = {
+        ...(ownerAction.error ? { error: ownerAction.error } : {}),
+        owner: ownerAction.name,
+        status: ownerAction.status,
+      };
       organizationActions.push(action);
-      organizationActionsByOwner.set(owner, action);
+      organizationActionsByOwner.set(ownerAction.name, action);
     }
 
     for (const source of missingSources) {

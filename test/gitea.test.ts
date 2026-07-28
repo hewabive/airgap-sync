@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HttpGiteaClient, provisionGiteaRepositories, type GiteaClient } from '../src/index.js';
+import {
+  HttpGiteaClient,
+  provisionGiteaOwners,
+  provisionGiteaRepositories,
+  type GiteaClient,
+} from '../src/index.js';
 import type { GitSourcesManifest } from '../src/types.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -118,6 +123,122 @@ describe('HttpGiteaClient', () => {
           status: 'error',
         },
       ],
+    });
+  });
+});
+
+describe('provisionGiteaOwners', () => {
+  it('creates one organization for shared PyPI and Generic purposes', async () => {
+    const createCalls: unknown[] = [];
+    const client: GiteaClient = {
+      createOrganization: (options) => {
+        createCalls.push(options);
+        return Promise.resolve();
+      },
+      createRepository: () => Promise.resolve(),
+      organizationExists: () => Promise.resolve(false),
+      repositoryExists: () => Promise.resolve(false),
+    };
+
+    const report = await provisionGiteaOwners({
+      authenticatedUser: 'publisher',
+      client,
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      requirements: [
+        {
+          kind: 'organization',
+          name: 'airgap-packages',
+          purposes: ['pypi'],
+          visibility: 'public',
+        },
+        {
+          kind: 'organization',
+          name: 'airgap-packages',
+          purposes: ['generic'],
+          visibility: 'public',
+        },
+      ],
+    });
+
+    expect(createCalls).toEqual([
+      {
+        fullName: 'airgap-sync managed owner for pypi, generic',
+        name: 'airgap-packages',
+        visibility: 'public',
+      },
+    ]);
+    expect(report).toMatchObject({
+      created: 1,
+      errors: [],
+      exists: 0,
+      planned: 0,
+    });
+    expect(report.actions[0]).toMatchObject({
+      kind: 'organization',
+      name: 'airgap-packages',
+      purposes: ['pypi', 'generic'],
+      status: 'created',
+    });
+  });
+
+  it('never creates a user and rejects a different authenticated principal', async () => {
+    const client: GiteaClient = {
+      createOrganization: () => {
+        throw new Error('user owners must not create organizations');
+      },
+      createRepository: () => Promise.resolve(),
+      organizationExists: () => {
+        throw new Error('user owners must not check organizations');
+      },
+      repositoryExists: () => Promise.resolve(false),
+    };
+
+    const report = await provisionGiteaOwners({
+      authenticatedUser: 'publisher',
+      client,
+      requirements: [
+        {
+          kind: 'user',
+          name: 'other-user',
+          purposes: ['pypi'],
+          visibility: 'public',
+        },
+      ],
+    });
+
+    expect(report.errors[0]?.error).toContain('must match the authenticated user');
+  });
+
+  it('reports dry-run organization creation without API calls', async () => {
+    const client: GiteaClient = {
+      createOrganization: () => {
+        throw new Error('dry-run must not create organizations');
+      },
+      createRepository: () => Promise.resolve(),
+      organizationExists: () => {
+        throw new Error('dry-run must not check organizations');
+      },
+      repositoryExists: () => Promise.resolve(false),
+    };
+
+    const report = await provisionGiteaOwners({
+      client,
+      dryRun: true,
+      requirements: [
+        {
+          kind: 'organization',
+          name: 'airgap-packages',
+          purposes: ['pypi', 'generic'],
+          visibility: 'public',
+        },
+      ],
+    });
+
+    expect(report).toMatchObject({
+      created: 0,
+      errors: [],
+      exists: 0,
+      planned: 1,
     });
   });
 });
@@ -277,7 +398,7 @@ describe('provisionGiteaRepositories', () => {
 
     expect(createOrganizationCalls).toEqual([
       {
-        fullName: 'airgap-sync mirror owner for owner',
+        fullName: 'airgap-sync managed owner for git',
         name: 'owner',
         visibility: 'public',
       },
