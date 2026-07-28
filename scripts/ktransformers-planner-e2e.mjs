@@ -102,11 +102,14 @@ try {
     workDir: path.join(tempRoot, 'linux'),
   });
   const plan = addPythonRuntimeContract(result.plan, {
-    applicationArtifactOwner: 'python-apps',
-    pythonPackageOwner: 'pypi',
     recipe,
   });
-  const consumer = createPythonConsumerBundleDocuments(plan);
+  const consumer = createPythonConsumerBundleDocuments(plan, {
+    genericOwner: 'airgap-packages',
+    giteaBaseUrl: 'http://gitea.local',
+    publicationId: 'e2e-publication',
+    pypiOwner: 'airgap-packages',
+  });
   if (
     plan.platforms.length !== 1 ||
     plan.platforms[0].platformFamilyId !== 'linux-glibc-x86_64' ||

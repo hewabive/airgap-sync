@@ -16,13 +16,18 @@ airgap-bundle/
         environment-plan.json
         plan-diff.json
         prerequisites.json
-        consumer-contract.json
-        consumer.env.template
-        pip.conf.template
         lock/
     artifacts/
       wheels/<sha256>/<filename>.whl
       optional/
+    publications/
+      <publication-id>/
+        publication-manifest.json
+        applications/
+          <application>--<coverage>/
+            consumer-contract.json
+            consumer.env.template
+            pip.conf.template
   seed-manifest.json
   dist-tags.json
   registry-metadata-cache.json
@@ -147,18 +152,33 @@ Application entries point to:
 - per-platform `pylock.toml` resolver evidence and hash-complete
   `requirements.lock`;
 - external CPython/system prerequisite report;
-- closed-index pip/uv configuration templates and standard consumer commands;
 - optional reviewed health checks.
 
 Artifacts are content-addressed by SHA-256. A wheel may be referenced by several
 applications and platform branches without being copied. Optional CPython, `uv`, and
-license archives have separate Generic Package publication coordinates. The summary
-reports application/artifact counts and total unique bytes.
+license archives contain transferable identity only; they have no Gitea owner or
+Generic Package coordinates. The summary reports application/artifact counts and
+total unique bytes.
 
 An interrupted download may leave verified content-addressed files, but the index and
 application document set are replaced only after the whole requested run succeeds.
 Retry reuses those files. Partial target downloads merge references and never remove
 objects belonging to unselected applications.
+
+The application index schema is version 2. A schema-v1 application bundle must be
+downloaded once with the current version before publication; existing content-addressed
+wheels and optional artifacts are reused.
+
+## python/publications/\<publication-id\>/publication-manifest.json
+
+Created during closed-network publish after Gitea authentication and owner resolution.
+It records the normalized Gitea URL, resolved PyPI and Generic owners, source plan IDs,
+concrete package coordinates, and materialized consumer-document paths and digests.
+
+`publicationId` is deterministic over semantic destination data. Tokens, authenticated
+login, timestamps, and upload results are excluded. Therefore the same application
+plan can be published to another Gitea deployment without a new online resolution,
+while two destinations get distinct consumer documents and Generic Package versions.
 
 ## Reports
 

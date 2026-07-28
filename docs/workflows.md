@@ -92,8 +92,14 @@ New workspaces use application-first schema v2:
   "gitOwnerStrategy": "preserve",
   "python": {
     "sourceIndex": "https://pypi.org/simple/",
-    "publishOwner": "pypi",
-    "applicationArtifactOwner": "python-apps",
+    "publication": {
+      "owner": {
+        "strategy": "fixed-owner",
+        "kind": "organization",
+        "name": "airgap-packages"
+      },
+      "visibility": "public"
+    },
     "planner": {
       "engine": "uv",
       "version": "0.11.16"
@@ -213,7 +219,8 @@ The download step writes npm metadata and Git source metadata:
 - `python-seed-manifest.json`, `python-fetch-report.json`, and verified wheels under
   `python-packages/` when legacy Python target environments are configured
 - `python/application-index.json`, per-application plans/locks, and shared
-  content-addressed artifacts for schema-v2 applications
+  content-addressed artifacts for schema-v2 applications. These files contain no
+  closed-network Gitea URL or package owner.
 
 By default, download uses `latestPolicy: "bundled"`: publish computes `latest` from
 `seed-manifest.json`, using the newest version already present in the bundle for each
@@ -320,10 +327,13 @@ The offline publish step should:
 - restore npm dist-tags;
 - map source Git repositories to the closed-network Git host;
 - preserve upstream owner/repository paths when possible;
-- create missing Gitea owners or repositories;
+- resolve Git, PyPI, and Generic Package owners from the workspace profile;
+- create missing Gitea organizations before any dependent upload (users are never
+  created automatically);
 - push local bare mirrors into Gitea using the provided Gitea token;
-- generate install configuration for consumer machines;
-- publish every bundled wheel under `python.publishOwner` through Gitea's PyPI upload
+- generate destination-specific install configuration under
+  `python/publications/<publicationId>/`;
+- publish every bundled wheel under the resolved PyPI owner through Gitea's PyPI upload
   API; a 409 is accepted only when the existing file has the same sha256.
 - publish application plans, locks, prerequisites, configuration, and optional
   runtime/tool transfer artifacts through Gitea Generic Packages.
@@ -333,13 +343,18 @@ needs no credentials:
 
 ```bash
 python3.11 -m pip install \
-  --index-url http://gitea.local/api/packages/pypi/pypi/simple \
+  --index-url http://gitea.local/api/packages/airgap-packages/pypi/simple \
   --only-binary=:all: --no-deps --require-hashes \
   -r lock/linux-glibc-x86_64--py311.requirements.lock
 ```
 
 Use this index as the primary `index-url`, not as an extra index, to avoid dependency
 confusion and accidental access to the public internet.
+
+The Git, PyPI, and Generic Package calls use the same Gitea token. By default both
+Python registries use the managed public `airgap-packages` organization. Set
+`python.publication.pypiOwner` or `python.publication.genericOwner` only when a
+separate namespace is operationally useful.
 
 If Git repositories are created by another process, or the target Git host is not
 Gitea-compatible, skip repository provisioning:

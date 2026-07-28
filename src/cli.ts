@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
@@ -60,6 +60,7 @@ import {
   readFetchReport,
   readGitSourcesManifest,
   readManifestRequirements,
+  readPythonApplicationBundleIndex,
   readBundleManifest,
   readDistTagsManifest,
   readRegistryMetadataCache,
@@ -1691,6 +1692,18 @@ async function resolvePromptBoolean(
 
 async function readSavedGiteaToken(workspaceDir: string): Promise<string | undefined> {
   return (await readWorkspaceSecrets(workspaceDir)).giteaToken;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function resolveGiteaToken(options: {
@@ -4587,7 +4600,26 @@ addNpmPublishOptions(
       const needsAuthenticatedGitOwner =
         resolved.gitOwnerStrategy === 'authenticated-user' ||
         (resolved.gitOwnerStrategy === 'fixed-owner' && resolved.gitPublishOwnerKind === 'user');
-      const token = needsAuthenticatedGitOwner
+      const pythonIndex = await readPythonApplicationBundleIndex(resolved.bundle);
+      const hasPythonSeed = await fileExists(
+        path.join(path.resolve(resolved.bundle), 'python-seed-manifest.json')
+      );
+      const hasPythonPublication = hasPythonSeed || pythonIndex !== undefined;
+      const pythonOwnerTargets = [
+        resolved.pythonPublicationProfile.owner,
+        resolved.pythonPublicationProfile.pypiOwner,
+        resolved.pythonPublicationProfile.genericOwner,
+      ].filter((owner) => owner !== undefined);
+      const needsAuthenticatedPythonOwner =
+        hasPythonPublication &&
+        pythonOwnerTargets.some((owner) =>
+          owner.strategy === 'authenticated-user' ? true : owner.kind === 'user'
+        );
+      const requiresGiteaToken =
+        (options.dryRun !== true && hasPythonPublication) ||
+        needsAuthenticatedGitOwner ||
+        needsAuthenticatedPythonOwner;
+      const token = requiresGiteaToken
         ? await requireGiteaToken({
             cliToken: options.giteaToken,
             optionName: '--gitea-token <token>',

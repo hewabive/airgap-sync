@@ -400,7 +400,6 @@ airgap-sync verify ./airgap-bundle --json
 airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
   --gitea http://gitea.local \
-  --python-owner pypi \
   --ignore-scripts
 ```
 
@@ -553,10 +552,16 @@ reports, consumer configuration, and optional runtime/tool transfer artifacts to
 Gitea Generic Packages. Existing immutable generic objects are skipped only after
 their downloaded content matches the local SHA-256.
 
+The same Gitea token authenticates Git, PyPI, and Generic Package operations. Publish
+resolves `python.publication`, creates missing organization owners, and only then
+starts package uploads. A user owner must equal the authenticated token user and is
+never created automatically.
+
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
-`--gitea`, `python.publishOwner` as `--python-owner`, the `gitOwnerStrategy` settings
-described below, and `defaults.publish` for public repositories and global Git rewrites.
+`--gitea`, `python.publication` as the PyPI/Generic owner profile, the
+`gitOwnerStrategy` settings described below, and `defaults.publish` for public
+repositories and global Git rewrites.
 Passing `<bundle>`, `--registry`, `--gitea`, `--public`, or
 `--configure-git-global` overrides those defaults.
 
@@ -566,7 +571,7 @@ Supported options:
 -r, --registry <url>      Target npm registry URL, defaults to targetRegistry
 --gitea <url>             Closed-network Git host base URL, defaults to giteaUrl
 --gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN or saved secrets
---python-owner <owner>    Public Gitea owner for the anonymous Python index
+--python-owner <owner>    Deprecated one-run PyPI organization override
 --git-username <name>     Git HTTP username for non-Gitea push authentication
 --git-password <token>    Git HTTP password/token for non-Gitea push authentication
 --git-owner-strategy <strategy> preserve, authenticated-user, or fixed-owner
@@ -574,7 +579,7 @@ Supported options:
 --git-publish-owner-kind <kind> user or organization for fixed-owner mapping
 --mirrors-dir <dir>       Directory containing bare Git mirrors
 --public                  Create public Gitea repositories instead of private repositories
---skip-git-provision      Assume target Git repositories already exist and skip Gitea API provisioning
+--skip-git-provision      Skip Git repository provisioning; package-owner provisioning still runs
 --no-skip-existing        Attempt to publish npm versions that already exist
 --dist-tag-concurrency <n> Concurrent npm dist-tag operations, default 4
 --publish-concurrency <n> Concurrent npm publish operations, default 4

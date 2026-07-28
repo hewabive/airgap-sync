@@ -19,7 +19,7 @@ The intended workflow is simple for the operator:
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
 python3.11 -m pip install \
-  --index-url http://gitea.local/api/packages/pypi/pypi/simple \
+  --index-url http://gitea.local/api/packages/airgap-packages/pypi/simple \
   --only-binary=:all: --no-deps --require-hashes \
   -r requirements.lock
 ```
@@ -242,14 +242,20 @@ bundle between machines.
 `airgap-sync.secrets.json` is optional. If you save a Gitea token from the menu, it is
 stored there in plaintext on the removable media.
 
+One Gitea token is reused for Git, PyPI, and Generic Packages. The default Python
+publication profile uses a managed public `airgap-packages` organization; publish
+creates it when missing. Optional PyPI/Generic owner overrides do not require separate
+tokens, and user accounts are never created automatically.
+
 The bundle contains the current transferable state plus audit reports:
 
 ```text
 airgap-bundle/packages/                 npm tarballs
 airgap-bundle/python-packages/          Python wheels
 airgap-bundle/python/application-index.json
-airgap-bundle/python/applications/      Per-application plans, locks, and contracts
+airgap-bundle/python/applications/      Destination-neutral plans and locks
 airgap-bundle/python/artifacts/         Shared content-addressed Python artifacts
+airgap-bundle/python/publications/      Closed-side publication manifests and consumer configs
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
 airgap-bundle/python-seed-manifest.json bundled Python files and target environments
