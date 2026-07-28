@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { applyBundle, type GiteaClient } from '../src/index.js';
+import { applyBundle, type ApplyProgressEvent, type GiteaClient } from '../src/index.js';
 import * as fs from '../src/core/fs.js';
 import type { BundleManifest, DistTagsManifest, GitSourcesManifest } from '../src/types.js';
 import type { GitCommandInvocation } from '../src/core/git-fetch.js';
@@ -156,12 +156,14 @@ describe('applyBundle', () => {
       { spaces: 2 }
     );
 
+    const progress: ApplyProgressEvent[] = [];
     const report = await applyBundle({
       bundleDir,
       dryRun: true,
       generatedAt: '2026-07-10T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
       giteaClient: noopClient,
+      onProgress: (event) => progress.push(event),
       pythonOwner: 'public',
       registryUrl: 'http://verdaccio.local:4873',
     });
@@ -174,6 +176,25 @@ describe('applyBundle', () => {
     expect(await fs.pathExists(path.join(bundleDir, 'python-publish-dry-run-report.json'))).toBe(
       true
     );
+    expect(progress).toContainEqual({
+      current: 0,
+      phase: 'python-publish',
+      status: 'start',
+      total: 1,
+    });
+    expect(progress).toContainEqual({
+      current: 1,
+      detail: 'planned demo_python-1.0-py3-none-any.whl',
+      phase: 'python-publish',
+      status: 'progress',
+      total: 1,
+    });
+    expect(progress).toContainEqual({
+      current: 1,
+      phase: 'python-publish',
+      status: 'done',
+      total: 1,
+    });
   });
 
   it('plans Gitea provisioning, mirror push, and optional Git config', async () => {

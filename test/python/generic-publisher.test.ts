@@ -9,6 +9,7 @@ import * as fs from '../../src/core/fs.js';
 import type { PythonApplicationBundleIndex } from '../../src/core/python/application-bundle.js';
 import type { PythonConsumerContract } from '../../src/core/python/consumer-contract.js';
 import { publishPythonGenericArtifacts } from '../../src/core/python/generic-publisher.js';
+import type { PythonPublishProgressEvent } from '../../src/core/python/publish-progress.js';
 
 let bundleDir: string;
 let server: http.Server | undefined;
@@ -166,10 +167,26 @@ describe('publishPythonGenericArtifacts', () => {
       giteaBaseUrl: baseUrl,
     };
 
-    const first = await publishPythonGenericArtifacts(options);
+    const progress: PythonPublishProgressEvent[] = [];
+    const first = await publishPythonGenericArtifacts({
+      ...options,
+      onProgress: (event) => progress.push(event),
+    });
     const second = await publishPythonGenericArtifacts(options);
 
     expect(first).toMatchObject({ errors: [], published: 5, skipped: 0 });
+    expect(progress[0]).toEqual({ current: 0, status: 'start' });
+    const uploadProgress = progress.find(
+      (event) => event.bytes === 0 && event.detail?.startsWith('upload ')
+    );
+    expect(uploadProgress).toMatchObject({
+      bytes: 0,
+      status: 'progress',
+      total: 5,
+    });
+    expect(typeof uploadProgress?.current).toBe('number');
+    expect(typeof uploadProgress?.totalBytes).toBe('number');
+    expect(progress.at(-1)).toEqual({ current: 5, status: 'done', total: 5 });
     expect(second).toMatchObject({ errors: [], published: 0, skipped: 5 });
     expect([...published.keys()]).toEqual(
       expect.arrayContaining([

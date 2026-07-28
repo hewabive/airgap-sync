@@ -9,6 +9,11 @@ import {
 } from './application-bundle.js';
 import type { PythonConsumerContract } from './consumer-contract.js';
 import type { PythonEnvironmentPlan } from './environment-plan.js';
+import {
+  createPythonFilePublishProgress,
+  type PythonFilePublishProgress,
+  type PythonPublishProgressEvent,
+} from './publish-progress.js';
 
 export interface PythonGenericPublishAuth {
   password: string;
@@ -43,6 +48,7 @@ export interface PublishPythonGenericArtifactsOptions {
   fetch?: typeof globalThis.fetch;
   generatedAt?: string;
   giteaBaseUrl: string;
+  onProgress?: (event: PythonPublishProgressEvent) => void;
   timeoutMs?: number;
 }
 
@@ -88,10 +94,19 @@ function safeFile(bundleDir: string, relativeFile: string): string {
   return absolute;
 }
 
-async function sha256(filePath: string): Promise<string> {
+async function sha256(
+  filePath: string,
+  onProgress?: PythonFilePublishProgress
+): Promise<string> {
   const hash = createHash('sha256');
+  const totalBytes = (await fs.stat(filePath)).size;
+  let bytes = 0;
+  onProgress?.('verify', bytes, totalBytes);
   for await (const chunk of fs.createReadStream(filePath)) {
-    hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    hash.update(buffer);
+    bytes += buffer.byteLength;
+    onProgress?.('verify', bytes, totalBytes);
   }
   return hash.digest('hex');
 }
@@ -112,6 +127,7 @@ async function remoteMatches(options: {
   auth?: PythonGenericPublishAuth;
   expectedSha256: string;
   fetch: typeof globalThis.fetch;
+  onProgress?: PythonFilePublishProgress;
   timeoutMs: number;
   url: string;
 }): Promise<boolean> {
@@ -126,8 +142,20 @@ async function remoteMatches(options: {
     throw new Error(`unable to verify existing generic artifact: HTTP ${String(response.status)}`);
   }
   const hash = createHash('sha256');
+  const contentLengthHeader = response.headers.get('content-length');
+  const contentLength =
+    contentLengthHeader === null ? undefined : Number(contentLengthHeader);
+  const totalBytes =
+    contentLength !== undefined && Number.isFinite(contentLength) && contentLength >= 0
+      ? contentLength
+      : undefined;
+  let bytes = 0;
+  options.onProgress?.('verify existing', bytes, totalBytes);
   for await (const chunk of Readable.fromWeb(response.body)) {
-    hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    hash.update(buffer);
+    bytes += buffer.byteLength;
+    options.onProgress?.('verify existing', bytes, totalBytes);
   }
   return hash.digest('hex') === options.expectedSha256;
 }
@@ -138,20 +166,32 @@ async function publishFile(options: {
   bundleDir: string;
   fetch: typeof globalThis.fetch;
   file: GenericFile;
+  onProgress?: PythonFilePublishProgress;
   timeoutMs: number;
 }): Promise<'published' | 'skipped'> {
   const filePath = safeFile(options.bundleDir, options.file.file);
-  const digest = await sha256(filePath);
+  const digest = await sha256(filePath, options.onProgress);
   if (options.file.expectedSha256 && digest !== options.file.expectedSha256) {
     throw new Error(`bundle sha256 mismatch for ${options.file.file}`);
   }
   const url = genericUrl(options.baseUrl, options.file);
+  const fileSize = (await fs.stat(filePath)).size;
+  let uploadedBytes = 0;
+  async function* uploadBody(): AsyncGenerator<Buffer> {
+    options.onProgress?.('upload', uploadedBytes, fileSize);
+    for await (const chunk of fs.createReadStream(filePath)) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      uploadedBytes += buffer.byteLength;
+      options.onProgress?.('upload', uploadedBytes, fileSize);
+      yield buffer;
+    }
+  }
   const response = await options.fetch(url, {
-    body: fs.createReadStream(filePath),
+    body: Readable.from(uploadBody()),
     duplex: 'half',
     headers: {
       ...authHeaders(options.auth),
-      'Content-Length': String((await fs.stat(filePath)).size),
+      'Content-Length': String(fileSize),
       'Content-Type': 'application/octet-stream',
     },
     method: 'PUT',
@@ -168,6 +208,7 @@ async function publishFile(options: {
         ...(options.auth ? { auth: options.auth } : {}),
         expectedSha256: digest,
         fetch: options.fetch,
+        ...(options.onProgress ? { onProgress: options.onProgress } : {}),
         timeoutMs: options.timeoutMs,
         url,
       })
@@ -260,9 +301,10 @@ export async function publishPythonGenericArtifacts(
   const bundleDir = path.resolve(options.bundleDir);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const dryRun = options.dryRun === true;
+  options.onProgress?.({ current: 0, status: 'start' });
   const index = await readPythonApplicationBundleIndex(bundleDir);
   if (!index) {
-    return {
+    const report: PythonGenericPublishReport = {
       actions: [],
       dryRun,
       enabled: false,
@@ -272,6 +314,8 @@ export async function publishPythonGenericArtifacts(
       published: 0,
       skipped: 0,
     };
+    options.onProgress?.({ current: 0, status: 'done', total: 0 });
+    return report;
   }
   let files: GenericFile[];
   try {
@@ -314,8 +358,20 @@ export async function publishPythonGenericArtifacts(
       report,
       { spaces: 2 }
     );
+    options.onProgress?.({
+      current: 0,
+      detail: action.error ?? 'could not prepare Python application artifacts',
+      status: 'error',
+      total: 0,
+    });
     return report;
   }
+  options.onProgress?.({
+    current: 0,
+    detail: `${String(files.length)} artifacts`,
+    status: 'progress',
+    total: files.length,
+  });
   const actions: PythonGenericPublishAction[] = [];
   if (!dryRun && !options.auth) {
     actions.push(
@@ -330,6 +386,7 @@ export async function publishPythonGenericArtifacts(
     );
   }
   let cursor = 0;
+  let completed = 0;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 4));
   if (actions.length === 0) {
     await Promise.all(
@@ -348,8 +405,23 @@ export async function publishPythonGenericArtifacts(
               status: 'planned',
               version: file.version,
             };
+            completed += 1;
+            options.onProgress?.({
+              current: completed,
+              detail: `planned ${file.filename}`,
+              status: 'progress',
+              total: files.length,
+            });
             continue;
           }
+          const onFileProgress = options.onProgress
+            ? createPythonFilePublishProgress({
+                current: () => completed,
+                filename: file.filename,
+                onProgress: options.onProgress,
+                total: files.length,
+              })
+            : undefined;
           try {
             actions[index] = {
               file: file.file,
@@ -361,6 +433,7 @@ export async function publishPythonGenericArtifacts(
                 bundleDir,
                 fetch: options.fetch ?? globalThis.fetch,
                 file,
+                ...(onFileProgress ? { onProgress: onFileProgress } : {}),
                 timeoutMs: options.timeoutMs ?? 300_000,
               }),
               version: file.version,
@@ -375,9 +448,19 @@ export async function publishPythonGenericArtifacts(
               version: file.version,
             };
           }
+          completed += 1;
+          const action = actions[index];
+          options.onProgress?.({
+            current: completed,
+            detail: `${action.status} ${file.filename}${action.error ? `: ${action.error}` : ''}`,
+            status: 'progress',
+            total: files.length,
+          });
         }
       })
     );
+  } else {
+    completed = actions.length;
   }
   const errors = actions.filter((action) => action.status === 'error');
   const report: PythonGenericPublishReport = {
@@ -400,5 +483,11 @@ export async function publishPythonGenericArtifacts(
     report,
     { spaces: 2 }
   );
+  options.onProgress?.({
+    current: completed,
+    ...(errors.length === 0 ? {} : { detail: `${String(errors.length)} errors` }),
+    status: errors.length === 0 ? 'done' : 'error',
+    total: files.length,
+  });
   return report;
 }

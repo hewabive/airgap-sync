@@ -3,6 +3,11 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import * as fs from '../fs.js';
 import type { PythonSeedFile, PythonSeedManifest } from './bundle.js';
+import {
+  createPythonFilePublishProgress,
+  type PythonFilePublishProgress,
+  type PythonPublishProgressEvent,
+} from './publish-progress.js';
 import { parseWheelFilename } from './wheels.js';
 
 export interface PythonPublishAuth {
@@ -39,6 +44,7 @@ export interface PublishPythonBundleOptions {
   dryRun?: boolean;
   generatedAt?: string;
   giteaBaseUrl: string;
+  onProgress?: (event: PythonPublishProgressEvent) => void;
   owner: string;
   timeoutMs?: number;
 }
@@ -114,7 +120,8 @@ function uploadFields(file: PythonSeedFile): [string, string][] {
 
 async function multipartBody(
   filePath: string,
-  file: PythonSeedFile
+  file: PythonSeedFile,
+  onProgress?: PythonFilePublishProgress
 ): Promise<{ body: Readable; boundary: string; length: number }> {
   const boundary = `airgap-sync-${randomBytes(18).toString('hex')}`;
   const parts = uploadFields(file).map(([name, value]) => fieldPart(boundary, name, value));
@@ -137,8 +144,13 @@ async function multipartBody(
       yield separator;
     }
     yield fileHeader;
+    let uploadedBytes = 0;
+    onProgress?.('upload', uploadedBytes, fileSize);
     for await (const chunk of fs.createReadStream(filePath)) {
-      yield Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      uploadedBytes += buffer.byteLength;
+      onProgress?.('upload', uploadedBytes, fileSize);
+      yield buffer;
     }
     yield separator;
     yield closing;
@@ -164,10 +176,19 @@ function bufferChunk(chunk: unknown): Buffer {
   throw new Error('HTTP or file stream returned an unsupported chunk');
 }
 
-async function localFileHash(filePath: string): Promise<string> {
+async function localFileHash(
+  filePath: string,
+  onProgress?: PythonFilePublishProgress
+): Promise<string> {
   const hash = createHash('sha256');
+  const totalBytes = (await fs.stat(filePath)).size;
+  let bytes = 0;
+  onProgress?.('verify', bytes, totalBytes);
   for await (const chunk of fs.createReadStream(filePath)) {
-    hash.update(bufferChunk(chunk));
+    const buffer = bufferChunk(chunk);
+    hash.update(buffer);
+    bytes += buffer.byteLength;
+    onProgress?.('verify', bytes, totalBytes);
   }
   return hash.digest('hex');
 }
@@ -176,6 +197,7 @@ async function verifyExistingFile(options: {
   auth?: PythonPublishAuth;
   file: PythonSeedFile;
   indexUrl: string;
+  onProgress?: PythonFilePublishProgress;
   timeoutMs: number;
 }): Promise<boolean> {
   const metadata = options.file.coreMetadata;
@@ -191,8 +213,20 @@ async function verifyExistingFile(options: {
     throw new Error(`unable to verify existing Gitea file: HTTP ${String(response.status)}`);
   }
   const hash = createHash('sha256');
+  const contentLengthHeader = response.headers.get('content-length');
+  const contentLength =
+    contentLengthHeader === null ? undefined : Number(contentLengthHeader);
+  const totalBytes =
+    contentLength !== undefined && Number.isFinite(contentLength) && contentLength >= 0
+      ? contentLength
+      : undefined;
+  let bytes = 0;
+  options.onProgress?.('verify existing', bytes, totalBytes);
   for await (const chunk of Readable.fromWeb(response.body)) {
-    hash.update(bufferChunk(chunk));
+    const buffer = bufferChunk(chunk);
+    hash.update(buffer);
+    bytes += buffer.byteLength;
+    options.onProgress?.('verify existing', bytes, totalBytes);
   }
   return hash.digest('hex') === options.file.sha256;
 }
@@ -214,14 +248,15 @@ async function publishFile(options: {
   bundleDir: string;
   file: PythonSeedFile;
   indexUrl: string;
+  onProgress?: PythonFilePublishProgress;
   timeoutMs: number;
   uploadUrl: string;
 }): Promise<'published' | 'skipped'> {
   const filePath = path.join(options.bundleDir, options.file.file);
-  if ((await localFileHash(filePath)) !== options.file.sha256) {
+  if ((await localFileHash(filePath, options.onProgress)) !== options.file.sha256) {
     throw new Error(`bundle sha256 mismatch for ${options.file.file}`);
   }
-  const multipart = await multipartBody(filePath, options.file);
+  const multipart = await multipartBody(filePath, options.file, options.onProgress);
   const response = await fetch(options.uploadUrl, {
     body: multipart.body,
     duplex: 'half',
@@ -259,6 +294,7 @@ export async function publishPythonBundle(
   const files = manifest.packages.flatMap((pkg) =>
     pkg.files.map((file) => ({ file, package: `${pkg.name}@${pkg.version}` }))
   );
+  options.onProgress?.({ current: 0, status: 'start', total: files.length });
   const actions: PythonPublishAction[] = [];
   if (!dryRun && !options.auth) {
     actions.push(
@@ -271,6 +307,7 @@ export async function publishPythonBundle(
     );
   }
   let cursor = 0;
+  let completed = 0;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 4));
   if (actions.length === 0) {
     await Promise.all(
@@ -285,8 +322,23 @@ export async function publishPythonBundle(
               package: entry.package,
               status: 'planned',
             };
+            completed += 1;
+            options.onProgress?.({
+              current: completed,
+              detail: `planned ${entry.file.filename}`,
+              status: 'progress',
+              total: files.length,
+            });
             continue;
           }
+          const onFileProgress = options.onProgress
+            ? createPythonFilePublishProgress({
+                current: () => completed,
+                filename: entry.file.filename,
+                onProgress: options.onProgress,
+                total: files.length,
+              })
+            : undefined;
           try {
             actions[index] = {
               file: entry.file.file,
@@ -296,6 +348,7 @@ export async function publishPythonBundle(
                 bundleDir: options.bundleDir,
                 file: entry.file,
                 indexUrl,
+                ...(onFileProgress ? { onProgress: onFileProgress } : {}),
                 timeoutMs: options.timeoutMs ?? 300_000,
                 uploadUrl,
               }),
@@ -308,12 +361,24 @@ export async function publishPythonBundle(
               status: 'error',
             };
           }
+          completed += 1;
+          const action = actions[index];
+          options.onProgress?.({
+            current: completed,
+            detail: `${action.status} ${entry.file.filename}${
+              action.error ? `: ${action.error}` : ''
+            }`,
+            status: 'progress',
+            total: files.length,
+          });
         }
       })
     );
+  } else {
+    completed = actions.length;
   }
   const errors = actions.filter((action) => action.status === 'error');
-  return {
+  const report: PythonPublishReport = {
     actions,
     dryRun,
     enabled: true,
@@ -327,4 +392,11 @@ export async function publishPythonBundle(
     skipped: actions.filter((action) => action.status === 'skipped').length,
     uploadUrl,
   };
+  options.onProgress?.({
+    current: completed,
+    ...(errors.length === 0 ? {} : { detail: `${String(errors.length)} errors` }),
+    status: errors.length === 0 ? 'done' : 'error',
+    total: files.length,
+  });
+  return report;
 }

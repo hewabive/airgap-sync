@@ -79,11 +79,16 @@ export type ApplyProgressPhase =
   | 'git-config'
   | 'report';
 
-export type ApplyProgressStatus = 'start' | 'done';
+export type ApplyProgressStatus = 'start' | 'progress' | 'done' | 'error';
 
 export interface ApplyProgressEvent {
+  bytes?: number;
+  current?: number;
+  detail?: string;
   phase: ApplyProgressPhase;
   status: ApplyProgressStatus;
+  total?: number;
+  totalBytes?: number;
 }
 
 function emptyGitSourcesManifest(generatedAt: string): GitSourcesManifest {
@@ -188,34 +193,44 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     if (!pythonOwner) {
       throw new Error('Python bundle publishing requires pythonPublishOwner or --python-owner');
     }
-    options.onProgress?.({ phase: 'python-publish', status: 'start' });
     python = await publishPythonBundle(pythonManifest, {
       ...(options.pythonAuth ? { auth: options.pythonAuth } : {}),
       bundleDir,
       dryRun,
       generatedAt,
       giteaBaseUrl: options.giteaBaseUrl,
+      ...(options.onProgress
+        ? {
+            onProgress: (event) => {
+              options.onProgress?.({ ...event, phase: 'python-publish' });
+            },
+          }
+        : {}),
       owner: pythonOwner,
       ...(options.publishConcurrency === undefined
         ? {}
         : { concurrency: options.publishConcurrency }),
     });
     await writePythonPublishReport(bundleDir, python);
-    options.onProgress?.({ phase: 'python-publish', status: 'done' });
   }
 
-  options.onProgress?.({ phase: 'python-application-publish', status: 'start' });
   const pythonApplications = await publishPythonGenericArtifacts({
     ...(options.pythonAuth ? { auth: options.pythonAuth } : {}),
     bundleDir,
     dryRun,
     generatedAt,
     giteaBaseUrl: options.giteaBaseUrl,
+    ...(options.onProgress
+      ? {
+          onProgress: (event) => {
+            options.onProgress?.({ ...event, phase: 'python-application-publish' });
+          },
+        }
+      : {}),
     ...(options.publishConcurrency === undefined
       ? {}
       : { concurrency: options.publishConcurrency }),
   });
-  options.onProgress?.({ phase: 'python-application-publish', status: 'done' });
 
   options.onProgress?.({ phase: 'gitea', status: 'start' });
   const gitea =

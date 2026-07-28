@@ -446,6 +446,10 @@ export type {
   PythonGenericPublishAuth,
   PythonGenericPublishReport,
 } from './core/python/generic-publisher.js';
+export type {
+  PythonPublishProgressEvent,
+  PythonPublishProgressStatus,
+} from './core/python/publish-progress.js';
 
 export type { HttpRegistryClientOptions, RegistryClient } from './core/registry.js';
 export type {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from '../../src/core/fs.js';
 import type { PythonSeedManifest } from '../../src/core/python/bundle.js';
 import { publishPythonBundle } from '../../src/core/python/publisher.js';
+import type { PythonPublishProgressEvent } from '../../src/core/python/publish-progress.js';
 
 let bundleDir: string;
 let server: http.Server | undefined;
@@ -85,6 +86,7 @@ afterEach(async () => {
 describe('publishPythonBundle', () => {
   it('streams a legacy multipart upload with Basic authentication', async () => {
     let received = Buffer.alloc(0);
+    const progress: PythonPublishProgressEvent[] = [];
     const baseUrl = await listen((request, response) => {
       expect(request.url).toBe('/api/packages/public/pypi');
       expect(request.headers.authorization).toBe(
@@ -102,10 +104,27 @@ describe('publishPythonBundle', () => {
       auth: { password: 'token', username: 'publisher' },
       bundleDir,
       giteaBaseUrl: baseUrl,
+      onProgress: (event) => progress.push(event),
       owner: 'public',
     });
 
     expect(report).toMatchObject({ errors: [], published: 1, skipped: 0 });
+    expect(progress[0]).toEqual({ current: 0, status: 'start', total: 1 });
+    expect(progress).toContainEqual({
+      bytes: 0,
+      current: 0,
+      detail: 'upload demo_package-1.0-py3-none-any.whl',
+      status: 'progress',
+      total: 1,
+      totalBytes: wheel.byteLength,
+    });
+    expect(progress).toContainEqual({
+      current: 1,
+      detail: 'published demo_package-1.0-py3-none-any.whl',
+      status: 'progress',
+      total: 1,
+    });
+    expect(progress.at(-1)).toEqual({ current: 1, status: 'done', total: 1 });
     expect(received.includes(wheel)).toBe(true);
     expect(received.toString()).toContain('name="sha256_digest"');
     expect(received.toString()).toContain(hash);

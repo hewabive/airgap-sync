@@ -1118,18 +1118,104 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
   'git-config': 'configure Git rewrites',
   publish: 'publish npm packages',
   'python-publish': 'publish Python wheels',
-  'python-application-publish': 'publish Python application contracts',
+  'python-application-publish': 'publish Python application artifacts',
   report: 'write publish report',
 };
 
-const COLLECT_PROGRESS_HEARTBEAT_MS = 10_000;
+const PROGRESS_HEARTBEAT_MS = 10_000;
 const gitFetchInteractivePromptHint =
   'If SSH asked for a passphrase, type it now and press Enter; the prompt is still active.';
 
 function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
+  const lastEvents = new Map<ApplyProgressPhase, ApplyProgressEvent>();
+  const lastLogged = new Map<ApplyProgressPhase, number>();
+  const lastOutputAt = new Map<ApplyProgressPhase, number>();
+  const heartbeatTimers = new Map<ApplyProgressPhase, ReturnType<typeof setInterval>>();
+
+  function isPythonPublishPhase(phase: ApplyProgressPhase): boolean {
+    return phase === 'python-publish' || phase === 'python-application-publish';
+  }
+
+  function stopHeartbeat(phase: ApplyProgressPhase): void {
+    const timer = heartbeatTimers.get(phase);
+    if (timer) {
+      clearInterval(timer);
+      heartbeatTimers.delete(phase);
+    }
+  }
+
+  function formatState(event: ApplyProgressEvent): string {
+    const current = event.current === undefined ? '...' : String(event.current);
+    const total = event.total === undefined ? '' : `/${String(event.total)}`;
+    const bytes =
+      event.bytes === undefined
+        ? ''
+        : ` bytes=${formatProgressBytes(event.bytes)}${
+            event.totalBytes === undefined ? '' : `/${formatProgressBytes(event.totalBytes)}`
+          }`;
+    const detail = event.detail ? ` ${event.detail}` : '';
+    return `${current}${total}${bytes}${detail}`;
+  }
+
   return (event) => {
     const label = applyPhaseLabels[event.phase];
-    console.error(`[publish] ${label}: ${event.status === 'start' ? 'started' : 'done'}`);
+    lastEvents.set(event.phase, event);
+
+    if (event.status === 'start') {
+      const total = event.total === undefined ? '' : ` (${String(event.total)})`;
+      console.error(`[publish] ${label}: started${total}`);
+      lastOutputAt.set(event.phase, Date.now());
+      stopHeartbeat(event.phase);
+      if (isPythonPublishPhase(event.phase)) {
+        const timer = setInterval(() => {
+          const latest = lastEvents.get(event.phase);
+          if (!latest) {
+            return;
+          }
+          const previousOutputAt = lastOutputAt.get(event.phase) ?? 0;
+          if (Date.now() - previousOutputAt < PROGRESS_HEARTBEAT_MS) {
+            return;
+          }
+          console.error(`[publish] ${label}: still running ${formatState(latest)}`);
+          lastOutputAt.set(event.phase, Date.now());
+        }, PROGRESS_HEARTBEAT_MS);
+        timer.unref();
+        heartbeatTimers.set(event.phase, timer);
+      }
+      return;
+    }
+
+    if (event.status === 'done' || event.status === 'error') {
+      stopHeartbeat(event.phase);
+      const count =
+        event.current === undefined
+          ? ''
+          : event.total === undefined
+            ? ` (${String(event.current)})`
+            : ` (${String(event.current)}/${String(event.total)})`;
+      const detail = event.detail ? ` ${event.detail}` : '';
+      console.error(`[publish] ${label}: ${event.status}${count}${detail}`);
+      lastOutputAt.set(event.phase, Date.now());
+      return;
+    }
+
+    if (event.current === undefined) {
+      return;
+    }
+    const last = lastLogged.get(event.phase) ?? 0;
+    const threshold =
+      event.total && event.total > 0 ? Math.max(1, Math.ceil(event.total / 20)) : 25;
+    const artifactCompleted = /^(?:error|planned|published|skipped) /u.test(event.detail ?? '');
+    const shouldLog =
+      !lastLogged.has(event.phase) ||
+      (artifactCompleted && (event.current === 1 || event.current - last >= threshold)) ||
+      (event.total !== undefined && event.current === event.total);
+    if (!shouldLog) {
+      return;
+    }
+    lastLogged.set(event.phase, event.current);
+    console.error(`[publish] ${label}: ${formatState(event)}`);
+    lastOutputAt.set(event.phase, Date.now());
   };
 }
 
@@ -1215,12 +1301,12 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
           return;
         }
         const previousOutputAt = lastOutputAt.get(key) ?? 0;
-        if (Date.now() - previousOutputAt < COLLECT_PROGRESS_HEARTBEAT_MS) {
+        if (Date.now() - previousOutputAt < PROGRESS_HEARTBEAT_MS) {
           return;
         }
         console.error(formatHeartbeatLine(latest, label, prefix));
         recordOutput(key);
-      }, COLLECT_PROGRESS_HEARTBEAT_MS);
+      }, PROGRESS_HEARTBEAT_MS);
       timer.unref();
       heartbeatTimers.set(key, timer);
       return;
