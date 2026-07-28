@@ -265,4 +265,35 @@ describe('run history', () => {
 
     await expect(fs.pathExists(path.join(historyDir, 'prune-report.json'))).resolves.toBe(false);
   });
+
+  it('allows download history to start from an obsolete Python application bundle', async () => {
+    await fs.writeJson(
+      path.join(bundleDir, 'python/application-index.json'),
+      {
+        applications: [],
+        artifacts: [],
+        createdAt: '2026-05-25T00:00:00.000Z',
+        schemaVersion: 1,
+        summary: { applications: 0, artifacts: 0, totalBytes: 0 },
+      },
+      { spaces: 2 }
+    );
+
+    const before = await captureBundleState(bundleDir);
+
+    expect(before.pythonApplicationIndex).toBeUndefined();
+    expect(before.pythonApplicationDocuments).toEqual([]);
+
+    const historyDir = await writeDownloadRunHistory({
+      before,
+      bundleDir,
+      rangeResolutionPolicy: 'reuse-stable',
+      report: collectReport(bundleDir, '2026-05-25T00:03:00.000Z'),
+      tagResolutionPolicy: 'reuse-stable',
+    });
+
+    await expect(
+      fs.readJson(path.join(historyDir, 'python-application-index.after.json'))
+    ).resolves.toMatchObject({ schemaVersion: 1 });
+  });
 });

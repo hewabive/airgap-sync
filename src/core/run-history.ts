@@ -369,7 +369,7 @@ export async function captureBundleState(bundleDir: string): Promise<BundleState
     readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
     readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
     readPackageFiles(bundleDir),
-    readPythonApplicationBundleIndex(bundleDir),
+    readPythonApplicationBundleIndex(bundleDir, { obsolete: 'ignore' }),
   ]);
   const pythonApplicationDocuments = await readPythonApplicationDocuments(
     bundleDir,
@@ -494,7 +494,9 @@ export async function writeDownloadRunHistory(
   }
 
   await Promise.all(reportCopies);
-  const afterPythonApplicationIndex = await readPythonApplicationBundleIndex(options.bundleDir);
+  const afterPythonApplicationIndex = await readPythonApplicationBundleIndex(options.bundleDir, {
+    obsolete: 'ignore',
+  });
   await Promise.all(
     (afterPythonApplicationIndex
       ? pythonApplicationDocumentPaths(afterPythonApplicationIndex)

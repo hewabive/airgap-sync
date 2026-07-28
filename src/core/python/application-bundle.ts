@@ -1048,9 +1048,10 @@ export async function downloadPythonApplicationPlans(
 }
 
 export async function readPythonApplicationBundleIndex(
-  bundleDir: string
+  bundleDir: string,
+  options: { obsolete?: 'error' | 'ignore' } = {}
 ): Promise<PythonApplicationBundleIndex | undefined> {
-  return readCurrentIndex(path.resolve(bundleDir));
+  return readCurrentIndex(path.resolve(bundleDir), options.obsolete === 'ignore');
 }
 
 function safeBundleRelativePath(value: string): boolean {
