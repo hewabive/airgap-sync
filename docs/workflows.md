@@ -333,8 +333,9 @@ The offline publish step should:
 - push local bare mirrors into Gitea using the provided Gitea token;
 - generate destination-specific install configuration under
   `python/publications/<publicationId>/`;
-- publish every bundled wheel under the resolved PyPI owner through Gitea's PyPI upload
-  API; a 409 is accepted only when the existing file has the same sha256.
+- query Gitea's compact PyPI Simple Index and skip exact version, filename, and SHA-256
+  matches before uploading missing wheels through the PyPI API; a 409 triggers a
+  metadata refresh and is accepted only when the existing file has the same SHA-256.
 - publish application plans, locks, prerequisites, configuration, and optional
   runtime/tool transfer artifacts through Gitea Generic Packages.
 

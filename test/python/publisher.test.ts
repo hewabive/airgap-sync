@@ -58,6 +58,17 @@ async function listen(handler: http.RequestListener): Promise<string> {
   return `http://127.0.0.1:${String(address.port)}`;
 }
 
+function simpleIndex(sha256?: string): string {
+  return [
+    '<!DOCTYPE html>',
+    '<html><body>',
+    `<a href="../../files/demo-package/1.0/demo_package-1.0-py3-none-any.whl${
+      sha256 ? `#sha256=${sha256}` : ''
+    }">demo_package-1.0-py3-none-any.whl</a>`,
+    '</body></html>',
+  ].join('');
+}
+
 beforeEach(async () => {
   bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-python-publish-'));
   await fs.ensureDir(path.join(bundleDir, 'python-packages'));
@@ -88,6 +99,11 @@ describe('publishPythonBundle', () => {
     let received = Buffer.alloc(0);
     const progress: PythonPublishProgressEvent[] = [];
     const baseUrl = await listen((request, response) => {
+      if (request.method === 'GET') {
+        expect(request.url).toBe('/api/packages/public/pypi/simple/demo-package/');
+        response.writeHead(404).end();
+        return;
+      }
       expect(request.url).toBe('/api/packages/public/pypi');
       expect(request.headers.authorization).toBe(
         `Basic ${Buffer.from('publisher:token').toString('base64')}`
@@ -130,8 +146,101 @@ describe('publishPythonBundle', () => {
     expect(received.toString()).toContain(hash);
   });
 
-  it('accepts a 409 only when the existing wheel has the bundled sha256', async () => {
+  it('skips an existing wheel from compact registry metadata without uploading it', async () => {
+    await fs.writeFile(
+      path.join(bundleDir, 'python-packages/demo_package-1.0-py3-none-any.whl'),
+      'locally corrupted but not needed for an existing target'
+    );
+    const requests: { method: string | undefined; url: string | undefined }[] = [];
     const baseUrl = await listen((request, response) => {
+      requests.push({ method: request.method, url: request.url });
+      expect(request.method).toBe('GET');
+      expect(request.url).toBe('/api/packages/public/pypi/simple/demo-package/');
+      response
+        .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        .end(simpleIndex(hash));
+    });
+
+    const report = await publishPythonBundle(manifest(), {
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      owner: 'public',
+    });
+
+    expect(report).toMatchObject({ errors: [], published: 0, skipped: 1 });
+    expect(requests).toEqual([
+      {
+        method: 'GET',
+        url: '/api/packages/public/pypi/simple/demo-package/',
+      },
+    ]);
+  });
+
+  it('rejects an existing wheel when registry metadata has a different sha256', async () => {
+    const requests: { method: string | undefined; url: string | undefined }[] = [];
+    const baseUrl = await listen((request, response) => {
+      requests.push({ method: request.method, url: request.url });
+      response
+        .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        .end(simpleIndex('ab'.repeat(32)));
+    });
+
+    const report = await publishPythonBundle(manifest(), {
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      owner: 'public',
+    });
+
+    expect(report).toMatchObject({ published: 0, skipped: 0 });
+    expect(report.errors[0]?.error).toContain('sha256 differs from the bundle');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe('GET');
+  });
+
+  it('refreshes compact registry metadata after a 409 race', async () => {
+    let metadataRequests = 0;
+    const baseUrl = await listen((request, response) => {
+      if (request.method === 'GET') {
+        expect(request.url).toBe('/api/packages/public/pypi/simple/demo-package/');
+        metadataRequests++;
+        if (metadataRequests === 1) {
+          response.writeHead(404).end();
+        } else {
+          response
+            .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+            .end(simpleIndex(hash));
+        }
+        return;
+      }
+      if (request.method === 'POST') {
+        request.resume();
+        response.writeHead(409).end('already exists');
+        return;
+      }
+      response.writeHead(405).end();
+    });
+
+    const report = await publishPythonBundle(manifest(), {
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      owner: 'public',
+    });
+
+    expect(report).toMatchObject({ errors: [], published: 0, skipped: 1 });
+    expect(metadataRequests).toBe(2);
+  });
+
+  it('downloads an existing wheel only when registry metadata has no sha256', async () => {
+    let metadataRequests = 0;
+    let downloadedExisting = false;
+    const baseUrl = await listen((request, response) => {
+      if (request.url === '/api/packages/public/pypi/simple/demo-package/') {
+        metadataRequests++;
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(simpleIndex());
+        return;
+      }
       if (request.method === 'POST') {
         request.resume();
         response.writeHead(409).end('already exists');
@@ -140,6 +249,7 @@ describe('publishPythonBundle', () => {
       expect(request.url).toBe(
         '/api/packages/public/pypi/files/demo-package/1.0/demo_package-1.0-py3-none-any.whl'
       );
+      downloadedExisting = true;
       response.writeHead(200).end(wheel);
     });
 
@@ -151,6 +261,8 @@ describe('publishPythonBundle', () => {
     });
 
     expect(report).toMatchObject({ errors: [], published: 0, skipped: 1 });
+    expect(metadataRequests).toBe(2);
+    expect(downloadedExisting).toBe(true);
   });
 
   it('plans without credentials or reading wheel files', async () => {

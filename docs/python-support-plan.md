@@ -42,8 +42,10 @@ online
 
 closed network
   python-seed-manifest.json
-    -> multipart POST each file to {giteaUrl}/api/packages/{owner}/pypi
-    -> 409 Conflict accepted only after target sha256 verification
+    -> query compact Gitea Simple Index metadata by package name
+    -> skip exact version/filename/sha256 matches
+    -> multipart POST only missing files to {giteaUrl}/api/packages/{owner}/pypi
+    -> refresh metadata after 409 Conflict and accept only a matching target sha256
     -> python-publish-report.json
     -> generate pip index configuration for consumers
 ```
@@ -256,8 +258,8 @@ Each phase lands with its tests and keeps `npm run check` green.
 ### Phase 5 — Publish
 
 - `publisher.ts`: standards-compatible multipart upload built entirely from the seed
-  manifest, HTTP Basic login/token auth, dry-run mode, verified-idempotent 409 handling,
-  and actionable package-size errors.
+  manifest, HTTP Basic login/token auth, dry-run mode, parallel Simple Index preflight,
+  verified-idempotent 409 handling, and actionable package-size errors.
 - Orchestration in `apply.ts`, `python-publish-report.json`, run history.
 
 ### Phase 6 — Verification and operator UX

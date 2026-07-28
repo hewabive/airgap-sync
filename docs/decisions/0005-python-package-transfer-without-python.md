@@ -37,8 +37,10 @@ Python dependency semantics differ from npm in two ways that matter for collecti
    `{giteaUrl}/api/packages/{owner}/pypi` authenticated with the existing Gitea token.
    All packages are published under one configured public owner so consumers use a
    single index URL without credentials. Upload authentication uses HTTP Basic with the
-   current Gitea login and the existing token. A 409 Conflict is treated as already
-   published only after the target file's sha256 matches the bundle.
+   current Gitea login and the existing token. Before upload, compact Simple Index
+   metadata is queried in parallel and an exact version/filename/SHA-256 match is
+   skipped. A 409 Conflict refreshes that metadata and is treated as already published
+   only after the target file's SHA-256 matches the bundle.
 3. Resolution is lockfile-first:
    - Lockfiles are authoritative. `uv.lock` and standardized `pylock.toml` graphs are
      filtered for each target environment and downloaded without re-resolving their

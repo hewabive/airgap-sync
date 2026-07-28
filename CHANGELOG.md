@@ -32,6 +32,8 @@
   package versions and requirement mappings changed.
 - Added a registry metadata cache for repeated downloads so already-bundled exact
   package versions can skip source-registry metadata lookups.
+- Made repeated Python publication query Gitea's compact Simple Index in parallel and
+  skip exact filename/SHA-256 matches without uploading or downloading wheel bodies.
 - Fixed download Git mirror reporting so changes from earlier fixed-point iterations
   are preserved in the final summary and `git-fetch-report.json`.
 - Fixed bare Git mirror `HEAD` synchronization with the upstream default branch.

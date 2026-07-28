@@ -8,7 +8,12 @@ import {
   type PythonFilePublishProgress,
   type PythonPublishProgressEvent,
 } from './publish-progress.js';
+import { normalizePackageName } from './names.js';
 import { parseWheelFilename } from './wheels.js';
+
+const registryLookupConcurrency = 8;
+const registryLookupTimeoutMs = 30_000;
+const sha256Pattern = /^[a-f0-9]{64}$/iu;
 
 export interface PythonPublishAuth {
   password: string;
@@ -53,6 +58,14 @@ interface MultipartPart {
   body: Buffer;
   header: Buffer;
 }
+
+interface PythonRegistryFile {
+  sha256?: string;
+}
+
+type PythonRegistrySnapshot = Map<string, PythonRegistryFile>;
+
+type RegistryFileStatus = 'matching' | 'mismatch' | 'missing' | 'unverified';
 
 function normalizeBaseUrl(value: string): string {
   const url = new URL(value);
@@ -166,6 +179,200 @@ function authHeader(auth: PythonPublishAuth | undefined): Record<string, string>
     : {};
 }
 
+function registryFileKey(version: string, filename: string): string {
+  return `${version}\0${filename}`;
+}
+
+function decodeHtmlAttribute(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    gt: '>',
+    lt: '<',
+    quot: '"',
+  };
+  return value.replace(
+    /&(?:#(\d+)|#x([a-f0-9]+)|([a-z]+));/giu,
+    (
+      entity,
+      decimal: string | undefined,
+      hexadecimal: string | undefined,
+      named: string | undefined
+    ) => {
+      const codePoint =
+        decimal === undefined
+          ? hexadecimal === undefined
+            ? undefined
+            : Number.parseInt(hexadecimal, 16)
+          : Number.parseInt(decimal, 10);
+      if (codePoint !== undefined) {
+        try {
+          return String.fromCodePoint(codePoint);
+        } catch {
+          return entity;
+        }
+      }
+      return named ? (namedEntities[named.toLowerCase()] ?? entity) : entity;
+    }
+  );
+}
+
+function safeDecodePathSegment(value: string): string | undefined {
+  try {
+    const decoded = decodeURIComponent(value);
+    return !decoded || decoded.includes('/') || decoded.includes('\\') || decoded.includes('\0')
+      ? undefined
+      : decoded;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseRegistrySnapshot(
+  html: string,
+  indexUrl: string,
+  packageName: string,
+  responseUrl: string
+): PythonRegistrySnapshot {
+  const snapshot: PythonRegistrySnapshot = new Map();
+  const filesPath = new URL(`${indexUrl.replace(/\/+$/u, '').replace(/\/simple$/u, '')}/files/`)
+    .pathname;
+  const hrefPattern = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/giu;
+  for (const match of html.matchAll(hrefPattern)) {
+    const rawHref = match[1] ?? match[2];
+    if (!rawHref) {
+      continue;
+    }
+    let fileUrl: URL;
+    try {
+      fileUrl = new URL(decodeHtmlAttribute(rawHref), responseUrl);
+    } catch {
+      continue;
+    }
+    if (
+      (fileUrl.protocol !== 'http:' && fileUrl.protocol !== 'https:') ||
+      !fileUrl.pathname.startsWith(filesPath)
+    ) {
+      continue;
+    }
+    const segments = fileUrl.pathname.slice(filesPath.length).split('/');
+    if (segments.length !== 3) {
+      continue;
+    }
+    const remotePackageName = safeDecodePathSegment(segments[0] ?? '');
+    const version = safeDecodePathSegment(segments[1] ?? '');
+    const filename = safeDecodePathSegment(segments[2] ?? '');
+    if (
+      !remotePackageName ||
+      normalizePackageName(remotePackageName) !== normalizePackageName(packageName) ||
+      !version ||
+      !filename
+    ) {
+      continue;
+    }
+    const fragment = new URLSearchParams(fileUrl.hash.slice(1));
+    const candidate = fragment.get('sha256');
+    const sha256 = candidate && sha256Pattern.test(candidate) ? candidate.toLowerCase() : undefined;
+    const key = registryFileKey(version, filename);
+    const existing = snapshot.get(key);
+    snapshot.set(key, {
+      ...(sha256 && (!existing?.sha256 || existing.sha256 === sha256) ? { sha256 } : {}),
+    });
+  }
+  return snapshot;
+}
+
+async function fetchRegistrySnapshot(options: {
+  auth?: PythonPublishAuth;
+  indexUrl: string;
+  packageName: string;
+  timeoutMs: number;
+}): Promise<PythonRegistrySnapshot | undefined> {
+  const packageUrl = `${options.indexUrl.replace(/\/+$/u, '')}/${encodeURIComponent(
+    normalizePackageName(options.packageName)
+  )}/`;
+  try {
+    const response = await fetch(packageUrl, {
+      headers: {
+        ...authHeader(options.auth),
+        Accept: 'text/html',
+        'Cache-Control': 'no-cache',
+      },
+      signal: AbortSignal.timeout(options.timeoutMs),
+    });
+    if (response.status === 404) {
+      return new Map();
+    }
+    if (!response.ok) {
+      return undefined;
+    }
+    return parseRegistrySnapshot(
+      await response.text(),
+      options.indexUrl,
+      options.packageName,
+      response.url
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function registryFileStatus(
+  snapshot: PythonRegistrySnapshot | undefined,
+  file: PythonSeedFile
+): RegistryFileStatus {
+  if (!snapshot) {
+    return 'unverified';
+  }
+  const remote = snapshot.get(registryFileKey(file.coreMetadata.version, file.filename));
+  if (!remote) {
+    return 'missing';
+  }
+  if (!remote.sha256) {
+    return 'unverified';
+  }
+  return remote.sha256 === file.sha256.toLowerCase() ? 'matching' : 'mismatch';
+}
+
+function registryMismatchError(file: PythonSeedFile): string {
+  return `Gitea already has ${file.filename} for ${normalizePackageName(file.coreMetadata.name)}==${file.coreMetadata.version}, but its sha256 differs from the bundle`;
+}
+
+async function lookupRegistrySnapshots(
+  files: PythonSeedFile[],
+  options: {
+    auth?: PythonPublishAuth;
+    indexUrl: string;
+    timeoutMs: number;
+  }
+): Promise<Map<string, PythonRegistrySnapshot | undefined>> {
+  const packageNames = [
+    ...new Set(files.map((file) => normalizePackageName(file.coreMetadata.name))),
+  ];
+  const snapshots = new Map<string, PythonRegistrySnapshot | undefined>();
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(registryLookupConcurrency, packageNames.length) }, async () => {
+      for (;;) {
+        const packageName = packageNames[cursor++];
+        if (!packageName) {
+          return;
+        }
+        snapshots.set(
+          packageName,
+          await fetchRegistrySnapshot({
+            ...(options.auth ? { auth: options.auth } : {}),
+            indexUrl: options.indexUrl,
+            packageName,
+            timeoutMs: options.timeoutMs,
+          })
+        );
+      }
+    })
+  );
+  return snapshots;
+}
+
 function bufferChunk(chunk: unknown): Buffer {
   if (Buffer.isBuffer(chunk)) {
     return chunk;
@@ -275,6 +482,19 @@ async function publishFile(options: {
   }
   if (response.status === 409) {
     await response.text();
+    const snapshot = await fetchRegistrySnapshot({
+      ...(options.auth ? { auth: options.auth } : {}),
+      indexUrl: options.indexUrl,
+      packageName: options.file.coreMetadata.name,
+      timeoutMs: Math.min(options.timeoutMs, registryLookupTimeoutMs),
+    });
+    const status = registryFileStatus(snapshot, options.file);
+    if (status === 'matching') {
+      return 'skipped';
+    }
+    if (status === 'mismatch') {
+      throw new Error(registryMismatchError(options.file));
+    }
     if (await verifyExistingFile(options)) {
       return 'skipped';
     }
@@ -298,41 +518,75 @@ export async function publishPythonBundle(
   );
   options.onProgress?.({ current: 0, status: 'start', total: files.length });
   const actions: PythonPublishAction[] = [];
-  if (!dryRun && !options.auth) {
-    actions.push(
-      ...files.map((entry) => ({
-        error: 'Python publishing requires a Gitea username and token',
-        file: entry.file.file,
-        package: entry.package,
-        status: 'error' as const,
-      }))
-    );
+  const timeoutMs = options.timeoutMs ?? 300_000;
+  const packageCount = new Set(
+    files.map((entry) => normalizePackageName(entry.file.coreMetadata.name))
+  ).size;
+  if (!dryRun && packageCount > 0) {
+    options.onProgress?.({
+      current: 0,
+      detail: `checking ${String(packageCount)} Python packages`,
+      status: 'progress',
+      total: files.length,
+    });
   }
+  const registrySnapshots = dryRun
+    ? new Map<string, PythonRegistrySnapshot | undefined>()
+    : await lookupRegistrySnapshots(
+        files.map((entry) => entry.file),
+        {
+          ...(options.auth ? { auth: options.auth } : {}),
+          indexUrl,
+          timeoutMs: Math.min(timeoutMs, registryLookupTimeoutMs),
+        }
+      );
   let cursor = 0;
   let completed = 0;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 4));
-  if (actions.length === 0) {
-    await Promise.all(
-      Array.from({ length: Math.min(concurrency, files.length) }, async () => {
-        for (;;) {
-          const index = cursor++;
-          const entry = files[index];
-          if (!entry) return;
-          if (dryRun) {
-            actions[index] = {
-              file: entry.file.file,
-              package: entry.package,
-              status: 'planned',
-            };
-            completed += 1;
-            options.onProgress?.({
-              current: completed,
-              detail: `planned ${entry.file.filename}`,
-              status: 'progress',
-              total: files.length,
-            });
-            continue;
-          }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+      for (;;) {
+        const index = cursor++;
+        const entry = files[index];
+        if (!entry) return;
+        if (dryRun) {
+          actions[index] = {
+            file: entry.file.file,
+            package: entry.package,
+            status: 'planned',
+          };
+          completed += 1;
+          options.onProgress?.({
+            current: completed,
+            detail: `planned ${entry.file.filename}`,
+            status: 'progress',
+            total: files.length,
+          });
+          continue;
+        }
+        const packageName = normalizePackageName(entry.file.coreMetadata.name);
+        const registryStatus = registryFileStatus(registrySnapshots.get(packageName), entry.file);
+        if (registryStatus === 'matching') {
+          actions[index] = {
+            file: entry.file.file,
+            package: entry.package,
+            status: 'skipped',
+          };
+        } else if (registryStatus === 'mismatch') {
+          actions[index] = {
+            error: registryMismatchError(entry.file),
+            file: entry.file.file,
+            package: entry.package,
+            status: 'error',
+          };
+        } else if (!options.auth) {
+          actions[index] = {
+            error: 'Python publishing requires a Gitea username and token',
+            file: entry.file.file,
+            package: entry.package,
+            status: 'error',
+          };
+        } else {
           const onFileProgress = options.onProgress
             ? createPythonFilePublishProgress({
                 current: () => completed,
@@ -346,12 +600,12 @@ export async function publishPythonBundle(
               file: entry.file.file,
               package: entry.package,
               status: await publishFile({
-                ...(options.auth ? { auth: options.auth } : {}),
+                auth: options.auth,
                 bundleDir: options.bundleDir,
                 file: entry.file,
                 indexUrl,
                 ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-                timeoutMs: options.timeoutMs ?? 300_000,
+                timeoutMs,
                 uploadUrl,
               }),
             };
@@ -363,22 +617,20 @@ export async function publishPythonBundle(
               status: 'error',
             };
           }
-          completed += 1;
-          const action = actions[index];
-          options.onProgress?.({
-            current: completed,
-            detail: `${action.status} ${entry.file.filename}${
-              action.error ? `: ${action.error}` : ''
-            }`,
-            status: 'progress',
-            total: files.length,
-          });
         }
-      })
-    );
-  } else {
-    completed = actions.length;
-  }
+        completed += 1;
+        const action = actions[index];
+        options.onProgress?.({
+          current: completed,
+          detail: `${action.status} ${entry.file.filename}${
+            action.error ? `: ${action.error}` : ''
+          }`,
+          status: 'progress',
+          total: files.length,
+        });
+      }
+    })
+  );
   const errors = actions.filter((action) => action.status === 'error');
   const report: PythonPublishReport = {
     actions,
