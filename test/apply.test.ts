@@ -5,6 +5,9 @@ import { applyBundle, type ApplyProgressEvent, type GiteaClient } from '../src/i
 import * as fs from '../src/core/fs.js';
 import type { BundleManifest, DistTagsManifest, GitSourcesManifest } from '../src/types.js';
 import type { GitCommandInvocation } from '../src/core/git-fetch.js';
+import type { PythonApplicationBundleIndex } from '../src/core/python/application-bundle.js';
+import { normalizePlatformCoveragePolicy } from '../src/core/python/coverage-policy.js';
+import { createPythonEnvironmentPlan } from '../src/core/python/environment-plan.js';
 
 let bundleDir: string;
 
@@ -72,6 +75,59 @@ const noopClient: GiteaClient = {
   organizationExists: () => Promise.resolve(false),
   repositoryExists: () => Promise.resolve(false),
 };
+
+async function writePythonApplicationBundle(): Promise<void> {
+  const policy = normalizePlatformCoveragePolicy({
+    id: 'windows',
+    platforms: ['windows-x86_64'],
+  });
+  const plan = createPythonEnvironmentPlan({
+    application: { name: 'demo-python', version: '1.0.0' },
+    coverage: { digest: 'a'.repeat(64), families: [], policy },
+    createdAt: '2026-07-28T00:00:00.000Z',
+    intent: {
+      application: { extras: [], features: {}, name: 'demo-python' },
+      coverage: { policyId: 'windows' },
+      python: { policy: 'auto' },
+      source: { type: 'pypi' },
+      updatePolicy: 'manual',
+    },
+    platforms: [],
+    resolver: { engine: 'uv', policyVersion: 1, version: '0.11.16' },
+    runtimeContract: { platforms: [] },
+    schemaVersion: 2,
+    wheels: [],
+  });
+  const directory = path.join(bundleDir, 'python/applications/demo-python--windows');
+  await fs.writeJson(path.join(directory, 'environment-plan.json'), plan, { spaces: 2 });
+  await fs.writeJson(path.join(directory, 'plan-diff.json'), { schemaVersion: 1 }, { spaces: 2 });
+  await fs.writeJson(
+    path.join(directory, 'prerequisites.json'),
+    { schemaVersion: 1 },
+    { spaces: 2 }
+  );
+  const index: PythonApplicationBundleIndex = {
+    applications: [
+      {
+        application: plan.application,
+        artifactIds: [],
+        branchSizes: [],
+        features: {},
+        locks: [],
+        planDiffPath: 'python/applications/demo-python--windows/plan-diff.json',
+        planId: plan.planId,
+        planPath: 'python/applications/demo-python--windows/environment-plan.json',
+        prerequisiteReportPath: 'python/applications/demo-python--windows/prerequisites.json',
+        targetId: 'demo-python--windows',
+      },
+    ],
+    artifacts: [],
+    createdAt: '2026-07-28T00:00:00.000Z',
+    schemaVersion: 2,
+    summary: { applications: 1, artifacts: 0, totalBytes: 0 },
+  };
+  await fs.writeJson(path.join(bundleDir, 'python/application-index.json'), index, { spaces: 2 });
+}
 
 describe('applyBundle', () => {
   beforeEach(async () => {
@@ -172,6 +228,10 @@ describe('applyBundle', () => {
       indexUrl: 'http://gitea.local/api/packages/public/pypi/simple',
       planned: 1,
     });
+    expect(report.gitea.organizations).toContainEqual({
+      owner: 'public',
+      status: 'planned',
+    });
     expect(report.succeeded).toBe(true);
     expect(await fs.pathExists(path.join(bundleDir, 'python-publish-dry-run-report.json'))).toBe(
       true
@@ -195,6 +255,71 @@ describe('applyBundle', () => {
       status: 'done',
       total: 1,
     });
+  });
+
+  it('resolves and materializes Python application publication during apply', async () => {
+    await writePythonApplicationBundle();
+
+    const report = await applyBundle({
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.gitea.organizations).toContainEqual({
+      owner: 'airgap-packages',
+      status: 'planned',
+    });
+    expect(report.pythonApplications).toMatchObject({
+      errors: [],
+      planned: 6,
+    });
+    expect(report.pythonApplications?.publicationId).toMatch(/^[a-f0-9]{64}$/u);
+    expect(await fs.pathExists(path.join(bundleDir, 'python/publications'))).toBe(false);
+  });
+
+  it('blocks Python uploads when the package organization cannot be provisioned', async () => {
+    await fs.writeJson(
+      path.join(bundleDir, 'seed-manifest.json'),
+      { ...manifest, packages: [] },
+      {
+        spaces: 2,
+      }
+    );
+    await fs.writeJson(
+      path.join(bundleDir, 'dist-tags.json'),
+      { ...distTags, requirements: [], tags: {} },
+      { spaces: 2 }
+    );
+    await writePythonApplicationBundle();
+
+    const report = await applyBundle({
+      bundleDir,
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: {
+        ...noopClient,
+        createOrganization: () => Promise.reject(new Error('organization create failed')),
+      },
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.gitea.organizationErrors).toEqual([
+      expect.objectContaining({
+        error: 'organization create failed',
+        owner: 'airgap-packages',
+      }),
+    ]);
+    expect(report.pythonApplications?.errors).toEqual([
+      expect.objectContaining({
+        error: 'Gitea owner airgap-packages could not be provisioned',
+      }),
+    ]);
+    expect(await fs.pathExists(path.join(bundleDir, 'python/publications'))).toBe(false);
+    expect(report.succeeded).toBe(false);
   });
 
   it('plans Gitea provisioning, mirror push, and optional Git config', async () => {

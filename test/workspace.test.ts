@@ -72,7 +72,6 @@ describe('workspace config', () => {
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
       python: {
-        applicationArtifactOwner: 'python-apps',
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -85,7 +84,6 @@ describe('workspace config', () => {
           },
           visibility: 'public',
         },
-        publishOwner: 'pypi',
         sourceIndex: 'https://pypi.org/simple/',
       },
       schemaVersion: 2,
@@ -266,7 +264,14 @@ describe('workspace config', () => {
             },
           ],
         },
-        publishOwner: 'pypi',
+        publication: {
+          owner: {
+            kind: 'organization',
+            name: 'airgap-packages',
+            strategy: 'fixed-owner',
+          },
+          visibility: 'public',
+        },
         sourceIndex: 'https://packages.example/simple',
       },
       schemaVersion: 2,
@@ -681,7 +686,6 @@ describe('workspace config', () => {
         },
       ],
       python: {
-        applicationArtifactOwner: 'python-apps',
         artifactTransfer: {
           cpython: true,
           uv: true,
@@ -690,7 +694,14 @@ describe('workspace config', () => {
           engine: 'uv',
           version: '0.11.16',
         },
-        publishOwner: 'pypi',
+        publication: {
+          owner: {
+            kind: 'organization',
+            name: 'airgap-packages',
+            strategy: 'fixed-owner',
+          },
+          visibility: 'public',
+        },
         sourceIndex: 'https://pypi.org/simple',
       },
       schemaVersion: 2,
@@ -844,7 +855,6 @@ describe('workspace config', () => {
     ]);
     expect(first.config).toMatchObject({
       python: {
-        applicationArtifactOwner: 'python-apps',
         legacySeed: {
           resolutionMode: 'locked-only',
         },
@@ -856,7 +866,6 @@ describe('workspace config', () => {
           },
           visibility: 'public',
         },
-        publishOwner: 'pypi',
         sourceIndex: 'https://packages.example/simple/',
       },
       schemaVersion: 2,
@@ -896,7 +905,6 @@ describe('workspace config', () => {
       path.join(tempDir, workspaceConfigPythonPublicationBackupFileName)
     );
     expect(first.config.python).toMatchObject({
-      applicationArtifactOwner: 'python-apps',
       publication: {
         owner: {
           kind: 'organization',
@@ -905,7 +913,6 @@ describe('workspace config', () => {
         },
         visibility: 'public',
       },
-      publishOwner: 'pypi',
       sourceIndex: 'https://pypi.org/simple/',
     });
     expect(

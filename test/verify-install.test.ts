@@ -9,7 +9,6 @@ import type { WorkspaceSnapshot } from '../src/core/workspace.js';
 import type { PythonApplicationBundleIndex } from '../src/core/python/application-bundle.js';
 import { normalizePlatformCoveragePolicy } from '../src/core/python/coverage-policy.js';
 import { createPythonEnvironmentPlan } from '../src/core/python/environment-plan.js';
-import type { PythonConsumerContract } from '../src/core/python/consumer-contract.js';
 
 let workspaceDir: string;
 let bundleDir: string;
@@ -391,7 +390,10 @@ describe('verifyInstall', () => {
         },
       ],
       resolver: { engine: 'uv', policyVersion: 1, version: '0.11.16' },
-      schemaVersion: 1,
+      schemaVersion: 2,
+      verification: {
+        healthChecks: [{ args: ['-c', 'import demo'], command: 'python' }],
+      },
       wheels: [],
     });
     const applicationDirectory = path.join(bundleDir, 'python/applications/demo--linux-x64');
@@ -402,40 +404,12 @@ describe('verifyInstall', () => {
     });
     await fs.ensureDir(path.dirname(path.join(bundleDir, lockFile)));
     await fs.writeFile(path.join(bundleDir, lockFile), '# exact lock\n');
-    const contract: PythonConsumerContract = {
-      application: plan.application,
-      configuration: {
-        environmentTemplatePath: 'consumer.env.template',
-        indexUrl: 'http://gitea.local/api/packages/pypi/pypi/simple',
-        pipConfigTemplatePath: 'pip.conf.template',
-      },
-      generatedFromPlanId: plan.planId,
-      installationOwner: 'consumer-infrastructure',
-      platforms: [
-        {
-          healthChecks: [{ args: ['-c', 'import demo'], command: 'python' }],
-          install: { pip: [], uv: [] },
-          lockPath: 'lock/linux-glibc-x86_64--py311.requirements.lock',
-          platformFamilyId: 'linux-glibc-x86_64',
-          pythonMinor: '3.11',
-          requiresPython: '>=3.11,<3.12',
-          verify: [],
-        },
-      ],
-      schemaVersion: 1,
-    };
-    await fs.writeJson(path.join(applicationDirectory, 'consumer-contract.json'), contract, {
-      spaces: 2,
-    });
     const index: PythonApplicationBundleIndex = {
       applications: [
         {
           application: plan.application,
           artifactIds: [],
           branchSizes: [],
-          consumerConfigurationPaths: [],
-          consumerContractPath: 'python/applications/demo--linux-x64/consumer-contract.json',
-          consumerDocumentDigests: {},
           features: {},
           locks: [
             {
@@ -455,7 +429,7 @@ describe('verifyInstall', () => {
       ],
       artifacts: [],
       createdAt: '2026-07-27T00:00:00.000Z',
-      schemaVersion: 1,
+      schemaVersion: 2,
       summary: { applications: 1, artifacts: 0, totalBytes: 0 },
     };
     await fs.writeJson(path.join(bundleDir, 'python/application-index.json'), index, {

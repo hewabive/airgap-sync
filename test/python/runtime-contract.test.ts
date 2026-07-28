@@ -92,7 +92,7 @@ function plan(): PythonEnvironmentPlan {
       policyVersion: 1,
       version: '0.11.16',
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     wheels: [],
   });
 }
@@ -111,8 +111,6 @@ describe('Python runtime contract', () => {
   it('declares external provisioning and machine prerequisites', () => {
     const original = plan();
     const enriched = addPythonRuntimeContract(original, {
-      applicationArtifactOwner: 'python-apps',
-      pythonPackageOwner: 'pypi',
       recipe: {
         application: 'demo-app',
         healthChecks: [{ args: ['-c', 'import demo_app'], command: 'python' }],
@@ -140,10 +138,6 @@ describe('Python runtime contract', () => {
     );
     expect(enriched).not.toHaveProperty('installActions');
     expect(enriched).toMatchObject({
-      publication: {
-        applicationArtifactOwner: 'python-apps',
-        pythonPackageOwner: 'pypi',
-      },
       verification: {
         healthChecks: [{ args: ['-c', 'import demo_app'], command: 'python' }],
       },
@@ -158,9 +152,8 @@ describe('Python runtime contract', () => {
     });
   });
 
-  it('records exact CPython, uv, license, and publication coordinates', () => {
+  it('records exact CPython, uv, and license artifact identities without a destination', () => {
     const enriched = addPythonRuntimeContract(plan(), {
-      applicationArtifactOwner: 'python-apps',
       includeCpython: true,
       includeUv: true,
     });
@@ -171,11 +164,7 @@ describe('Python runtime contract', () => {
         expect.objectContaining({
           kind: 'cpython',
           platforms: ['linux-glibc-x86_64'],
-          publication: {
-            owner: 'python-apps',
-            package: 'cpython-linux-glibc-x86_64',
-            version: '3.11.15',
-          },
+          version: '3.11.15',
         }),
         expect.objectContaining({
           kind: 'uv',
@@ -188,13 +177,14 @@ describe('Python runtime contract', () => {
         }),
       ])
     );
+    expect(enriched.runtimeArtifacts?.every((artifact) => !('publication' in artifact))).toBe(true);
   });
 
-  it('requires a generic package owner before enabling transfer', () => {
-    expect(() =>
+  it('enables transfer without knowing the future Generic Package owner', () => {
+    expect(
       addPythonRuntimeContract(plan(), {
         includeCpython: true,
-      })
-    ).toThrow('requires applicationArtifactOwner');
+      }).runtimeArtifacts
+    ).toHaveLength(2);
   });
 });

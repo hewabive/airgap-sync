@@ -63,7 +63,7 @@ describe('active Python application plan store', () => {
         },
       ],
       resolver: { engine: 'uv', policyVersion: 1, version: '0.11.16' },
-      schemaVersion: 1,
+      schemaVersion: 2,
       wheels: [],
     });
 

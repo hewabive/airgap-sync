@@ -74,18 +74,13 @@ describe('optional Python plan artifact transfer', () => {
             url: 'https://docs.python.org/3/license.html',
           },
           platforms: ['windows-x86_64'],
-          publication: {
-            owner: 'python-apps',
-            package: 'cpython-windows-x86_64',
-            version: '3.11.15',
-          },
           sha256,
           size: content.byteLength,
           sourceUrl: pathToFileURL(sourcePath).toString(),
           version: '3.11.15',
         },
       ],
-      schemaVersion: 1,
+      schemaVersion: 2,
       wheels: [],
     });
     const bundleDir = path.join(tempDir, 'bundle');
@@ -96,14 +91,8 @@ describe('optional Python plan artifact transfer', () => {
       plan,
     });
 
-    expect(manifest?.artifacts[0]).toMatchObject({
-      publication: {
-        owner: 'python-apps',
-        package: 'cpython-windows-x86_64',
-        version: '3.11.15',
-      },
-      status: 'downloaded',
-    });
+    expect(manifest?.artifacts[0]).toMatchObject({ status: 'downloaded' });
+    expect(manifest?.artifacts[0]).not.toHaveProperty('publication');
     expect(await verifyPythonPlanArtifactManifest(bundleDir, manifest!)).toEqual([]);
 
     await fs.writeFile(path.join(bundleDir, manifest!.artifacts[0]!.file), 'corrupt');
@@ -143,17 +132,12 @@ describe('optional Python plan artifact transfer', () => {
             url: 'https://example.test/license',
           },
           platforms: ['windows-x86_64'],
-          publication: {
-            owner: 'python-apps',
-            package: 'uv-windows-x86_64',
-            version: '0.11.16',
-          },
           sha256: 'a'.repeat(64),
           sourceUrl: 'https://example.test/uv.tar.gz',
           version: '0.11.16',
         },
       ],
-      schemaVersion: 1,
+      schemaVersion: 2,
       wheels: [],
     });
 

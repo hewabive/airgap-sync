@@ -53,15 +53,14 @@ export interface PythonConsumerBundleDocuments {
 }
 
 export interface CreatePythonConsumerBundleDocumentsOptions {
-  giteaBaseUrl?: string;
+  genericOwner: string;
+  giteaBaseUrl: string;
+  publicationId: string;
+  pypiOwner: string;
 }
 
-function closedIndexUrl(plan: PythonEnvironmentPlan, giteaBaseUrl: string | undefined): string {
-  if (!plan.publication) {
-    throw new Error('Python environment plan has no publication contract');
-  }
-  const base = giteaBaseUrl?.replace(/\/+$/u, '') ?? '${GITEA_BASE_URL}';
-  const owner = plan.publication.pythonPackageOwner;
+function closedIndexUrl(giteaBaseUrl: string, owner: string): string {
+  const base = giteaBaseUrl.replace(/\/+$/u, '');
   return `${base}/api/packages/${encodeURIComponent(owner)}/pypi/simple`;
 }
 
@@ -111,23 +110,19 @@ export function createPythonRequirementsLock(
   return `${lines.join('\n')}\n`;
 }
 
-function genericPublication(plan: PythonEnvironmentPlan): PythonConsumerContract['publication'] {
-  if (!plan.publication) {
-    return undefined;
-  }
+function genericPublication(
+  plan: PythonEnvironmentPlan,
+  options: CreatePythonConsumerBundleDocumentsOptions
+): NonNullable<PythonConsumerContract['publication']> {
   return {
-    owner: plan.publication.applicationArtifactOwner,
+    owner: options.genericOwner,
     package: `${plan.application.name}-${plan.coverage.policy.id}`,
-    version: `${plan.application.version}+plan.${plan.planId.slice(0, 12)}`,
+    version: `${plan.application.version}+plan.${plan.planId.slice(0, 12)}.pub.${options.publicationId.slice(0, 12)}`,
   };
 }
 
-export function createPythonConsumerBundleDocuments(
-  plan: PythonEnvironmentPlan,
-  options: CreatePythonConsumerBundleDocumentsOptions = {}
-): PythonConsumerBundleDocuments {
-  const indexUrl = closedIndexUrl(plan, options.giteaBaseUrl);
-  const locks = plan.platforms.map<PythonConsumerLock>((platform) => {
+export function createPythonConsumerLocks(plan: PythonEnvironmentPlan): PythonConsumerLock[] {
+  return plan.platforms.map<PythonConsumerLock>((platform) => {
     if (!platform.requirementsLockPath) {
       throw new Error(`Python platform ${platform.platformFamilyId} has no requirements lock path`);
     }
@@ -140,8 +135,16 @@ export function createPythonConsumerBundleDocuments(
       pythonMinor: platform.pythonMinor,
     };
   });
+}
+
+export function createPythonConsumerBundleDocuments(
+  plan: PythonEnvironmentPlan,
+  options: CreatePythonConsumerBundleDocumentsOptions
+): PythonConsumerBundleDocuments {
+  const indexUrl = closedIndexUrl(options.giteaBaseUrl, options.pypiOwner);
+  const locks = createPythonConsumerLocks(plan);
   const healthChecks = plan.verification?.healthChecks ?? [];
-  const publication = genericPublication(plan);
+  const publication = genericPublication(plan, options);
   const contract: PythonConsumerContract = {
     application: plan.application,
     configuration: {
@@ -192,7 +195,7 @@ export function createPythonConsumerBundleDocuments(
         ],
       };
     }),
-    ...(publication ? { publication } : {}),
+    publication,
     schemaVersion: 1,
   };
   return {

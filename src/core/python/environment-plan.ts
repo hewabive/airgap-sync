@@ -47,11 +47,6 @@ export interface PythonPlanTransferArtifact {
     url: string;
   };
   platforms: string[];
-  publication: {
-    owner: string;
-    package: string;
-    version: string;
-  };
   sha256: string;
   size?: number;
   sourceUrl: string;
@@ -91,10 +86,6 @@ export interface PythonEnvironmentPlan {
   platforms: PythonPlatformPlan[];
   preferredPythonMinor?: string;
   presentation?: PythonEnvironmentPlanPresentation;
-  publication?: {
-    applicationArtifactOwner: string;
-    pythonPackageOwner: string;
-  };
   recipe?: PythonEnvironmentPlanRecipe;
   resolver: {
     cutoff?: string;
@@ -104,7 +95,7 @@ export interface PythonEnvironmentPlan {
   };
   runtimeArtifacts?: PythonPlanTransferArtifact[];
   runtimeContract?: PythonRuntimeContract;
-  schemaVersion: 1;
+  schemaVersion: 2;
   verification?: {
     healthChecks: {
       args: string[];
@@ -127,7 +118,6 @@ export function pythonEnvironmentPlanSemanticContent(
     intent: plan.intent,
     platforms: plan.platforms,
     ...(plan.preferredPythonMinor ? { preferredPythonMinor: plan.preferredPythonMinor } : {}),
-    ...(plan.publication ? { publication: plan.publication } : {}),
     ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
     ...(plan.runtimeArtifacts ? { runtimeArtifacts: plan.runtimeArtifacts } : {}),
@@ -145,6 +135,17 @@ export function pythonEnvironmentPlanId(plan: PythonEnvironmentPlanInput): strin
 export function createPythonEnvironmentPlan(
   plan: PythonEnvironmentPlanInput
 ): PythonEnvironmentPlan {
+  if ((plan as { schemaVersion?: unknown }).schemaVersion !== 2) {
+    throw new Error(
+      'Python environment plan schemaVersion 1 is obsolete; replan and download the application'
+    );
+  }
+  if ('publication' in plan) {
+    throw new Error('Python environment plan must not contain publication coordinates');
+  }
+  if (plan.runtimeArtifacts?.some((artifact) => 'publication' in (artifact as object)) === true) {
+    throw new Error('Python runtime artifacts must not contain publication coordinates');
+  }
   const planId = pythonEnvironmentPlanId(plan);
   if (plan.planId !== undefined && plan.planId !== planId) {
     throw new Error(`Python environment plan ID mismatch: expected ${planId}`);

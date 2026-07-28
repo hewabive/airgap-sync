@@ -41,12 +41,8 @@ function plan() {
         status: 'supported',
       },
     ],
-    publication: {
-      applicationArtifactOwner: 'python-apps',
-      pythonPackageOwner: 'pypi',
-    },
     resolver: { engine: 'uv', policyVersion: 1, version: '0.11.16' },
-    schemaVersion: 1,
+    schemaVersion: 2,
     verification: {
       healthChecks: [{ args: ['-c', 'import demo'], command: 'python' }],
     },
@@ -91,7 +87,10 @@ describe('Python consumer contract', () => {
 
   it('generates pip and uv commands that use only the closed index and exact lock', () => {
     const documents = createPythonConsumerBundleDocuments(plan(), {
+      genericOwner: 'python-apps',
       giteaBaseUrl: 'http://gitea.local/',
+      publicationId: 'c'.repeat(64),
+      pypiOwner: 'pypi',
     });
 
     expect(documents.contract).toMatchObject({
@@ -125,12 +124,24 @@ describe('Python consumer contract', () => {
     ]);
   });
 
-  it('rejects plans without publication coordinates', () => {
+  it('resolves different destinations without changing the application plan', () => {
     const value = plan();
-    delete value.publication;
+    const first = createPythonConsumerBundleDocuments(value, {
+      genericOwner: 'first-artifacts',
+      giteaBaseUrl: 'http://first.local',
+      publicationId: 'a'.repeat(64),
+      pypiOwner: 'first-pypi',
+    });
+    const second = createPythonConsumerBundleDocuments(value, {
+      genericOwner: 'second-artifacts',
+      giteaBaseUrl: 'http://second.local',
+      publicationId: 'b'.repeat(64),
+      pypiOwner: 'second-pypi',
+    });
 
-    expect(() => createPythonConsumerBundleDocuments(value)).toThrow(
-      'Python environment plan has no publication contract'
-    );
+    expect(first.contract.generatedFromPlanId).toBe(value.planId);
+    expect(second.contract.generatedFromPlanId).toBe(value.planId);
+    expect(first.contract.configuration.indexUrl).not.toBe(second.contract.configuration.indexUrl);
+    expect(first.contract.publication?.version).not.toBe(second.contract.publication?.version);
   });
 });

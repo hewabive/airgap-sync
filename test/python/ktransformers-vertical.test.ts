@@ -246,12 +246,13 @@ describe('KTransformers vertical slice', () => {
       workDir: '/work',
     });
     const plan = addPythonRuntimeContract(result.plan, {
-      applicationArtifactOwner: 'python-apps',
-      pythonPackageOwner: 'pypi',
       recipe,
     });
     const consumer = createPythonConsumerBundleDocuments(plan, {
+      genericOwner: 'python-apps',
       giteaBaseUrl: 'http://gitea.local:3000',
+      publicationId: 'a'.repeat(64),
+      pypiOwner: 'pypi',
     });
 
     expect(plan.preferredPythonMinor).toBe('3.11');

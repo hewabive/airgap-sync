@@ -73,7 +73,7 @@ function planInput(createdAt: string): PythonEnvironmentPlanInput {
       policyVersion: 1,
       version: '0.11.16',
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     wheels: [],
   };
 }

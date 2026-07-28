@@ -77,10 +77,6 @@ function createPlan(options: {
         status: 'supported',
       },
     ],
-    publication: {
-      applicationArtifactOwner: 'python-apps',
-      pythonPackageOwner: 'pypi',
-    },
     resolver: {
       engine: 'uv',
       policyVersion: 1,
@@ -98,7 +94,7 @@ function createPlan(options: {
         },
       ],
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     wheels: [
       {
         filename: options.filename,
@@ -221,6 +217,25 @@ describe('Python application bundle', () => {
 
   afterEach(async () => {
     await fs.remove(tempDir);
+  });
+
+  it('requires one new download for a schema-v1 application bundle', async () => {
+    const bundleDir = path.join(tempDir, 'bundle');
+    await fs.writeJson(
+      path.join(bundleDir, 'python/application-index.json'),
+      {
+        applications: [],
+        artifacts: [],
+        createdAt: '2026-07-27T00:00:00.000Z',
+        schemaVersion: 1,
+        summary: { applications: 0, artifacts: 0, totalBytes: 0 },
+      },
+      { spaces: 2 }
+    );
+
+    await expect(readPythonApplicationBundleIndex(bundleDir)).rejects.toThrow(
+      'schemaVersion 1 is obsolete; run airgap-sync download again'
+    );
   });
 
   it('deduplicates shared wheels while retaining independent plans and locks', async () => {

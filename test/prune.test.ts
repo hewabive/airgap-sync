@@ -270,7 +270,7 @@ describe('pruneBundle', () => {
           },
         ],
         createdAt: generatedAt,
-        schemaVersion: 1,
+        schemaVersion: 2,
         summary: { applications: 1, artifacts: 1, totalBytes: 4 },
       },
       { spaces: 2 }

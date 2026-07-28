@@ -628,7 +628,7 @@ export async function planPythonApplication(
         policyVersion: (options.plannerPolicy ?? defaultPythonPlannerPolicy).version,
         version: uvToolManifest.version,
       },
-      schemaVersion: 1,
+      schemaVersion: 2,
       wheels: mergePlanWheels(resolved.branches),
     });
     return {

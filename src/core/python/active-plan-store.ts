@@ -65,6 +65,9 @@ async function readOptionalPlan(planPath: string): Promise<PythonEnvironmentPlan
     return undefined;
   }
   const value = await fs.readJson<PythonEnvironmentPlan>(planPath);
+  if ((value as { schemaVersion?: unknown }).schemaVersion === 1) {
+    return undefined;
+  }
   return createPythonEnvironmentPlan(value);
 }
 

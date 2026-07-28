@@ -15,12 +15,10 @@ import { uvToolManifest } from './uv-tool.js';
 import type { BuiltInPlatformFamilyId } from './platform-family.js';
 
 export interface AddPythonRuntimeContractOptions {
-  applicationArtifactOwner?: string;
   includeCpython?: boolean;
   includeUv?: boolean;
   recipe?: PythonApplicationRecipe;
   runtimeCatalog?: ManagedPythonRuntimeCatalog;
-  pythonPackageOwner?: string;
 }
 
 export interface PythonPrerequisiteReport {
@@ -30,18 +28,6 @@ export interface PythonPrerequisiteReport {
   planId: string;
   platforms: PythonRuntimeContract['platforms'];
   schemaVersion: 1;
-}
-
-function artifactPublication(
-  owner: string,
-  packageName: string,
-  version: string
-): PythonPlanTransferArtifact['publication'] {
-  return {
-    owner,
-    package: packageName,
-    version,
-  };
 }
 
 function runtimeContract(
@@ -65,7 +51,6 @@ function runtimeContract(
 
 function cpythonArtifacts(
   plan: PythonEnvironmentPlan,
-  owner: string,
   catalog: ManagedPythonRuntimeCatalog
 ): PythonPlanTransferArtifact[] {
   return plan.platforms.map((platform) => {
@@ -84,11 +69,6 @@ function cpythonArtifacts(
       kind: 'cpython',
       license: catalog.license,
       platforms: [platform.platformFamilyId],
-      publication: artifactPublication(
-        owner,
-        `cpython-${platform.platformFamilyId}`,
-        asset.pythonVersion
-      ),
       sha256: asset.sha256,
       size: asset.size,
       sourceUrl: asset.url,
@@ -108,7 +88,7 @@ function uvAssetKey(platformFamilyId: string): string {
   }
 }
 
-function uvArtifacts(plan: PythonEnvironmentPlan, owner: string): PythonPlanTransferArtifact[] {
+function uvArtifacts(plan: PythonEnvironmentPlan): PythonPlanTransferArtifact[] {
   const platforms = plan.platforms.map((platform) => platform.platformFamilyId);
   const binaries = platforms.map((platformFamilyId) => {
     const asset = uvToolManifest.assets[uvAssetKey(platformFamilyId)]!;
@@ -120,7 +100,6 @@ function uvArtifacts(plan: PythonEnvironmentPlan, owner: string): PythonPlanTran
         url: uvToolManifest.licenseFiles[0]!.url,
       },
       platforms: [platformFamilyId],
-      publication: artifactPublication(owner, `uv-${platformFamilyId}`, uvToolManifest.version),
       sha256: asset.sha256,
       size: asset.size,
       sourceUrl: asset.url,
@@ -135,7 +114,6 @@ function uvArtifacts(plan: PythonEnvironmentPlan, owner: string): PythonPlanTran
       url: licenseFile.url,
     },
     platforms: [...platforms],
-    publication: artifactPublication(owner, 'uv-license', uvToolManifest.version),
     sha256: licenseFile.sha256,
     sourceUrl: licenseFile.url,
     version: uvToolManifest.version,
@@ -147,16 +125,11 @@ export function addPythonRuntimeContract(
   plan: PythonEnvironmentPlan,
   options: AddPythonRuntimeContractOptions = {}
 ): PythonEnvironmentPlan {
-  const includeArtifacts = options.includeCpython === true || options.includeUv === true;
-  if (includeArtifacts && !options.applicationArtifactOwner) {
-    throw new Error('Optional Python runtime transfer requires applicationArtifactOwner');
-  }
-  const owner = options.applicationArtifactOwner;
   const runtimeArtifacts: PythonPlanTransferArtifact[] = [
-    ...(options.includeCpython && owner
-      ? cpythonArtifacts(plan, owner, options.runtimeCatalog ?? managedPythonRuntimeCatalog)
+    ...(options.includeCpython
+      ? cpythonArtifacts(plan, options.runtimeCatalog ?? managedPythonRuntimeCatalog)
       : []),
-    ...(options.includeUv && owner ? uvArtifacts(plan, owner) : []),
+    ...(options.includeUv ? uvArtifacts(plan) : []),
   ].sort((left, right) => left.filename.localeCompare(right.filename));
   const input: PythonEnvironmentPlanInput = {
     application: plan.application,
@@ -166,15 +139,6 @@ export function addPythonRuntimeContract(
     platforms: plan.platforms,
     ...(plan.preferredPythonMinor ? { preferredPythonMinor: plan.preferredPythonMinor } : {}),
     ...(plan.presentation ? { presentation: plan.presentation } : {}),
-    ...(plan.publication ? { publication: plan.publication } : {}),
-    ...(!plan.publication && options.applicationArtifactOwner && options.pythonPackageOwner
-      ? {
-          publication: {
-            applicationArtifactOwner: options.applicationArtifactOwner,
-            pythonPackageOwner: options.pythonPackageOwner,
-          },
-        }
-      : {}),
     ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
     ...(runtimeArtifacts.length > 0 ? { runtimeArtifacts } : {}),

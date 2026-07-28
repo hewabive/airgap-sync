@@ -300,13 +300,11 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
       gitOwnerStrategy: 'preserve',
       output: defaultWorkspaceOutputDir,
       python: {
-        applicationArtifactOwner: defaultWorkspacePythonApplicationArtifactOwner,
         planner: {
           engine: 'uv',
           version: workspacePythonPlannerVersion,
         },
         publication: defaultPythonPublicationProfile(),
-        publishOwner: defaultWorkspacePythonPublishOwner,
         sourceIndex: defaultWorkspacePythonSourceIndex,
       },
       schemaVersion: 2,
@@ -787,9 +785,6 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
       cpython: value.artifactTransfer.cpython === true,
       uv: value.artifactTransfer.uv === true,
     };
-    if ((artifactTransfer.cpython || artifactTransfer.uv) && !applicationArtifactOwner) {
-      throw new Error('python.artifactTransfer requires python.applicationArtifactOwner');
-    }
   }
   const planner = isRecord(value.planner) ? value.planner : {};
   if (planner.engine !== undefined && planner.engine !== 'uv') {
@@ -992,8 +987,14 @@ export function workspaceLegacyPythonSettings(
   config: WorkspaceConfig
 ): WorkspaceLegacyPythonSettings {
   if (config.schemaVersion === 2) {
+    const publicationOwner =
+      config.python?.publication?.pypiOwner ?? config.python?.publication?.owner;
     return {
-      ...(config.python?.publishOwner ? { publishOwner: config.python.publishOwner } : {}),
+      ...(publicationOwner?.strategy === 'fixed-owner'
+        ? { publishOwner: publicationOwner.name }
+        : config.python?.publishOwner
+          ? { publishOwner: config.python.publishOwner }
+          : {}),
       resolutionMode: config.python?.legacySeed?.resolutionMode ?? 'locked-only',
       ...(config.python?.sourceIndex ? { sourceIndex: config.python.sourceIndex } : {}),
       ...(config.python?.legacySeed?.targetEnvironments
@@ -1033,9 +1034,6 @@ export function withWorkspaceLegacyPythonSettings(
   return {
     ...config,
     python: {
-      ...(config.python?.applicationArtifactOwner
-        ? { applicationArtifactOwner: config.python.applicationArtifactOwner }
-        : {}),
       ...(config.python?.artifactTransfer
         ? { artifactTransfer: config.python.artifactTransfer }
         : {}),
@@ -1047,8 +1045,18 @@ export function withWorkspaceLegacyPythonSettings(
         engine: 'uv',
         version: workspacePythonPlannerVersion,
       },
-      ...(config.python?.publication ? { publication: config.python.publication } : {}),
-      ...(settings.publishOwner ? { publishOwner: settings.publishOwner } : {}),
+      publication: {
+        ...(config.python?.publication ?? defaultPythonPublicationProfile()),
+        ...(settings.publishOwner
+          ? {
+              pypiOwner: {
+                kind: 'organization' as const,
+                name: settings.publishOwner,
+                strategy: 'fixed-owner' as const,
+              },
+            }
+          : {}),
+      },
       sourceIndex:
         settings.sourceIndex ?? config.python?.sourceIndex ?? defaultWorkspacePythonSourceIndex,
     },
@@ -1191,8 +1199,13 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   return normalizeWorkspaceConfig({
     ...normalized,
     python: {
-      ...normalized.python,
+      ...(normalized.python?.artifactTransfer
+        ? { artifactTransfer: normalized.python.artifactTransfer }
+        : {}),
+      ...(normalized.python?.legacySeed ? { legacySeed: normalized.python.legacySeed } : {}),
+      planner: normalized.python!.planner,
       publication: defaultPythonPublicationProfile(),
+      sourceIndex: normalized.python!.sourceIndex,
     },
   });
 }
@@ -1210,6 +1223,7 @@ const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
     id: '0002-python-application-publication',
     isApplied: (config) =>
       config.schemaVersion !== 2 ||
+      Boolean(config.python?.publication) ||
       Boolean(config.python?.applicationArtifactOwner && config.python.publishOwner),
   },
   {

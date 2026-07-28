@@ -19,7 +19,6 @@ import {
   readPythonApplicationBundleIndex,
   type PythonApplicationBundleEntry,
 } from './python/application-bundle.js';
-import type { PythonConsumerContract } from './python/consumer-contract.js';
 import type { PythonEnvironmentPlan, PythonPlatformPlan } from './python/environment-plan.js';
 import { compareVersions, versionSatisfies } from './python/pep440.js';
 
@@ -421,9 +420,6 @@ async function verifyPythonApplicationInstall(options: {
   const plan = await fs.readJson<PythonEnvironmentPlan>(
     path.join(options.bundleDir, options.application.planPath)
   );
-  const contract = await fs.readJson<PythonConsumerContract>(
-    path.join(options.bundleDir, options.application.consumerContractPath)
-  );
   const platformFamilyId = localPythonPlatformFamilyId();
   const branch = plan.platforms.find(
     (candidate) => candidate.platformFamilyId === platformFamilyId
@@ -549,12 +545,10 @@ async function verifyPythonApplicationInstall(options: {
   }
   const checks = [
     { args: ['-m', 'pip', 'check'], command: python },
-    ...(contract.platforms
-      .find((candidate) => candidate.platformFamilyId === branch.platformFamilyId)
-      ?.healthChecks.map((check) => ({
-        args: check.args,
-        command: /^(?:python|python3)$/u.test(check.command) ? python : check.command,
-      })) ?? []),
+    ...(plan.verification?.healthChecks ?? []).map((check) => ({
+      args: check.args,
+      command: /^(?:python|python3)$/u.test(check.command) ? python : check.command,
+    })),
   ];
   const binDirectory = path.dirname(python);
   const verificationEnv = {
@@ -703,8 +697,13 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
   const pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
+  const configuredPythonOwner =
+    snapshot.python?.publication?.pypiOwner ?? snapshot.python?.publication?.owner;
   const pythonOwner =
-    options.pythonOwner ?? snapshot.python?.publishOwner ?? snapshot.pythonPublishOwner;
+    options.pythonOwner ??
+    (configuredPythonOwner?.strategy === 'fixed-owner' ? configuredPythonOwner.name : undefined) ??
+    snapshot.python?.publishOwner ??
+    snapshot.pythonPublishOwner;
   const pythonIndexUrl =
     (pythonManifest || pythonApplicationIndex) && pythonOwner
       ? `${normalizeBaseUrl(options.giteaBaseUrl)}/api/packages/${encodeURIComponent(pythonOwner)}/pypi/simple`

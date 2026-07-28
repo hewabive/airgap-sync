@@ -1,14 +1,12 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { semanticDigest } from '../canonical-json.js';
 import * as fs from '../fs.js';
 import {
   readPythonApplicationBundleIndex,
   type PythonApplicationBundleIndex,
 } from './application-bundle.js';
-import type { PythonConsumerContract } from './consumer-contract.js';
-import type { PythonEnvironmentPlan } from './environment-plan.js';
+import type { PythonPublicationManifest } from './publication-manifest.js';
 import {
   createPythonFilePublishProgress,
   type PythonFilePublishProgress,
@@ -36,6 +34,7 @@ export interface PythonGenericPublishReport {
   errors: PythonGenericPublishAction[];
   generatedAt: string;
   planned: number;
+  publicationId?: string;
   published: number;
   skipped: number;
 }
@@ -49,6 +48,7 @@ export interface PublishPythonGenericArtifactsOptions {
   generatedAt?: string;
   giteaBaseUrl: string;
   onProgress?: (event: PythonPublishProgressEvent) => void;
+  publicationManifest: PythonPublicationManifest;
   timeoutMs?: number;
 }
 
@@ -94,10 +94,7 @@ function safeFile(bundleDir: string, relativeFile: string): string {
   return absolute;
 }
 
-async function sha256(
-  filePath: string,
-  onProgress?: PythonFilePublishProgress
-): Promise<string> {
+async function sha256(filePath: string, onProgress?: PythonFilePublishProgress): Promise<string> {
   const hash = createHash('sha256');
   const totalBytes = (await fs.stat(filePath)).size;
   let bytes = 0;
@@ -143,8 +140,7 @@ async function remoteMatches(options: {
   }
   const hash = createHash('sha256');
   const contentLengthHeader = response.headers.get('content-length');
-  const contentLength =
-    contentLengthHeader === null ? undefined : Number(contentLengthHeader);
+  const contentLength = contentLengthHeader === null ? undefined : Number(contentLengthHeader);
   const totalBytes =
     contentLength !== undefined && Number.isFinite(contentLength) && contentLength >= 0
       ? contentLength
@@ -223,76 +219,65 @@ async function publishFile(options: {
   );
 }
 
-async function applicationFiles(
-  bundleDir: string,
+function applicationFiles(
   index: PythonApplicationBundleIndex,
-  giteaBaseUrl: string
-): Promise<GenericFile[]> {
+  manifest: PythonPublicationManifest
+): GenericFile[] {
   const files: GenericFile[] = [];
   for (const application of index.applications) {
-    const contractPath = safeFile(bundleDir, application.consumerContractPath);
-    const contractContent = await fs.readFile(contractPath, 'utf8');
-    const contract = await fs.readJson<PythonConsumerContract>(contractPath);
-    if (
-      contract.generatedFromPlanId !== application.planId ||
-      semanticDigest(contractContent) !==
-        application.consumerDocumentDigests[application.consumerContractPath]
-    ) {
-      throw new Error(`Python consumer contract does not match ${application.targetId}`);
-    }
-    const plan = await fs.readJson<PythonEnvironmentPlan>(
-      safeFile(bundleDir, application.planPath)
+    const publication = manifest.applications.find(
+      (candidate) => candidate.targetId === application.targetId
     );
-    if (!plan.publication) {
-      throw new Error(`Python application ${application.targetId} has no publication contract`);
-    }
-    const expectedIndexUrl = `${normalizeBaseUrl(giteaBaseUrl)}/api/packages/${encodeURIComponent(plan.publication.pythonPackageOwner)}/pypi/simple`;
-    if (contract.configuration.indexUrl !== expectedIndexUrl) {
+    if (publication?.planId !== application.planId) {
       throw new Error(
-        `Python application ${application.targetId} consumer index ${contract.configuration.indexUrl} does not match publish destination ${expectedIndexUrl}; update workspace giteaUrl and download the immutable plan again`
-      );
-    }
-    if (!contract.publication) {
-      throw new Error(
-        `Python application ${application.targetId} has no generic publication coordinates; replan with python.applicationArtifactOwner configured`
+        `Python publication manifest does not match application ${application.targetId}`
       );
     }
     const documentPaths = [
       application.planPath,
       application.planDiffPath,
       application.prerequisiteReportPath,
-      application.consumerContractPath,
-      ...application.consumerConfigurationPaths,
+      ...publication.documents.map((document) => document.file),
       ...application.locks.map((lock) => lock.file),
     ];
     for (const file of [...new Set(documentPaths)]) {
       files.push({
         file,
         filename: validateCoordinate(path.posix.basename(file), 'filename'),
-        owner: validateCoordinate(contract.publication.owner, 'owner'),
-        package: validateCoordinate(contract.publication.package, 'package name'),
-        version: validateCoordinate(contract.publication.version, 'version'),
+        owner: validateCoordinate(publication.genericPackage.owner, 'owner'),
+        package: validateCoordinate(publication.genericPackage.package, 'package name'),
+        version: validateCoordinate(publication.genericPackage.version, 'version'),
       });
     }
   }
   return files;
 }
 
-function optionalArtifactFiles(index: PythonApplicationBundleIndex): GenericFile[] {
-  return index.artifacts.flatMap((artifact) =>
-    artifact.kind === 'wheel' || !artifact.publication
-      ? []
-      : [
-          {
-            expectedSha256: artifact.sha256,
-            file: artifact.file,
-            filename: validateCoordinate(artifact.filename, 'filename'),
-            owner: validateCoordinate(artifact.publication.owner, 'owner'),
-            package: validateCoordinate(artifact.publication.package, 'package name'),
-            version: validateCoordinate(artifact.publication.version, 'version'),
-          },
-        ]
-  );
+function optionalArtifactFiles(
+  index: PythonApplicationBundleIndex,
+  manifest: PythonPublicationManifest
+): GenericFile[] {
+  return index.artifacts.flatMap((artifact) => {
+    if (artifact.kind === 'wheel') {
+      return [];
+    }
+    const publication = manifest.artifacts.find(
+      (candidate) => candidate.artifactId === artifact.id
+    );
+    if (publication?.file !== artifact.file) {
+      throw new Error(`Python publication manifest does not match artifact ${artifact.id}`);
+    }
+    return [
+      {
+        expectedSha256: artifact.sha256,
+        file: artifact.file,
+        filename: validateCoordinate(artifact.filename, 'filename'),
+        owner: validateCoordinate(publication.genericPackage.owner, 'owner'),
+        package: validateCoordinate(publication.genericPackage.package, 'package name'),
+        version: validateCoordinate(publication.genericPackage.version, 'version'),
+      },
+    ];
+  });
 }
 
 export async function publishPythonGenericArtifacts(
@@ -311,6 +296,7 @@ export async function publishPythonGenericArtifacts(
       errors: [],
       generatedAt,
       planned: 0,
+      publicationId: options.publicationManifest.publicationId,
       published: 0,
       skipped: 0,
     };
@@ -320,8 +306,8 @@ export async function publishPythonGenericArtifacts(
   let files: GenericFile[];
   try {
     files = [
-      ...(await applicationFiles(bundleDir, index, options.giteaBaseUrl)),
-      ...optionalArtifactFiles(index),
+      ...applicationFiles(index, options.publicationManifest),
+      ...optionalArtifactFiles(index, options.publicationManifest),
     ].sort(
       (left, right) =>
         left.owner.localeCompare(right.owner) ||
@@ -345,6 +331,7 @@ export async function publishPythonGenericArtifacts(
       errors: [action],
       generatedAt,
       planned: 0,
+      publicationId: options.publicationManifest.publicationId,
       published: 0,
       skipped: 0,
     };
@@ -470,6 +457,7 @@ export async function publishPythonGenericArtifacts(
     errors,
     generatedAt,
     planned: actions.filter((action) => action.status === 'planned').length,
+    publicationId: options.publicationManifest.publicationId,
     published: actions.filter((action) => action.status === 'published').length,
     skipped: actions.filter((action) => action.status === 'skipped').length,
   };

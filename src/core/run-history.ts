@@ -133,8 +133,6 @@ function pythonApplicationDocumentPaths(index: PythonApplicationBundleIndex): st
       application.planPath,
       application.planDiffPath,
       application.prerequisiteReportPath,
-      application.consumerContractPath,
-      ...application.consumerConfigurationPaths,
       ...application.locks.map((lock) => lock.file),
     ]) {
       if (

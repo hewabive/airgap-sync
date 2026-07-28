@@ -29,6 +29,7 @@ import {
   createWorkspacePythonRootWheels,
   createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
+  defaultPythonPublicationProfile,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
@@ -127,6 +128,7 @@ import type {
   PythonEnvironmentPlanInput,
   PythonApplicationRecipe,
   PythonEnvironmentPlan,
+  PythonPublicationProfile,
   WorkspacePythonApplicationTarget,
 } from './index.js';
 import {
@@ -756,12 +758,16 @@ function formatPythonTargetEnvironmentList(
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
   const legacyPython = workspaceLegacyPythonSettings(config);
   const defaultCoverage = config.coveragePolicies?.[0];
+  const publication = config.python?.publication ?? defaultPythonPublicationProfile();
+  const publicationOwner = (owner: PythonPublicationProfile['owner']): string =>
+    owner.strategy === 'authenticated-user' ? 'authenticated user' : `${owner.kind} ${owner.name}`;
   const pythonLines =
     config.schemaVersion === 2
       ? [
           `Python application source: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`,
-          `Python wheel owner: ${config.python?.publishOwner ?? defaultPythonPublishOwner}`,
-          `Python application owner: ${config.python?.applicationArtifactOwner ?? 'python-apps'}`,
+          `Python publication owner: ${publicationOwner(publication.owner)}`,
+          `Python PyPI owner: ${publicationOwner(publication.pypiOwner ?? publication.owner)}`,
+          `Python Generic owner: ${publicationOwner(publication.genericOwner ?? publication.owner)}`,
           `Default application coverage: ${
             defaultCoverage
               ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
@@ -906,11 +912,7 @@ function formatPythonApplicationPlan(plan: PythonEnvironmentPlan): string {
     ...platformLines,
     `Locked packages: ${String(packageCount)}`,
     `Wheel variants: ${String(plan.wheels.length)}`,
-    ...(plan.publication
-      ? [
-          `Publication: PyPI owner ${plan.publication.pythonPackageOwner}; application artifacts owner ${plan.publication.applicationArtifactOwner}`,
-        ]
-      : []),
+    'Publication: resolved on the closed-network side',
     'Status: ready to download',
   ].join('\n');
 }
@@ -1022,16 +1024,8 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
         workDir: path.join(plannerWorkDir, String(index)),
       });
       const plan = addPythonRuntimeContract(result.plan, {
-        ...(options.config.python?.applicationArtifactOwner
-          ? {
-              applicationArtifactOwner: options.config.python.applicationArtifactOwner,
-            }
-          : {}),
         includeCpython: options.config.python?.artifactTransfer?.cpython === true,
         includeUv: options.config.python?.artifactTransfer?.uv === true,
-        ...(options.config.python?.publishOwner
-          ? { pythonPackageOwner: options.config.python.publishOwner }
-          : {}),
         ...(recipe ? { recipe } : {}),
       });
       const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
@@ -1755,6 +1749,7 @@ async function resolvePublishWorkspaceDefaults(options: {
   gitea: string;
   publicRepositories?: WorkspacePromptBoolean;
   pythonOwner?: string;
+  pythonPublicationProfile: PythonPublicationProfile;
   gitOwnerStrategy: GitOwnerStrategy;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
@@ -1802,7 +1797,8 @@ async function resolvePublishWorkspaceDefaults(options: {
     throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
   }
   const pythonOwner =
-    options.pythonOwner ?? config?.python?.publishOwner ?? config?.pythonPublishOwner;
+    options.pythonOwner ?? (config?.schemaVersion === 1 ? config.pythonPublishOwner : undefined);
+  const pythonPublicationProfile = config?.python?.publication ?? defaultPythonPublicationProfile();
   const gitOwnerStrategy = options.gitOwnerStrategy ?? config?.gitOwnerStrategy ?? 'preserve';
   const gitPublishOwner = options.gitPublishOwner ?? config?.gitPublishOwner;
   const gitPublishOwnerKind = options.gitPublishOwnerKind ?? config?.gitPublishOwnerKind;
@@ -1821,6 +1817,7 @@ async function resolvePublishWorkspaceDefaults(options: {
     ...(gitPublishOwnerKind ? { gitPublishOwnerKind } : {}),
     ...(config ? { publicRepositories: config.defaults.publish.publicRepositories } : {}),
     ...(pythonOwner ? { pythonOwner } : {}),
+    pythonPublicationProfile,
     registry,
     workspaceDir,
   };
@@ -2197,22 +2194,46 @@ async function configurePythonApplicationPublication(
       config.python?.sourceIndex ?? defaultPythonSourceIndex
     )
   );
-  const publishOwner = (
-    await ask(
-      rl,
-      'Gitea PyPI owner for wheels',
-      config.python?.publishOwner ?? defaultPythonPublishOwner
-    )
+  const currentPublication = config.python?.publication ?? defaultPythonPublicationProfile();
+  const currentOwner =
+    currentPublication.owner.strategy === 'fixed-owner'
+      ? currentPublication.owner.name
+      : 'airgap-packages';
+  const owner = (
+    await ask(rl, 'Managed Gitea organization for Python packages', currentOwner)
   ).trim();
-  const applicationArtifactOwner = (
-    await ask(
-      rl,
-      'Gitea Generic Packages owner for application contracts',
-      config.python?.applicationArtifactOwner ?? 'python-apps'
-    )
-  ).trim();
-  if (!publishOwner || !applicationArtifactOwner) {
-    throw new Error('Both Python publication owners are required');
+  if (!owner) {
+    throw new Error('Python publication organization is required');
+  }
+  const splitOwners = await askYesNo(
+    rl,
+    'Use separate organizations for PyPI and Generic Packages?',
+    Boolean(currentPublication.pypiOwner ?? currentPublication.genericOwner)
+  );
+  const pypiOwner = splitOwners
+    ? (
+        await ask(
+          rl,
+          'Gitea organization for PyPI wheels',
+          currentPublication.pypiOwner?.strategy === 'fixed-owner'
+            ? currentPublication.pypiOwner.name
+            : owner
+        )
+      ).trim()
+    : undefined;
+  const genericOwner = splitOwners
+    ? (
+        await ask(
+          rl,
+          'Gitea organization for Generic Packages',
+          currentPublication.genericOwner?.strategy === 'fixed-owner'
+            ? currentPublication.genericOwner.name
+            : owner
+        )
+      ).trim()
+    : undefined;
+  if (splitOwners && (!pypiOwner || !genericOwner)) {
+    throw new Error('Both Python publication organizations are required');
   }
   const nextConfig: WorkspaceConfig = {
     ...config,
@@ -2221,12 +2242,36 @@ async function configurePythonApplicationPublication(
         ? { artifactTransfer: config.python.artifactTransfer }
         : {}),
       ...(config.python?.legacySeed ? { legacySeed: config.python.legacySeed } : {}),
-      applicationArtifactOwner,
       planner: config.python?.planner ?? {
         engine: 'uv',
         version: workspacePythonPlannerVersion,
       },
-      publishOwner,
+      publication: {
+        ...(genericOwner
+          ? {
+              genericOwner: {
+                kind: 'organization' as const,
+                name: genericOwner,
+                strategy: 'fixed-owner' as const,
+              },
+            }
+          : {}),
+        owner: {
+          kind: 'organization',
+          name: owner,
+          strategy: 'fixed-owner',
+        },
+        ...(pypiOwner
+          ? {
+              pypiOwner: {
+                kind: 'organization' as const,
+                name: pypiOwner,
+                strategy: 'fixed-owner' as const,
+              },
+            }
+          : {}),
+        visibility: 'public',
+      },
       sourceIndex,
     },
   };
@@ -2624,11 +2669,31 @@ async function configurePythonSettingsMenu(
       return;
     }
     const defaultCoverage = config.coveragePolicies?.[0];
+    const publication = config.python?.publication ?? defaultPythonPublicationProfile();
+    const publicationOwner =
+      publication.owner.strategy === 'authenticated-user'
+        ? 'authenticated user'
+        : `${publication.owner.kind} ${publication.owner.name}`;
     console.log('\nPython applications');
     console.log(`Source index: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`);
-    console.log(`Wheel owner: ${config.python?.publishOwner ?? defaultPythonPublishOwner}`);
+    console.log(`Publication owner: ${publicationOwner}`);
     console.log(
-      `Application artifacts owner: ${config.python?.applicationArtifactOwner ?? 'python-apps'}`
+      `PyPI override: ${
+        publication.pypiOwner?.strategy === 'fixed-owner'
+          ? publication.pypiOwner.name
+          : publication.pypiOwner
+            ? 'authenticated user'
+            : '(shared)'
+      }`
+    );
+    console.log(
+      `Generic override: ${
+        publication.genericOwner?.strategy === 'fixed-owner'
+          ? publication.genericOwner.name
+          : publication.genericOwner
+            ? 'authenticated user'
+            : '(shared)'
+      }`
     );
     console.log(
       `Default coverage: ${
@@ -4569,6 +4634,7 @@ addNpmPublishOptions(
         private: !publicRepositories,
         ...(login && token ? { pythonAuth: { password: token, username: login } } : {}),
         ...(resolved.pythonOwner ? { pythonOwner: resolved.pythonOwner } : {}),
+        pythonPublicationProfile: resolved.pythonPublicationProfile,
         publishConcurrency: options.publishConcurrency,
         registryUrl: resolved.registry,
         skipExisting: options.skipExisting !== false,

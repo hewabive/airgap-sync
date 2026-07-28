@@ -52,14 +52,6 @@ function activePlanFor(
     createdAt: '2026-07-27T00:00:00.000Z',
     intent: resolved.intent,
     platforms: [],
-    ...(workspaceConfig.python?.applicationArtifactOwner && workspaceConfig.python.publishOwner
-      ? {
-          publication: {
-            applicationArtifactOwner: workspaceConfig.python.applicationArtifactOwner,
-            pythonPackageOwner: workspaceConfig.python.publishOwner,
-          },
-        }
-      : {}),
     ...(recipe
       ? {
           recipe: {
@@ -74,7 +66,7 @@ function activePlanFor(
       policyVersion: 1,
       version: '0.11.16',
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     wheels: [],
   });
   return { plan } as ActivePythonApplicationPlan;
@@ -158,27 +150,28 @@ describe('workspace Python application plan preflight', () => {
     expect(result.targets[0]?.activePlan.plan.intent.application.extras).toEqual(['server']);
   });
 
-  it('replans when publication coordinates changed', async () => {
+  it('keeps a current plan when publication coordinates changed', async () => {
     const target = config.targets[0] as WorkspacePythonApplicationTarget;
-    let stored = activePlanFor(config, target);
-    config.python!.applicationArtifactOwner = 'other-python-apps';
+    const stored = activePlanFor(config, target);
+    config.python!.publication = {
+      owner: {
+        kind: 'organization',
+        name: 'other-python-packages',
+        strategy: 'fixed-owner',
+      },
+      visibility: 'public',
+    };
 
     const result = await ensureWorkspacePythonApplicationPlans({
       config,
-      planTargets: () => {
-        stored = activePlanFor(config, target);
-        return Promise.resolve();
-      },
+      planTargets: () => Promise.reject(new Error('planner must not run')),
       readActivePlan: () => Promise.resolve(stored),
       readRecipe: () => Promise.resolve(undefined),
       workspaceDir,
     });
 
-    expect(result.plannedTargetIndexes).toEqual([1]);
-    expect(result.targets[0]?.activePlan.plan.publication).toEqual({
-      applicationArtifactOwner: 'other-python-apps',
-      pythonPackageOwner: 'pypi',
-    });
+    expect(result.plannedTargetIndexes).toEqual([]);
+    expect(result.targets[0]?.activePlan.plan.planId).toBe(stored.plan.planId);
   });
 
   it('replans when a workspace recipe changed', async () => {

@@ -34,10 +34,9 @@ import { parseCoreMetadata } from './metadata.js';
 import { readWheelMetadata } from './wheel-metadata.js';
 import type { PythonTargetEnvironmentConfig } from './environments.js';
 import {
-  createPythonConsumerBundleDocuments,
+  createPythonConsumerLocks,
   createPythonRequirementsLock,
-  type PythonConsumerBundleDocuments,
-  type PythonConsumerContract,
+  type PythonConsumerLock,
 } from './consumer-contract.js';
 
 export type PythonApplicationArtifactKind = 'cpython' | 'license' | 'uv' | 'wheel';
@@ -53,7 +52,6 @@ export interface PythonApplicationBundleArtifact {
   id: string;
   kind: PythonApplicationArtifactKind;
   package?: string;
-  publication?: PythonPlanTransferArtifact['publication'];
   references: PythonApplicationArtifactReference[];
   sha256: string;
   size: number;
@@ -82,9 +80,6 @@ export interface PythonApplicationBundleEntry {
     platformFamilyId: string;
     pythonMinor: string;
   }[];
-  consumerContractPath: string;
-  consumerConfigurationPaths: string[];
-  consumerDocumentDigests: Record<string, string>;
   planId: string;
   planDiffPath: string;
   planPath: string;
@@ -96,7 +91,7 @@ export interface PythonApplicationBundleIndex {
   applications: PythonApplicationBundleEntry[];
   artifacts: PythonApplicationBundleArtifact[];
   createdAt: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
   summary: {
     applications: number;
     artifacts: number;
@@ -151,7 +146,6 @@ export interface DownloadPythonApplicationPlansOptions {
   dryRun?: boolean;
   fetch?: typeof globalThis.fetch;
   generatedAt?: string;
-  giteaBaseUrl?: string;
   onProgress?: (event: PythonApplicationDownloadProgressEvent) => void;
   partial?: boolean;
   targets: {
@@ -379,7 +373,6 @@ function collectPlannedArtifacts(
           filename: runtime.filename,
           id,
           kind: runtime.kind,
-          publication: runtime.publication,
           sha256: runtime.sha256,
           ...(runtime.size !== undefined ? { expectedSize: runtime.size } : {}),
           sourceUrl: runtime.sourceUrl,
@@ -393,7 +386,8 @@ function collectPlannedArtifacts(
 }
 
 async function readCurrentIndex(
-  bundleDir: string
+  bundleDir: string,
+  replaceLegacy = false
 ): Promise<PythonApplicationBundleIndex | undefined> {
   const filePath = path.join(bundleDir, pythonApplicationIndexPath);
   if (!(await fs.pathExists(filePath))) {
@@ -401,10 +395,18 @@ async function readCurrentIndex(
   }
   const index = await fs.readJson<PythonApplicationBundleIndex>(filePath);
   if (
-    (index as { schemaVersion?: unknown }).schemaVersion !== 1 ||
+    (index as { schemaVersion?: unknown }).schemaVersion !== 2 ||
     !Array.isArray(index.applications) ||
     !Array.isArray(index.artifacts)
   ) {
+    if ((index as { schemaVersion?: unknown }).schemaVersion === 1) {
+      if (replaceLegacy) {
+        return undefined;
+      }
+      throw new Error(
+        'Python application bundle schemaVersion 1 is obsolete; run airgap-sync download again'
+      );
+    }
     throw new Error(`${pythonApplicationIndexPath} is invalid`);
   }
   return index;
@@ -413,7 +415,7 @@ async function readCurrentIndex(
 function lockEntries(
   targetId: string,
   activePlan: ActivePythonApplicationPlan,
-  consumer: PythonConsumerBundleDocuments
+  locks: PythonConsumerLock[]
 ): PythonApplicationBundleEntry['locks'] {
   const applicationDirectory = pythonApplicationPlanDirectory(targetId);
   return [
@@ -424,7 +426,7 @@ function lockEntries(
       platformFamilyId: evidence.platformFamilyId,
       pythonMinor: evidence.pythonMinor,
     })),
-    ...consumer.locks.map((lock) => ({
+    ...locks.map((lock) => ({
       digest: lock.digest,
       file: path.posix.join(applicationDirectory, lock.path),
       format: 'requirements' as const,
@@ -519,7 +521,7 @@ function mergeIndex(
     applications,
     artifacts,
     createdAt,
-    schemaVersion: 1,
+    schemaVersion: 2,
     summary: {
       applications: applications.length,
       artifacts: artifacts.length,
@@ -715,7 +717,7 @@ async function writeApplicationDocuments(
   bundleDir: string,
   targetId: string,
   activePlan: ActivePythonApplicationPlan,
-  consumer: PythonConsumerBundleDocuments,
+  locks: PythonConsumerLock[],
   generatedAt: string
 ): Promise<void> {
   const directory = path.join(bundleDir, pythonApplicationPlanDirectory(targetId));
@@ -739,10 +741,7 @@ async function writeApplicationDocuments(
       fs.writeJsonAtomic(path.join(temporaryDirectory, 'plan-diff.json'), activePlan.diff, {
         spaces: 2,
       }),
-      ...consumer.documents.map((document) =>
-        fs.writeFileAtomic(path.join(temporaryDirectory, document.path), document.content)
-      ),
-      ...consumer.locks.map((lock) =>
+      ...locks.map((lock) =>
         fs.writeFileAtomic(path.join(temporaryDirectory, lock.path), lock.content)
       ),
       ...activePlan.manifest.evidence.map(async (evidence) => {
@@ -849,11 +848,7 @@ export async function downloadPythonApplicationPlans(
       } else if (
         !dryRun &&
         (await reuseLegacyWheel(bundleDir, planned.artifact, targetPath, (bytes) => {
-          reportBytes(
-            `reuse ${planned.artifact.filename}`,
-            bytes,
-            planned.artifact.expectedSize
-          );
+          reportBytes(`reuse ${planned.artifact.filename}`, bytes, planned.artifact.expectedSize);
         }))
       ) {
         status = 'reused';
@@ -917,15 +912,10 @@ export async function downloadPythonApplicationPlans(
     status: 'progress',
     total: totalArtifacts,
   });
-  const consumerDocuments = new Map<string, PythonConsumerBundleDocuments>();
+  const consumerLocks = new Map<string, PythonConsumerLock[]>();
   for (const { activePlan, targetId } of options.targets) {
     try {
-      consumerDocuments.set(
-        targetId,
-        createPythonConsumerBundleDocuments(activePlan.plan, {
-          ...(options.giteaBaseUrl ? { giteaBaseUrl: options.giteaBaseUrl } : {}),
-        })
-      );
+      consumerLocks.set(targetId, createPythonConsumerLocks(activePlan.plan));
     } catch (error) {
       actions.push({
         error: `could not generate consumer locks: ${(error as Error).message}`,
@@ -938,8 +928,8 @@ export async function downloadPythonApplicationPlans(
   }
   const entries = options.targets
     .map(({ activePlan, targetId }) => {
-      const consumer = consumerDocuments.get(targetId);
-      if (!consumer) {
+      const locks = consumerLocks.get(targetId);
+      if (!locks) {
         return undefined;
       }
       const artifactIds = [...downloadedArtifacts.values()]
@@ -952,26 +942,8 @@ export async function downloadPythonApplicationPlans(
         application: activePlan.plan.application,
         artifactIds,
         branchSizes: branchSizes(targetId, activePlan.plan, downloadedArtifacts, incrementalIds),
-        consumerConfigurationPaths: consumer.documents
-          .filter((document) => document.path !== 'consumer-contract.json')
-          .map((document) =>
-            path.posix.join(pythonApplicationPlanDirectory(targetId), document.path)
-          )
-          .sort(),
-        consumerContractPath: path.posix.join(
-          pythonApplicationPlanDirectory(targetId),
-          'consumer-contract.json'
-        ),
-        consumerDocumentDigests: Object.fromEntries(
-          consumer.documents
-            .map((document): [string, string] => [
-              path.posix.join(pythonApplicationPlanDirectory(targetId), document.path),
-              semanticDigest(document.content),
-            ])
-            .sort(([left], [right]) => left.localeCompare(right))
-        ),
         features: activePlan.plan.intent.application.features,
-        locks: lockEntries(targetId, activePlan, consumer),
+        locks: lockEntries(targetId, activePlan, locks),
         planId: activePlan.plan.planId,
         planDiffPath: path.posix.join(pythonApplicationPlanDirectory(targetId), 'plan-diff.json'),
         planPath: pythonApplicationPlanPath(targetId),
@@ -987,7 +959,7 @@ export async function downloadPythonApplicationPlans(
   let index: PythonApplicationBundleIndex | undefined;
   let compatibilityManifest: PythonSeedManifest | undefined;
   if (!dryRun && actions.every((action) => action.status !== 'error')) {
-    const current = await readCurrentIndex(bundleDir);
+    const current = await readCurrentIndex(bundleDir, true);
     index = mergeIndex(
       current,
       entries,
@@ -1046,7 +1018,7 @@ export async function downloadPythonApplicationPlans(
             bundleDir,
             targetId,
             activePlan,
-            consumerDocuments.get(targetId)!,
+            consumerLocks.get(targetId)!,
             generatedAt
           )
         )
@@ -1180,48 +1152,6 @@ export async function verifyPythonApplicationBundle(
           `Python plan diff is missing or invalid (${application.planDiffPath}): ${(error as Error).message}`
         );
       }
-    }
-    for (const documentPath of [
-      application.consumerContractPath,
-      ...application.consumerConfigurationPaths,
-    ]) {
-      if (!safeBundleRelativePath(documentPath)) {
-        errors.push(`Unsafe Python consumer document path: ${documentPath}`);
-        continue;
-      }
-      if (!(await fs.pathExists(path.join(resolvedBundleDir, documentPath)))) {
-        errors.push(`Python consumer document is missing: ${documentPath}`);
-        continue;
-      }
-      const content = await fs.readFile(path.join(resolvedBundleDir, documentPath), 'utf8');
-      if (semanticDigest(content) !== application.consumerDocumentDigests[documentPath]) {
-        errors.push(`Python consumer document digest mismatch: ${documentPath}`);
-      }
-    }
-    try {
-      const contract = await fs.readJson<PythonConsumerContract>(
-        path.join(resolvedBundleDir, application.consumerContractPath)
-      );
-      if (
-        contract.generatedFromPlanId !== application.planId ||
-        (contract as { installationOwner?: unknown }).installationOwner !==
-          'consumer-infrastructure' ||
-        /(?:^|[/.])pypi\.org(?:[/:]|$)/iu.test(contract.configuration.indexUrl) ||
-        contract.platforms.some(
-          (platform) =>
-            !platform.install.pip.includes('--no-deps') ||
-            !platform.install.pip.includes('--require-hashes') ||
-            !platform.install.pip.includes('--only-binary=:all:')
-        )
-      ) {
-        errors.push(
-          `Python consumer contract is incomplete or unsafe: ${application.consumerContractPath}`
-        );
-      }
-    } catch (error) {
-      errors.push(
-        `Python consumer contract is invalid (${application.consumerContractPath}): ${(error as Error).message}`
-      );
     }
   }
   const artifactIds = new Set(index.artifacts.map((artifact) => artifact.id));

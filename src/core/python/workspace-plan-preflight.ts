@@ -4,7 +4,6 @@ import {
   type ActivePythonApplicationPlan,
 } from './active-plan-store.js';
 import type { PythonApplicationRecipe } from './application-recipe.js';
-import type { PythonEnvironmentPlan } from './environment-plan.js';
 import { pythonApplicationTargetId } from './application-paths.js';
 import { platformCoveragePolicyDigest } from './coverage-policy.js';
 import {
@@ -45,7 +44,6 @@ export interface EnsureWorkspacePythonApplicationPlansResult {
 }
 
 interface ExpectedWorkspacePythonApplicationPlan {
-  publication?: PythonEnvironmentPlan['publication'];
   recipeDigest?: string;
   resolved: ReturnType<typeof resolveWorkspacePythonApplication>;
   targetId: string;
@@ -56,16 +54,11 @@ function planIsCurrent(
   activePlan: ActivePythonApplicationPlan,
   expected: ExpectedWorkspacePythonApplicationPlan
 ): boolean {
-  const publicationIsCurrent =
-    activePlan.plan.publication && expected.publication
-      ? semanticDigest(activePlan.plan.publication) === semanticDigest(expected.publication)
-      : activePlan.plan.publication === expected.publication;
   return (
     semanticDigest(activePlan.plan.intent) === semanticDigest(expected.resolved.intent) &&
     activePlan.plan.coverage.digest ===
       platformCoveragePolicyDigest(expected.resolved.coveragePolicy) &&
-    activePlan.plan.recipe?.digest === expected.recipeDigest &&
-    publicationIsCurrent
+    activePlan.plan.recipe?.digest === expected.recipeDigest
   );
 }
 
@@ -81,17 +74,7 @@ async function expectedPlans(
     }
     const resolved = resolveWorkspacePythonApplication(options.config, target);
     const recipe = await options.readRecipe(target);
-    const applicationArtifactOwner = options.config.python?.applicationArtifactOwner;
-    const pythonPackageOwner = options.config.python?.publishOwner;
     expected.push({
-      ...(applicationArtifactOwner && pythonPackageOwner
-        ? {
-            publication: {
-              applicationArtifactOwner,
-              pythonPackageOwner,
-            },
-          }
-        : {}),
       ...(recipe ? { recipeDigest: semanticDigest(recipe) } : {}),
       resolved,
       targetId: pythonApplicationTargetId(

@@ -53,6 +53,7 @@ export interface ProvisionGiteaRepositoriesOptions {
   giteaBaseUrl: string;
   generatedAt?: string;
   manifest: GitSourcesManifest;
+  ownerRequirements?: GiteaOwnerRequirement[];
   private?: boolean;
 }
 
@@ -432,7 +433,10 @@ export async function provisionGiteaRepositories(
       client: options.client,
       dryRun: true,
       ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
-      requirements: gitOwnerRequirements(options.manifest, isPrivate ? 'private' : 'public'),
+      requirements: [
+        ...gitOwnerRequirements(options.manifest, isPrivate ? 'private' : 'public'),
+        ...(options.ownerRequirements ?? []),
+      ],
     });
     for (const ownerAction of ownerReport.actions) {
       const action: GiteaOrganizationActionResult = {
@@ -494,7 +498,10 @@ export async function provisionGiteaRepositories(
     const ownerReport = await provisionGiteaOwners({
       client: options.client,
       ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
-      requirements: gitOwnerRequirements(missingManifest, isPrivate ? 'private' : 'public'),
+      requirements: [
+        ...gitOwnerRequirements(missingManifest, isPrivate ? 'private' : 'public'),
+        ...(options.ownerRequirements ?? []),
+      ],
     });
     for (const ownerAction of ownerReport.actions) {
       if (organizationActionsByOwner.has(ownerAction.name)) {

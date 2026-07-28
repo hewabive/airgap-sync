@@ -51,8 +51,13 @@ export {
 export { comparePythonEnvironmentPlans, formatPythonPlanDiff } from './core/python/plan-diff.js';
 export {
   createPythonConsumerBundleDocuments,
+  createPythonConsumerLocks,
   createPythonRequirementsLock,
 } from './core/python/consumer-contract.js';
+export {
+  materializePythonPublication,
+  pythonPublicationManifestPath,
+} from './core/python/publication-manifest.js';
 export { publishPythonGenericArtifacts } from './core/python/generic-publisher.js';
 export {
   createPythonEnvironmentPlan,
@@ -148,6 +153,14 @@ export type {
   PythonPublicationProfile,
   ResolvedPythonPublicationProfile,
 } from './core/python/publication-targets.js';
+export type {
+  MaterializePythonPublicationOptions,
+  PythonGenericPackageCoordinates,
+  PythonPublicationApplication,
+  PythonPublicationArtifact,
+  PythonPublicationDocument,
+  PythonPublicationManifest,
+} from './core/python/publication-manifest.js';
 export { configureGitRewrites } from './core/git-config.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
