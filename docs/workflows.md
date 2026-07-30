@@ -72,9 +72,9 @@ set to `true`, `false`, or `ask` under `defaults.download`, `defaults.publish`, 
 `defaults.download.tagResolutionPolicy` controls whether stable tag dependencies can
 reuse previous bundle mappings. `defaults.download.rangeResolutionPolicy` controls
 whether stable transitive semver range dependencies can reuse previous resolved
-versions. `defaults.download.prune` controls whether stale local bundle tarballs and Git
-mirrors are removed after a successful download. When the interactive menu initializes a
-workspace, it asks for these defaults during setup.
+versions. `defaults.download.prune` controls whether stale local npm, Python, and Git
+bundle objects are removed after a successful download. When the interactive menu
+initializes a workspace, it asks for these defaults during setup.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
@@ -265,11 +265,13 @@ airgap-sync bundle prune ./airgap-bundle --dry-run
 airgap-sync bundle prune ./airgap-bundle
 ```
 
-Pruning removes tarballs, wheels, obsolete application plans, and Git mirrors that are
-no longer referenced by the latest successful bundle documents. Shared Python
-artifacts remain while any application references them. Prune refuses to run after an
-incomplete or partial target download and does not delete anything from Verdaccio or
-Gitea.
+Pruning removes tarballs, wheels, obsolete application plans, empty content-addressed
+artifact directories, and Git mirrors that are no longer referenced by the latest
+successful bundle documents. A full download writes an empty Python application index
+when the last application target is removed, so those former plans and artifacts become
+eligible for pruning. Shared Python artifacts remain while any application references
+them. Prune refuses to run after an incomplete or partial target download and does not
+delete anything from Verdaccio or Gitea.
 
 Before transfer, inspect the bundle:
 

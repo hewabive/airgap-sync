@@ -304,9 +304,17 @@ airgap-sync bundle prune ./airgap-bundle
 ```
 
 Removes stale objects from the local transfer bundle: unreferenced `packages/*.tgz`,
-`python-packages/*.whl`, and `git-mirrors/**/*.git`. The command refuses to run unless
-the latest `collect-report.json` records a successful non-dry-run fixed-point download.
-Dry runs write `prune-dry-run-report.json`; real runs write `prune-report.json`.
+`python-packages/*.whl`, Python application artifacts under `python/artifacts/`,
+obsolete application plans under `python/applications/`, and
+`git-mirrors/**/*.git`. Empty content-addressed Python artifact directories are removed
+too. The command refuses to run unless the latest `collect-report.json` records a
+successful non-dry-run fixed-point download. Dry runs write
+`prune-dry-run-report.json`; real runs write `prune-report.json`.
+
+A full workspace `download` synchronizes the Python application index even when no
+Python application targets remain. Therefore a subsequent prune can remove the last
+application plan and its artifacts. A partial `download --target` preserves
+unselected application references and never triggers automatic pruning.
 
 ## fetch
 

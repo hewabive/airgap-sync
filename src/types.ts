@@ -486,6 +486,7 @@ export type BundlePruneObjectType =
   | 'git-mirror'
   | 'npm-package'
   | 'python-application-artifact'
+  | 'python-application-artifact-directory'
   | 'python-application-plan'
   | 'python-package';
 export type BundlePruneActionStatus = 'planned' | 'removed' | 'error';
@@ -512,6 +513,7 @@ export interface BundlePruneReport {
   generatedAt: string;
   gitMirrors: BundlePruneObjectSummary;
   npmPackages: BundlePruneObjectSummary;
+  pythonApplicationArtifactDirectories?: BundlePruneObjectSummary;
   pythonApplicationArtifacts?: BundlePruneObjectSummary;
   pythonApplicationPlans?: BundlePruneObjectSummary;
   pythonPackages: BundlePruneObjectSummary;

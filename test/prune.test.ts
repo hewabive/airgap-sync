@@ -290,14 +290,87 @@ describe('pruneBundle', () => {
       stale: 1,
       total: 2,
     });
+    expect(report.pythonApplicationArtifactDirectories).toEqual({
+      kept: 1,
+      removed: 1,
+      stale: 1,
+      total: 2,
+    });
     await expect(fs.pathExists(path.join(bundleDir, keptArtifact))).resolves.toBe(true);
     await expect(fs.pathExists(path.join(bundleDir, staleArtifact))).resolves.toBe(false);
+    await expect(fs.pathExists(path.join(bundleDir, path.dirname(staleArtifact)))).resolves.toBe(
+      false
+    );
     await expect(
       fs.pathExists(path.join(bundleDir, 'python/applications/kept--linux'))
     ).resolves.toBe(true);
     await expect(
       fs.pathExists(path.join(bundleDir, 'python/applications/stale--linux'))
     ).resolves.toBe(false);
+  });
+
+  it('removes orphaned Python application objects even when the application index is absent', async () => {
+    await writeBundleFiles();
+    const orphanedArtifact =
+      'python/artifacts/wheels/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/orphaned.whl';
+    const orphanedArtifactDirectory = path.dirname(orphanedArtifact);
+    const orphanedPlan = 'python/applications/orphaned--linux';
+    await fs.ensureDir(path.join(bundleDir, orphanedArtifactDirectory));
+    await fs.writeFile(path.join(bundleDir, orphanedArtifact), 'orphaned');
+    await fs.ensureDir(path.join(bundleDir, orphanedPlan));
+    await fs.writeFile(path.join(bundleDir, orphanedPlan, 'environment-plan.json'), '{}');
+
+    const dryRun = await pruneBundle({ bundleDir, dryRun: true });
+
+    expect(dryRun.pythonApplicationArtifacts).toEqual({
+      kept: 0,
+      removed: 0,
+      stale: 1,
+      total: 1,
+    });
+    expect(dryRun.pythonApplicationArtifactDirectories).toEqual({
+      kept: 0,
+      removed: 0,
+      stale: 1,
+      total: 1,
+    });
+    expect(dryRun.pythonApplicationPlans).toEqual({
+      kept: 0,
+      removed: 0,
+      stale: 1,
+      total: 1,
+    });
+    expect(dryRun.actions.filter((action) => action.type.startsWith('python-application'))).toEqual(
+      [
+        expect.objectContaining({
+          path: orphanedArtifact,
+          status: 'planned',
+          type: 'python-application-artifact',
+        }),
+        expect.objectContaining({
+          path: orphanedArtifactDirectory,
+          status: 'planned',
+          type: 'python-application-artifact-directory',
+        }),
+        expect.objectContaining({
+          path: orphanedPlan,
+          status: 'planned',
+          type: 'python-application-plan',
+        }),
+      ]
+    );
+    await expect(fs.pathExists(path.join(bundleDir, orphanedArtifact))).resolves.toBe(true);
+
+    const report = await pruneBundle({ bundleDir });
+
+    expect(report.pythonApplicationArtifacts?.removed).toBe(1);
+    expect(report.pythonApplicationArtifactDirectories?.removed).toBe(1);
+    expect(report.pythonApplicationPlans?.removed).toBe(1);
+    await expect(fs.pathExists(path.join(bundleDir, orphanedArtifact))).resolves.toBe(false);
+    await expect(fs.pathExists(path.join(bundleDir, orphanedArtifactDirectory))).resolves.toBe(
+      false
+    );
+    await expect(fs.pathExists(path.join(bundleDir, orphanedPlan))).resolves.toBe(false);
   });
 
   it('refuses to prune after an incomplete download', async () => {

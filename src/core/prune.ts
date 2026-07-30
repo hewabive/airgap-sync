@@ -17,6 +17,8 @@ import {
 import {
   pythonApplicationPlanDirectory,
   pythonApplicationsDirectory,
+  pythonOptionalArtifactsDirectory,
+  pythonWheelArtifactsDirectory,
 } from './python/application-paths.js';
 
 export interface PruneBundleOptions {
@@ -143,6 +145,27 @@ async function listPythonApplicationPlanDirectories(bundleDir: string): Promise<
   }
 }
 
+async function listPythonApplicationArtifactDirectories(bundleDir: string): Promise<string[]> {
+  const directories: string[] = [];
+  for (const artifactRoot of [pythonOptionalArtifactsDirectory, pythonWheelArtifactsDirectory]) {
+    try {
+      const entries = await fs.readdir(path.join(bundleDir, artifactRoot), {
+        withFileTypes: true,
+      });
+      directories.push(
+        ...entries
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => path.posix.join(artifactRoot, entry.name))
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+  return directories.sort();
+}
+
 async function listGitMirrorDirs(bundleDir: string): Promise<string[]> {
   const mirrorsDir = path.join(bundleDir, 'git-mirrors');
   const found: string[] = [];
@@ -263,12 +286,10 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   );
   const packageFiles = await listPackageFiles(bundleDir);
   const pythonPackageFiles = pythonManifest ? await listPythonPackageFiles(bundleDir) : [];
-  const pythonApplicationArtifactFiles = pythonApplicationIndex
-    ? await listFilesRecursively(bundleDir, 'python/artifacts')
-    : [];
-  const pythonApplicationPlanDirectories = pythonApplicationIndex
-    ? await listPythonApplicationPlanDirectories(bundleDir)
-    : [];
+  const pythonApplicationArtifactFiles = await listFilesRecursively(bundleDir, 'python/artifacts');
+  const pythonApplicationArtifactDirectories =
+    await listPythonApplicationArtifactDirectories(bundleDir);
+  const pythonApplicationPlanDirectories = await listPythonApplicationPlanDirectories(bundleDir);
   const gitMirrors = await listGitMirrorDirs(bundleDir);
   const stalePackageFiles = packageFiles.filter((file) => !livePackageFiles.has(file));
   const livePythonPackageFiles = new Set(
@@ -286,6 +307,10 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   );
   const stalePythonApplicationArtifacts = pythonApplicationArtifactFiles.filter(
     (file) => !livePythonApplicationArtifacts.has(file)
+  );
+  const stalePythonApplicationArtifactDirectories = pythonApplicationArtifactDirectories.filter(
+    (directory) =>
+      ![...livePythonApplicationArtifacts].some((file) => file.startsWith(`${directory}/`))
   );
   const livePythonApplicationPlans = new Set(
     pythonApplicationIndex?.applications.map((application) =>
@@ -363,6 +388,28 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     }
   }
 
+  for (const staleDirectory of stalePythonApplicationArtifactDirectories) {
+    try {
+      actions.push(
+        await removeStaleObject(
+          bundleDir,
+          'python-application-artifact-directory',
+          staleDirectory,
+          dryRun
+        )
+      );
+    } catch (error) {
+      const action: BundlePruneActionResult = {
+        error: (error as Error).message,
+        path: staleDirectory,
+        status: 'error',
+        type: 'python-application-artifact-directory',
+      };
+      actions.push(action);
+      errors.push(action);
+    }
+  }
+
   for (const stalePlan of stalePythonApplicationPlans) {
     try {
       actions.push(
@@ -399,6 +446,14 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
       dryRun
         ? 0
         : stalePackageFiles.length - errors.filter((error) => error.type === 'npm-package').length
+    ),
+    pythonApplicationArtifactDirectories: summary(
+      pythonApplicationArtifactDirectories.length,
+      stalePythonApplicationArtifactDirectories.length,
+      dryRun
+        ? 0
+        : stalePythonApplicationArtifactDirectories.length -
+            errors.filter((error) => error.type === 'python-application-artifact-directory').length
     ),
     pythonApplicationArtifacts: summary(
       pythonApplicationArtifactFiles.length,

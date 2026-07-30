@@ -483,4 +483,82 @@ describe('Python application bundle', () => {
       }),
     ]);
   });
+
+  it('replaces stale references on a full replan and can synchronize an empty target set', async () => {
+    const oldContent = wheelBuffer('1.0.0');
+    const oldSha = createHash('sha256').update(oldContent).digest('hex');
+    const oldSource = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    await fs.writeFile(oldSource, oldContent);
+    const bundleDir = path.join(tempDir, 'bundle');
+    const original = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(oldSource),
+        sha256: oldSha,
+        size: oldContent.byteLength,
+        sourceUrl: pathToFileURL(oldSource).toString(),
+      })
+    );
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [{ activePlan: original, targetId: original.manifest.targetId }],
+    });
+
+    const newContent = wheelBuffer('2.0.0');
+    const newSha = createHash('sha256').update(newContent).digest('hex');
+    const newSource = path.join(tempDir, 'shared-2.0.0-py3-none-any.whl');
+    await fs.writeFile(newSource, newContent);
+    const updated = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(newSource),
+        sha256: newSha,
+        size: newContent.byteLength,
+        sourceUrl: pathToFileURL(newSource).toString(),
+        version: '2.0.0',
+        wheelVersion: '2.0.0',
+      })
+    );
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [{ activePlan: updated, targetId: updated.manifest.targetId }],
+    });
+
+    const replannedIndex = await readPythonApplicationBundleIndex(bundleDir);
+    expect(replannedIndex?.applications).toHaveLength(1);
+    expect(replannedIndex?.applications[0]).toMatchObject({
+      application: { name: 'first-app', version: '2.0.0' },
+      targetId: original.manifest.targetId,
+    });
+    expect(replannedIndex?.artifacts.map((artifact) => artifact.sha256)).toEqual([newSha]);
+    await expect(
+      fs.pathExists(
+        path.join(bundleDir, `python/artifacts/wheels/${oldSha}/${path.basename(oldSource)}`)
+      )
+    ).resolves.toBe(true);
+
+    const emptied = await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [],
+    });
+
+    expect(emptied).toMatchObject({
+      applications: [],
+      errors: [],
+      totalBytes: 0,
+    });
+    expect(await readPythonApplicationBundleIndex(bundleDir)).toMatchObject({
+      applications: [],
+      artifacts: [],
+      summary: {
+        applications: 0,
+        artifacts: 0,
+        totalBytes: 0,
+      },
+    });
+    expect(
+      (await fs.readJson<PythonSeedManifest>(path.join(bundleDir, 'python-seed-manifest.json')))
+        .packages
+    ).toEqual([]);
+  });
 });

@@ -677,6 +677,11 @@ function formatPruneSummary(report: BundlePruneReport): string {
           `Python application artifacts: ${String(report.pythonApplicationArtifacts.total)} total, ${String(report.pythonApplicationArtifacts.stale)} stale, ${String(report.pythonApplicationArtifacts.removed)} removed.`,
         ]
       : []),
+    ...(report.pythonApplicationArtifactDirectories
+      ? [
+          `Python application artifact directories: ${String(report.pythonApplicationArtifactDirectories.total)} total, ${String(report.pythonApplicationArtifactDirectories.stale)} stale, ${String(report.pythonApplicationArtifactDirectories.removed)} removed.`,
+        ]
+      : []),
     ...(report.pythonApplicationPlans
       ? [
           `Python application plans: ${String(report.pythonApplicationPlans.total)} total, ${String(report.pythonApplicationPlans.stale)} stale, ${String(report.pythonApplicationPlans.removed)} removed.`,
@@ -3764,7 +3769,7 @@ program
     parseRetryDelaysMs
   )
   .option('--dry-run', 'Resolve and report without pulling, downloading, or cloning')
-  .option('--prune', 'Remove stale tarballs and Git mirrors after a successful download')
+  .option('--prune', 'Remove stale npm, Python, and Git objects after a successful download')
   .option('--json', 'Print the full JSON report instead of the concise summary')
   .action(async (root: string | undefined, options: CollectOptions) => {
     try {
@@ -3892,7 +3897,7 @@ program
           registry,
           registryUrl,
         });
-        if (pythonApplicationPlans.length > 0) {
+        if (pythonApplicationPlans.length > 0 || targetSelection === undefined) {
           report.pythonApplications = await downloadPythonApplicationPlans({
             bundleDir: outputDir,
             dryRun: options.dryRun === true,
@@ -4248,7 +4253,7 @@ const bundleCommand = program.command('bundle').description('Operate on an airga
 
 bundleCommand
   .command('prune')
-  .description('Remove stale tarballs and Git mirrors not referenced by the latest download')
+  .description('Remove stale npm, Python, and Git objects not referenced by the latest download')
   .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--dry-run', 'Print stale objects without removing them')
   .option('--json', 'Print the full JSON prune report')
