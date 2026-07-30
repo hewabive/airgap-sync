@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createGitConfigRewriteRules, resolveGitPublishTargets } from '../src/index.js';
-import type { GitSourcesManifest } from '../src/types.js';
+import type { GitSource, GitSourcesManifest } from '../src/types.js';
 
 const manifest: GitSourcesManifest = {
   schemaVersion: 1,
@@ -18,6 +18,18 @@ const manifest: GitSourcesManifest = {
   ],
   skipped: [],
 };
+
+function source(host: string, owner: string, repo: string): GitSource {
+  return {
+    host,
+    id: `${host}/${owner}/${repo}`,
+    localMirrorPath: `git-mirrors/${host}/${owner}/${repo}.git`,
+    owner,
+    repo,
+    requirements: [],
+    sourceUrl: `https://${host}/${owner}/${repo}.git`,
+  };
+}
 
 describe('resolveGitPublishTargets', () => {
   it('maps repositories to the authenticated user without changing source identity', () => {
@@ -65,5 +77,61 @@ describe('resolveGitPublishTargets', () => {
       targetUrl: 'http://gitea.local/maxim/vllm-project--vllm.git',
     });
     expect(rules).not.toContainEqual(expect.objectContaining({ insteadOf: 'https://github.com/' }));
+  });
+
+  it('rejects different preserved sources that publish to the same owner and repository', () => {
+    expect(() =>
+      resolveGitPublishTargets({
+        manifest: {
+          ...manifest,
+          sources: [source('github.com', 'acme', 'app'), source('gitlab.example', 'acme', 'app')],
+        },
+        strategy: 'preserve',
+      })
+    ).toThrow(
+      'Git publish target collision: acme/app: github.com/acme/app and gitlab.example/acme/app'
+    );
+  });
+
+  it('rejects host-only source moves for remapped owner strategies too', () => {
+    expect(() =>
+      resolveGitPublishTargets({
+        authenticatedUser: 'maxim',
+        manifest: {
+          ...manifest,
+          sources: [source('github.com', 'acme', 'app'), source('gitlab.example', 'acme', 'app')],
+        },
+        strategy: 'authenticated-user',
+      })
+    ).toThrow(
+      'Git publish target collision: maxim/acme--app: github.com/acme/app and gitlab.example/acme/app'
+    );
+  });
+
+  it('allows equal repository names under different preserved owners', () => {
+    const resolved = resolveGitPublishTargets({
+      manifest: {
+        ...manifest,
+        sources: [source('github.com', 'first', 'app'), source('gitlab.example', 'second', 'app')],
+      },
+      strategy: 'preserve',
+    });
+
+    expect(resolved.sources).toMatchObject([
+      { publishOwner: 'first', publishRepo: 'app' },
+      { publishOwner: 'second', publishRepo: 'app' },
+    ]);
+  });
+
+  it('treats destination owner and repository names as case-insensitive', () => {
+    expect(() =>
+      resolveGitPublishTargets({
+        manifest: {
+          ...manifest,
+          sources: [source('github.com', 'Acme', 'App'), source('gitlab.example', 'acme', 'app')],
+        },
+        strategy: 'preserve',
+      })
+    ).toThrow('Git publish target collision');
   });
 });

@@ -10,6 +10,7 @@ import type {
 import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
 import { gitSourceMirrorPath, gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
+import { assertUniqueGitPublishTargets } from './git-publish-targets.js';
 
 export interface ApplyGitSourcesOptions {
   bundleDir: string;
@@ -35,6 +36,7 @@ export function createGitConfigRewriteRules(
   manifest: GitSourcesManifest,
   giteaBaseUrl: string
 ): GitConfigRewriteRule[] {
+  assertUniqueGitPublishTargets(manifest);
   const seen = new Set<string>();
   const rules: GitConfigRewriteRule[] = [];
 
@@ -190,6 +192,7 @@ async function applyRepository(
 }
 
 export async function applyGitSources(options: ApplyGitSourcesOptions): Promise<GitApplyReport> {
+  assertUniqueGitPublishTargets(options.manifest);
   const mirrorsDir = path.resolve(
     options.mirrorsDir ?? path.join(options.bundleDir, 'git-mirrors')
   );

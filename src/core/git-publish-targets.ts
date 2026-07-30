@@ -23,20 +23,62 @@ function remappedRepositoryName(source: GitSource): string {
   return `${source.owner}--${source.repo}`;
 }
 
+function publishTarget(source: GitSource): { key: string; path: string } {
+  const owner = (source.publishOwner ?? source.owner).trim();
+  const repo = (source.publishRepo ?? source.repo).trim();
+  return {
+    key: `${owner.toLowerCase()}\0${repo.toLowerCase()}`,
+    path: `${owner}/${repo}`,
+  };
+}
+
+export function assertUniqueGitPublishTargets(manifest: GitSourcesManifest): void {
+  const destinations = new Map<string, { path: string; sourceIds: Set<string> }>();
+  for (const source of manifest.sources) {
+    const target = publishTarget(source);
+    const destination = destinations.get(target.key) ?? {
+      path: target.path,
+      sourceIds: new Set<string>(),
+    };
+    destination.sourceIds.add(source.id);
+    destinations.set(target.key, destination);
+  }
+
+  const collisions = [...destinations.values()]
+    .filter((destination) => destination.sourceIds.size > 1)
+    .sort((left, right) => left.path.localeCompare(right.path));
+  if (collisions.length === 0) {
+    return;
+  }
+
+  const details = collisions
+    .map((collision) => `${collision.path}: ${[...collision.sourceIds].sort().join(' and ')}`)
+    .join('; ');
+  throw new Error(
+    `Git publish target collision: ${details}. Remove the obsolete source or choose a non-conflicting Git owner strategy before publishing.`
+  );
+}
+
+function resolvedManifest(manifest: GitSourcesManifest, sources: GitSource[]): GitSourcesManifest {
+  const resolved = { ...manifest, sources };
+  assertUniqueGitPublishTargets(resolved);
+  return resolved;
+}
+
 export function resolveGitPublishTargets(
   options: ResolveGitPublishTargetsOptions
 ): GitSourcesManifest {
   const strategy = options.strategy ?? 'preserve';
   if (strategy === 'preserve') {
-    return {
-      ...options.manifest,
-      sources: options.manifest.sources.map((source) => ({
+    return resolvedManifest(
+      options.manifest,
+      options.manifest.sources.map((source) => ({
         ...source,
         publishOwner: source.owner,
         publishOwnerKind: 'organization',
         publishRepo: source.repo,
-      })),
-    };
+      }))
+    );
   }
 
   const owner =
@@ -64,16 +106,6 @@ export function resolveGitPublishTargets(
     publishOwnerKind: ownerKind,
     publishRepo: remappedRepositoryName(source),
   }));
-  const names = new Map<string, string>();
-  for (const source of sources) {
-    const previous = names.get(source.publishRepo);
-    if (previous && previous !== source.id) {
-      throw new Error(
-        `Git publish target collision for ${source.publishRepo}: ${previous} and ${source.id}`
-      );
-    }
-    names.set(source.publishRepo, source.id);
-  }
 
-  return { ...options.manifest, sources };
+  return resolvedManifest(options.manifest, sources);
 }

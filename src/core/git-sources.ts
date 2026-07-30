@@ -258,7 +258,7 @@ export async function writeGitSourcesManifest(
   manifest: GitSourcesManifest
 ): Promise<void> {
   await fs.ensureDir(bundleDir);
-  await fs.writeJson(path.join(bundleDir, 'git-sources.json'), manifest, { spaces: 2 });
+  await fs.writeJsonAtomic(path.join(bundleDir, 'git-sources.json'), manifest, { spaces: 2 });
 }
 
 export async function readGitSourcesManifest(bundleDir: string): Promise<GitSourcesManifest> {

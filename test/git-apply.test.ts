@@ -86,6 +86,39 @@ describe('applyGitSources', () => {
     });
   });
 
+  it('rejects destination collisions before planning or pushing', async () => {
+    const calls: GitCommandInvocation[] = [];
+    const collidingManifest: GitSourcesManifest = {
+      ...manifest,
+      sources: [
+        manifest.sources[0]!,
+        {
+          ...manifest.sources[0]!,
+          host: 'gitlab.example',
+          id: 'gitlab.example/owner/repo',
+          localMirrorPath: 'git-mirrors/gitlab.example/owner/repo.git',
+          sourceUrl: 'https://gitlab.example/owner/repo.git',
+        },
+      ],
+    };
+
+    await expect(
+      applyGitSources({
+        bundleDir,
+        dryRun: true,
+        giteaBaseUrl: 'http://gitea.local',
+        manifest: collidingManifest,
+        runner: (invocation) => {
+          calls.push(invocation);
+          return Promise.resolve();
+        },
+      })
+    ).rejects.toThrow(
+      'Git publish target collision: owner/repo: github.com/owner/repo and gitlab.example/owner/repo'
+    );
+    expect(calls).toEqual([]);
+  });
+
   it('reports missing local mirrors', async () => {
     const report = await applyGitSources({
       bundleDir,

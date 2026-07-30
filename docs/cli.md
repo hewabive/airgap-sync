@@ -205,8 +205,17 @@ application-specific.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
-extend the same bundle, but pruning is skipped even when `--prune` or a prune default
-is enabled, because other targets may still depend on existing bundle objects.
+extend the same bundle. Previously active Git sources that are not part of the selected
+download remain in `git-sources.json`, and `workspace-snapshot.json` continues to
+record the complete configured target list. Newly configured unselected targets are
+not materialized until they are selected or a full download is run. Pruning is skipped
+even when `--prune` or a prune default is enabled, because other targets may still
+depend on existing bundle objects.
+
+Failed downloads write diagnostic reports but do not replace the active
+`git-sources.json` or `workspace-snapshot.json`. Those files are activated only after
+the workspace download, including Python application artifact transfer, completes
+successfully.
 
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
@@ -638,6 +647,13 @@ bundle mirror path remain unchanged. Equivalent workspace configuration is:
   "gitPublishOwnerKind": "organization"
 }
 ```
+
+Before provisioning or pushing, publication verifies that every Git source maps to a
+unique destination owner/repository. This prevents two sources such as
+`github.com/acme/app` and `gitlab.example/acme/app` from both pushing with `--prune`
+to the same `acme/app` repository. A collision stops the operation before any Gitea API
+calls or Git pushes; remove the obsolete source or select a non-conflicting owner
+strategy.
 
 After a non-dry-run publish, the generated publish/apply reports are copied into
 `airgap-bundle/runs/publish/<run-id>/` so the previous offline import diagnostics are

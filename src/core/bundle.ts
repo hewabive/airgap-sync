@@ -228,7 +228,9 @@ export async function writeWorkspaceSnapshot(
   snapshot: WorkspaceSnapshot
 ): Promise<void> {
   await fs.ensureDir(bundleDir);
-  await fs.writeJson(path.join(bundleDir, 'workspace-snapshot.json'), snapshot, { spaces: 2 });
+  await fs.writeJsonAtomic(path.join(bundleDir, 'workspace-snapshot.json'), snapshot, {
+    spaces: 2,
+  });
 }
 
 export async function writeVerifyReport(bundleDir: string, report: VerifyReport): Promise<void> {

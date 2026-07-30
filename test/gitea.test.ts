@@ -286,6 +286,52 @@ describe('provisionGiteaRepositories', () => {
     ]);
   });
 
+  it('rejects destination collisions before calling Gitea', async () => {
+    const calls: string[] = [];
+    const client: GiteaClient = {
+      createOrganization: () => {
+        calls.push('create-organization');
+        return Promise.resolve();
+      },
+      createRepository: () => {
+        calls.push('create-repository');
+        return Promise.resolve();
+      },
+      organizationExists: () => {
+        calls.push('organization-exists');
+        return Promise.resolve(false);
+      },
+      repositoryExists: () => {
+        calls.push('repository-exists');
+        return Promise.resolve(false);
+      },
+    };
+    const collidingManifest: GitSourcesManifest = {
+      ...manifest,
+      sources: [
+        manifest.sources[0]!,
+        {
+          ...manifest.sources[0]!,
+          host: 'gitlab.example',
+          id: 'gitlab.example/owner/repo',
+          localMirrorPath: 'git-mirrors/gitlab.example/owner/repo.git',
+          sourceUrl: 'https://gitlab.example/owner/repo.git',
+        },
+      ],
+    };
+
+    await expect(
+      provisionGiteaRepositories({
+        client,
+        giteaBaseUrl: 'http://gitea.local',
+        manifest: collidingManifest,
+      })
+    ).rejects.toThrow(
+      'Git publish target collision: owner/repo: github.com/owner/repo and gitlab.example/owner/repo'
+    );
+    expect(calls).toEqual([]);
+  });
+
   it('plans repository creation without calling Gitea in dry-run mode', async () => {
     const calls: string[] = [];
     const client: GiteaClient = {

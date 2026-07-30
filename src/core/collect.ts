@@ -70,6 +70,8 @@ export interface CollectBundleOptions {
   includePeer?: boolean;
   initialGitRequirements?: GitRequirement[];
   initialGitSources?: GitSource[];
+  /** Sources preserved in the resulting manifest without fetching or scanning them. */
+  retainedGitSources?: GitSource[];
   initialRequirements?: RootPackageRequirement[];
   initialUnsupported?: UnsupportedRootPackageRequirement[];
   latestPolicy?: LatestPolicy;
@@ -91,6 +93,8 @@ export interface CollectBundleOptions {
   root?: string;
   runGitCommand?: GitCommandRunner;
   runGitOutputCommand?: GitOutputCommandRunner;
+  /** Leave git-sources.json unchanged so an outer workflow can activate it later. */
+  deferGitSourcesActivation?: boolean;
   tagResolutionPolicy?: TagResolutionPolicy;
   tarballTimeoutMs?: number;
 }
@@ -250,6 +254,39 @@ function addUnique<T>(
 
 function sourceIds(sources: GitSource[]): Set<string> {
   return new Set(sources.map((source) => source.id));
+}
+
+function mergeRetainedGitSource(current: GitSource, retained: GitSource): GitSource {
+  const preferred = retained.target === true && current.target !== true ? retained : current;
+  const requirements = new Map(
+    [...retained.requirements, ...current.requirements].map((requirement) => [
+      gitRequirementKey(requirement),
+      requirement,
+    ])
+  );
+  const pythonResolutionMode =
+    current.pythonResolutionMode === 'locked-only' ||
+    retained.pythonResolutionMode === 'locked-only'
+      ? 'locked-only'
+      : (current.pythonResolutionMode ?? retained.pythonResolutionMode);
+
+  return {
+    ...preferred,
+    ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
+    requirements: [...requirements.values()].sort((left, right) =>
+      gitRequirementKey(left).localeCompare(gitRequirementKey(right))
+    ),
+    ...(current.target === true || retained.target === true ? { target: true } : {}),
+  };
+}
+
+function mergeRetainedGitSources(current: GitSource[], retained: GitSource[] = []): GitSource[] {
+  const sources = new Map(retained.map((source) => [source.id, source]));
+  for (const source of current) {
+    const previous = sources.get(source.id);
+    sources.set(source.id, previous ? mergeRetainedGitSource(source, previous) : source);
+  }
+  return [...sources.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function gitSourcesFetchKey(sources: GitSource[]): string {
@@ -860,12 +897,18 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       total: pythonResult.report.resolvedFiles,
     });
   }
+  const activeGitSources = {
+    ...gitSources,
+    sources: mergeRetainedGitSources(gitSources.sources, options.retainedGitSources),
+  };
   const wroteBundle =
     !dryRun &&
+    repositoryUpdate.errors.length === 0 &&
     reportFetch.errors.length === 0 &&
     reportGitFetch.errors.length === 0 &&
     (pythonResult?.report.errors.length ?? 0) === 0 &&
     scanErrors.length === 0 &&
+    activeGitSources.skipped.length === 0 &&
     !maxIterationsReached;
 
   timings.totalMs = elapsedMs(totalStart);
@@ -876,7 +919,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     generatedAt,
     gitFetch: reportGitFetch,
     gitManifestScanErrors: scanErrors,
-    gitSources,
+    gitSources: activeGitSources,
     iterations,
     maxIterationsReached,
     outputDir,
@@ -930,7 +973,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
 
     const reportWriteStart = performance.now();
     await writeFetchReport(outputDir, reportFetch);
-    await writeGitSourcesManifest(outputDir, gitSources);
+    if (wroteBundle && options.deferGitSourcesActivation !== true) {
+      await writeGitSourcesManifest(outputDir, activeGitSources);
+    }
     await writeGitFetchReport(outputDir, reportGitFetch);
     if (pythonResult) {
       await writePythonFetchReport(outputDir, pythonResult.report);

@@ -26,6 +26,13 @@
 - Added automatic, backed-up, atomic workspace migration from schema v1 to schema v2
   when a workspace is opened.
 - Added partial workspace downloads for selected targets.
+- Fixed partial workspace downloads so previously active unselected Git sources remain
+  publishable and workspace snapshots retain the complete configured target list.
+- Made workspace downloads activate `git-sources.json` and `workspace-snapshot.json`
+  only after a successful run; failed attempts retain the last active metadata while
+  still writing diagnostic reports.
+- Added a fail-fast Git publication preflight that rejects multiple source IDs mapped
+  to the same case-insensitive Gitea owner/repository before provisioning or pushing.
 - Made `publish` workspace-aware so it can use `airgap-sync.json` defaults when run
   without bundle, registry, or Gitea arguments.
 - Added manifest-based download run change reports so fixed-point updates show which

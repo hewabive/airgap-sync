@@ -12,6 +12,7 @@ import {
   gitSourceTargetUrl,
   normalizeBaseUrl,
 } from './git-targets.js';
+import { assertUniqueGitPublishTargets } from './git-publish-targets.js';
 import {
   mergeGiteaOwnerRequirements,
   type GiteaOwnerKind,
@@ -423,6 +424,7 @@ function existingRepositoryAction(
 export async function provisionGiteaRepositories(
   options: ProvisionGiteaRepositoriesOptions
 ): Promise<GiteaRepositoryProvisionReport> {
+  assertUniqueGitPublishTargets(options.manifest);
   const isPrivate = options.private ?? true;
   const actions: GiteaRepositoryActionResult[] = [];
   const organizationActions: GiteaOrganizationActionResult[] = [];
@@ -554,6 +556,7 @@ export async function provisionGiteaRepositories(
 export function assumeGiteaRepositoriesExist(
   options: AssumeGiteaRepositoriesExistOptions
 ): GiteaRepositoryProvisionReport {
+  assertUniqueGitPublishTargets(options.manifest);
   const isPrivate = options.private ?? true;
   const organizationActions: GiteaOrganizationActionResult[] = uniqueOwners(options.manifest).map(
     (owner) => ({

@@ -835,6 +835,174 @@ describe('collectBundle', () => {
     });
   });
 
+  it('keeps the last active Git sources manifest after a failed download', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const activeManifest = {
+      createdAt: '2026-05-20T00:00:00.000Z',
+      schemaVersion: 1 as const,
+      skipped: [],
+      sources: [
+        {
+          host: 'github.com',
+          id: 'github.com/acme/active',
+          localMirrorPath: 'git-mirrors/github.com/acme/active.git',
+          owner: 'acme',
+          repo: 'active',
+          requirements: [],
+          sourceUrl: 'https://github.com/acme/active.git',
+          target: true,
+        },
+      ],
+    };
+    await fs.writeJson(path.join(outputDir, 'git-sources.json'), activeManifest, { spaces: 2 });
+
+    const report = await collectBundle({
+      initialRequirements: [
+        {
+          name: 'missing',
+          raw: 'missing@latest',
+          requiredBy: 'root',
+          specifier: 'latest',
+          type: 'tag',
+        },
+      ],
+      outputDir,
+      registry: {
+        getPackageMetadata() {
+          throw new Error('source registry unavailable');
+        },
+      },
+      registryUrl: 'https://registry.example',
+    });
+
+    expect(report.wroteBundle).toBe(false);
+    expect(report.gitSources.sources).toEqual([]);
+    await expect(fs.readJson(path.join(outputDir, 'git-sources.json'))).resolves.toEqual(
+      activeManifest
+    );
+  });
+
+  it('retains previously active Git sources without fetching them during a partial download', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const selectedMirror = path.join(
+      outputDir,
+      'git-mirrors/gitlab.example/new-owner/selected.git'
+    );
+    const retainedSource = {
+      host: 'github.com',
+      id: 'github.com/acme/retained',
+      localMirrorPath: 'git-mirrors/github.com/acme/retained.git',
+      owner: 'acme',
+      repo: 'retained',
+      requirements: [],
+      sourceUrl: 'https://github.com/acme/retained.git',
+      target: true,
+    };
+    const retainedSelectedSource = {
+      committish: 'old-branch',
+      host: 'gitlab.example',
+      id: 'gitlab.example/new-owner/selected',
+      localMirrorPath: 'git-mirrors/gitlab.example/new-owner/selected.git',
+      owner: 'new-owner',
+      repo: 'selected',
+      requirements: [
+        {
+          raw: 'selected@git+ssh://git@gitlab.example/new-owner/selected.git#abc123',
+          rawSpec: 'git+ssh://git@gitlab.example/new-owner/selected.git#abc123',
+          requiredBy: 'retained@1.0.0',
+        },
+      ],
+      sourceUrl: 'ssh://git@gitlab.example/new-owner/selected.git',
+      target: true,
+    };
+    await fs.ensureDir(selectedMirror);
+
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      initialGitSources: [
+        {
+          committish: 'main',
+          host: 'gitlab.example',
+          id: 'gitlab.example/new-owner/selected',
+          localMirrorPath: 'git-mirrors/gitlab.example/new-owner/selected.git',
+          owner: 'new-owner',
+          repo: 'selected',
+          requirements: [],
+          sourceUrl: 'https://gitlab.example/new-owner/selected.git',
+          target: true,
+        },
+      ],
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          throw new Error(`Unexpected registry lookup for ${name}`);
+        },
+      },
+      registryUrl: 'https://registry.example',
+      retainedGitSources: [retainedSource, retainedSelectedSource],
+      runGitCommand(invocation) {
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({ stderr: '', stdout: 'refs/heads/main abc123\n' });
+        }
+        return Promise.resolve(undefined);
+      },
+      runGitOutputCommand(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({ stderr: '', stdout: '' });
+        }
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(report.wroteBundle).toBe(true);
+    expect(report.gitFetch.totalRepositories).toBe(1);
+    expect(report.gitSources.sources.map((source) => source.id)).toEqual([
+      'github.com/acme/retained',
+      'gitlab.example/new-owner/selected',
+    ]);
+    expect(report.gitSources.sources[1]).toMatchObject({
+      committish: 'main',
+      requirements: [{ requiredBy: 'retained@1.0.0' }],
+      sourceUrl: 'https://gitlab.example/new-owner/selected.git',
+      target: true,
+    });
+    await expect(fs.readJson(path.join(outputDir, 'git-sources.json'))).resolves.toMatchObject({
+      sources: [{ id: 'github.com/acme/retained' }, { id: 'gitlab.example/new-owner/selected' }],
+    });
+  });
+
+  it('can defer activation of a successful Git sources manifest to a workspace orchestrator', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const activeManifest = {
+      createdAt: '2026-05-20T00:00:00.000Z',
+      schemaVersion: 1 as const,
+      skipped: [],
+      sources: [],
+    };
+    await fs.writeJson(path.join(outputDir, 'git-sources.json'), activeManifest, { spaces: 2 });
+
+    const report = await collectBundle({
+      deferGitSourcesActivation: true,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      outputDir,
+      registry: {
+        getPackageMetadata(name) {
+          throw new Error(`Unexpected registry lookup for ${name}`);
+        },
+      },
+      registryUrl: 'https://registry.example',
+    });
+
+    expect(report.wroteBundle).toBe(true);
+    expect(report.gitSources.createdAt).toBe('2026-05-21T00:00:00.000Z');
+    await expect(fs.readJson(path.join(outputDir, 'git-sources.json'))).resolves.toEqual(
+      activeManifest
+    );
+  });
+
   it('reuses previous tag resolutions from unchanged Git source manifests', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const mirrorPath = path.join(outputDir, 'git-mirrors/github.com/acme/app.git');

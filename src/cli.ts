@@ -3867,11 +3867,16 @@ program
           : undefined;
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
+        const retainedGitSources =
+          targetSelection && (await fileExists(path.join(outputDir, 'git-sources.json')))
+            ? (await readGitSourcesManifest(outputDir)).sources
+            : undefined;
         const onDownloadProgress = createCollectProgressLogger();
         const report = await collectBundle({
           allowApproximatePython,
           dryRun: options.dryRun === true,
           concurrency: options.concurrency,
+          deferGitSourcesActivation: true,
           includeDev,
           includePeer,
           initialGitRequirements: parsedTargets.gitRequirements,
@@ -3896,6 +3901,7 @@ program
             : {}),
           registry,
           registryUrl,
+          ...(retainedGitSources ? { retainedGitSources } : {}),
         });
         if (pythonApplicationPlans.length > 0 || targetSelection === undefined) {
           report.pythonApplications = await downloadPythonApplicationPlans({
@@ -3915,13 +3921,16 @@ program
         }
         const workspaceSnapshot = createWorkspaceSnapshot({
           config: {
-            ...activeConfig,
+            ...config,
             output: snapshotOutput,
             sourceRegistry: registryUrl,
           },
           createdAt: report.generatedAt,
         });
-        if (options.dryRun !== true) {
+        const activateDownload =
+          options.dryRun !== true && report.wroteBundle && !collectShouldFail(report);
+        if (activateDownload) {
+          await writeGitSourcesManifest(outputDir, report.gitSources);
           await writeWorkspaceSnapshot(outputDir, workspaceSnapshot);
         }
 
