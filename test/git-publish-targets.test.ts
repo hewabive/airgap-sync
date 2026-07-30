@@ -64,8 +64,6 @@ describe('resolveGitPublishTargets', () => {
       insteadOf: 'https://github.com/vllm-project/vllm.git',
       targetUrl: 'http://gitea.local/maxim/vllm-project--vllm.git',
     });
-    expect(rules).not.toContainEqual(
-      expect.objectContaining({ insteadOf: 'https://github.com/' })
-    );
+    expect(rules).not.toContainEqual(expect.objectContaining({ insteadOf: 'https://github.com/' }));
   });
 });

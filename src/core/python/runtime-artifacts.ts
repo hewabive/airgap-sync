@@ -114,9 +114,13 @@ export async function transferPythonRuntimeArtifacts(options: {
     runtimes: runtimes.sort((left, right) => left.pythonVersion.localeCompare(right.pythonVersion)),
   };
   if (!options.dryRun) {
-    await fs.writeJsonAtomic(path.join(options.bundleDir, 'python-runtime-manifest.json'), manifest, {
-      spaces: 2,
-    });
+    await fs.writeJsonAtomic(
+      path.join(options.bundleDir, 'python-runtime-manifest.json'),
+      manifest,
+      {
+        spaces: 2,
+      }
+    );
   }
   return manifest;
 }

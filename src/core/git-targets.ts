@@ -13,9 +13,7 @@ export function gitSourcePublishOwner(source: GitSource): string {
   return source.publishOwner ?? source.owner;
 }
 
-export function gitSourcePublishOwnerKind(
-  source: GitSource
-): 'organization' | 'user' {
+export function gitSourcePublishOwnerKind(source: GitSource): 'organization' | 'user' {
   return source.publishOwnerKind ?? 'organization';
 }
 

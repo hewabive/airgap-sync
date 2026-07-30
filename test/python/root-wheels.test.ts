@@ -97,10 +97,9 @@ describe('Python root wheels', () => {
       requirements: [roots[0]!.requirement],
     });
     expect(resolution.errors).toEqual([]);
-    expect(resolution.artifacts.map((artifact) => `${artifact.name}==${artifact.version}`)).toEqual([
-      'torch==2.7.0',
-      'vllm==0.24.0',
-    ]);
+    expect(resolution.artifacts.map((artifact) => `${artifact.name}==${artifact.version}`)).toEqual(
+      ['torch==2.7.0', 'vllm==0.24.0']
+    );
     expect(
       await fs.pathExists(
         path.join(tempDir, 'bundle', 'python-packages', 'vllm-0.24.0-py3-none-any.whl')
