@@ -32,6 +32,10 @@ async function writeBundle(
   for (const [filename, content] of Object.entries(files)) {
     await fs.writeFileAtomic(path.join(directory, filename), content);
   }
+  const sourceDocuments = Object.entries(files).map(([filename, content]) => ({
+    digest: createHash('sha256').update(content).digest('hex'),
+    file: `python/applications/demo--desktop-x64/${filename}`,
+  }));
   const toolContent = Buffer.from('uv fixture');
   const toolSha = createHash('sha256').update(toolContent).digest('hex');
   const toolFile = `python/artifacts/optional/tools/uv/${toolSha}/uv.tar.gz`;
@@ -42,12 +46,17 @@ async function writeBundle(
     'consumer-contract.json',
     'consumer.env.template',
     'pip.conf.template',
-  ].map((filename) => ({
-    digest: 'c'.repeat(64),
-    file: `${publicationDirectory}/${filename}`,
-  }));
+  ].map((filename) => {
+    const file = `${publicationDirectory}/${filename}`;
+    const content = `${file}\n`;
+    return {
+      content,
+      digest: createHash('sha256').update(content).digest('hex'),
+      file,
+    };
+  });
   for (const document of publicationDocuments) {
-    await fs.writeFileAtomic(path.join(bundleDir, document.file), `${document.file}\n`);
+    await fs.writeFileAtomic(path.join(bundleDir, document.file), document.content);
   }
   const index: PythonApplicationBundleIndex = {
     applications: [
@@ -96,7 +105,7 @@ async function writeBundle(
   return {
     applications: [
       {
-        documents: publicationDocuments,
+        documents: publicationDocuments.map(({ digest, file }) => ({ digest, file })),
         genericPackage: {
           owner: 'python-apps',
           package: 'demo-desktop-x64',
@@ -104,6 +113,7 @@ async function writeBundle(
         },
         planId: 'a'.repeat(64),
         pypiIndexUrl: `${giteaBaseUrl}/api/packages/pypi/pypi/simple`,
+        sourceDocuments,
         targetId: 'demo--desktop-x64',
       },
     ],
@@ -124,7 +134,7 @@ async function writeBundle(
       pypi: { kind: 'organization', name: 'pypi' },
     },
     publicationId,
-    schemaVersion: 1,
+    schemaVersion: 2,
   };
 }
 

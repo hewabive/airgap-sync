@@ -72,7 +72,23 @@ async function bundleFixture(): Promise<PythonApplicationBundleIndex> {
     ],
   });
   const planPath = 'python/applications/demo--windows/environment-plan.json';
+  const planDiffPath = 'python/applications/demo--windows/plan-diff.json';
+  const prerequisiteReportPath = 'python/applications/demo--windows/prerequisites.json';
   await fs.writeJson(path.join(bundleDir, planPath), plan, { spaces: 2 });
+  await fs.writeJson(
+    path.join(bundleDir, planDiffPath),
+    { planId: { to: plan.planId }, schemaVersion: 1 },
+    { spaces: 2 }
+  );
+  await fs.writeJson(
+    path.join(bundleDir, prerequisiteReportPath),
+    {
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      planId: plan.planId,
+      schemaVersion: 1,
+    },
+    { spaces: 2 }
+  );
   return {
     applications: [
       {
@@ -81,10 +97,10 @@ async function bundleFixture(): Promise<PythonApplicationBundleIndex> {
         branchSizes: [],
         features: {},
         locks: [],
-        planDiffPath: 'python/applications/demo--windows/plan-diff.json',
+        planDiffPath,
         planId: plan.planId,
         planPath,
-        prerequisiteReportPath: 'python/applications/demo--windows/prerequisites.json',
+        prerequisiteReportPath,
         targetId: 'demo--windows',
       },
     ],
@@ -129,6 +145,14 @@ describe('Python publication manifest', () => {
       planId: index.applications[0]?.planId,
       pypiIndexUrl: 'http://gitea.local/api/packages/airgap-packages/pypi/simple',
     });
+    expect(first.applications[0]?.sourceDocuments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: index.applications[0]?.prerequisiteReportPath,
+        }),
+      ])
+    );
+    expect(first.schemaVersion).toBe(2);
     expect(first.applications[0]?.genericPackage.version).toContain(
       `pub.${first.publicationId.slice(0, 12)}`
     );
@@ -142,6 +166,25 @@ describe('Python publication manifest', () => {
     expect(contract).toContain('http://gitea.local/api/packages/airgap-packages/pypi/simple');
     expect(contract).not.toContain('admin');
     expect(contract).not.toMatch(/token|password/iu);
+
+    await fs.writeJson(
+      path.join(bundleDir, index.applications[0]!.prerequisiteReportPath),
+      {
+        generatedAt: '2026-07-29T00:00:00.000Z',
+        planId: index.applications[0]?.planId,
+        schemaVersion: 1,
+      },
+      { spaces: 2 }
+    );
+    const changedSource = await materializePythonPublication('http://gitea.local', {
+      bundleDir,
+      index,
+      profile: firstProfile,
+    });
+    expect(changedSource.publicationId).not.toBe(first.publicationId);
+    expect(changedSource.applications[0]?.genericPackage.version).not.toBe(
+      first.applications[0]?.genericPackage.version
+    );
 
     const secondProfile = resolvePythonPublicationProfile(
       normalizePythonPublicationProfile({

@@ -151,7 +151,8 @@ Application entries point to:
 - immutable environment plan and human-readable plan diff;
 - per-platform `pylock.toml` resolver evidence and hash-complete
   `requirements.lock`;
-- external CPython/system prerequisite report;
+- external CPython/system prerequisite report whose generation timestamp is inherited
+  from the active plan, so repeated downloads do not change its content;
 - optional reviewed health checks.
 
 Artifacts are content-addressed by SHA-256. A wheel may be referenced by several
@@ -173,12 +174,15 @@ wheels and optional artifacts are reused.
 
 Created during closed-network publish after Gitea authentication and owner resolution.
 It records the normalized Gitea URL, resolved PyPI and Generic owners, source plan IDs,
-concrete package coordinates, and materialized consumer-document paths and digests.
+source-document paths and digests, concrete package coordinates, and materialized
+consumer-document paths and digests.
 
-`publicationId` is deterministic over semantic destination data. Tokens, authenticated
-login, timestamps, and upload results are excluded. Therefore the same application
-plan can be published to another Gitea deployment without a new online resolution,
-while two destinations get distinct consumer documents and Generic Package versions.
+`publicationId` is deterministic over the destination and exact transferable source
+documents. Tokens, authenticated login, publication-run timestamps, and upload results
+are excluded. Therefore a byte-identical application bundle can be retried
+idempotently, changed source documents receive new immutable Generic Package versions,
+and the same application plan can be published to another Gitea deployment without a
+new online resolution.
 
 ## Reports
 

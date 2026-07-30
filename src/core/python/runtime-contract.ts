@@ -160,7 +160,7 @@ export function addPythonRuntimeContract(
 
 export function createPythonPrerequisiteReport(
   plan: PythonEnvironmentPlan,
-  generatedAt = new Date().toISOString()
+  generatedAt = plan.createdAt
 ): PythonPrerequisiteReport {
   if (!plan.runtimeContract) {
     throw new Error('Python environment plan has no runtime contract');

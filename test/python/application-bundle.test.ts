@@ -267,7 +267,7 @@ describe('Python application bundle', () => {
     const progress: PythonApplicationDownloadProgressEvent[] = [];
     const report = await downloadPythonApplicationPlans({
       bundleDir,
-      generatedAt: '2026-07-27T00:00:00.000Z',
+      generatedAt: '2026-07-28T00:00:00.000Z',
       onProgress: (event) => progress.push(event),
       targets: [
         { activePlan: first, targetId: first.manifest.targetId },
@@ -342,9 +342,16 @@ describe('Python application bundle', () => {
     });
     expect(compatibilityManifest.packages[0]?.files[0]?.file).toContain('python/artifacts/wheels/');
     expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
+    const prerequisitePath = index!.applications[0]!.prerequisiteReportPath;
+    const firstPrerequisite = await fs.readFile(path.join(bundleDir, prerequisitePath), 'utf8');
+    expect(JSON.parse(firstPrerequisite)).toMatchObject({
+      generatedAt: first.plan.createdAt,
+      planId: first.plan.planId,
+    });
 
     const repeated = await downloadPythonApplicationPlans({
       bundleDir,
+      generatedAt: '2026-07-29T00:00:00.000Z',
       targets: [
         { activePlan: first, targetId: first.manifest.targetId },
         { activePlan: second, targetId: second.manifest.targetId },
@@ -355,6 +362,9 @@ describe('Python application bundle', () => {
       existing: 1,
       incrementalBytes: 0,
     });
+    await expect(fs.readFile(path.join(bundleDir, prerequisitePath), 'utf8')).resolves.toBe(
+      firstPrerequisite
+    );
   });
 
   it('recovers from an interrupted multi-artifact download without activating a partial index', async () => {

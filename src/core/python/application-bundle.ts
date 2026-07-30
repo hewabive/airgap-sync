@@ -717,15 +717,13 @@ async function writeApplicationDocuments(
   bundleDir: string,
   targetId: string,
   activePlan: ActivePythonApplicationPlan,
-  locks: PythonConsumerLock[],
-  generatedAt: string
+  locks: PythonConsumerLock[]
 ): Promise<void> {
   const directory = path.join(bundleDir, pythonApplicationPlanDirectory(targetId));
   const temporaryDirectory = `${directory}.tmp-${String(process.pid)}`;
   const backupDirectory = `${directory}.backup-${String(process.pid)}`;
   const prerequisiteReport: PythonPrerequisiteReport = createPythonPrerequisiteReport(
-    activePlan.plan,
-    generatedAt
+    activePlan.plan
   );
   await fs.remove(temporaryDirectory);
   await fs.remove(backupDirectory);
@@ -1018,8 +1016,7 @@ export async function downloadPythonApplicationPlans(
             bundleDir,
             targetId,
             activePlan,
-            consumerLocks.get(targetId)!,
-            generatedAt
+            consumerLocks.get(targetId)!
           )
         )
       );

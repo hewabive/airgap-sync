@@ -243,17 +243,28 @@ function applicationFiles(
         `Python publication manifest does not match application ${application.targetId}`
       );
     }
-    const documentPaths = [
-      application.planPath,
-      application.planDiffPath,
-      application.prerequisiteReportPath,
-      ...publication.documents.map((document) => document.file),
-      ...application.locks.map((lock) => lock.file),
-    ];
-    for (const file of [...new Set(documentPaths)]) {
+    const expectedSourcePaths = [
+      ...new Set([
+        application.planPath,
+        application.planDiffPath,
+        application.prerequisiteReportPath,
+        ...application.locks.map((lock) => lock.file),
+      ]),
+    ].sort();
+    const sourcePaths = publication.sourceDocuments.map((document) => document.file).sort();
+    if (
+      expectedSourcePaths.length !== sourcePaths.length ||
+      expectedSourcePaths.some((file, index) => file !== sourcePaths[index])
+    ) {
+      throw new Error(
+        `Python publication manifest source documents do not match application ${application.targetId}`
+      );
+    }
+    for (const document of [...publication.sourceDocuments, ...publication.documents]) {
       files.push({
-        file,
-        filename: validateCoordinate(path.posix.basename(file), 'filename'),
+        expectedSha256: document.digest,
+        file: document.file,
+        filename: validateCoordinate(path.posix.basename(document.file), 'filename'),
         owner: validateCoordinate(publication.genericPackage.owner, 'owner'),
         package: validateCoordinate(publication.genericPackage.package, 'package name'),
         version: validateCoordinate(publication.genericPackage.version, 'version'),

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { semanticDigest } from '../canonical-json.js';
 import * as fs from '../fs.js';
@@ -26,6 +27,7 @@ export interface PythonPublicationApplication {
   genericPackage: PythonGenericPackageCoordinates;
   planId: string;
   pypiIndexUrl: string;
+  sourceDocuments: PythonPublicationDocument[];
   targetId: string;
 }
 
@@ -44,7 +46,7 @@ export interface PythonPublicationManifest {
     pypi: ResolvedPythonPublicationProfile['pypiOwner'];
   };
   publicationId: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
 }
 
 export interface MaterializePythonPublicationOptions {
@@ -55,6 +57,10 @@ export interface MaterializePythonPublicationOptions {
 }
 
 const publicationsDirectory = 'python/publications';
+
+function contentDigest(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
 
 function safeBundleFile(bundleDir: string, relativeFile: string): string {
   if (
@@ -96,15 +102,15 @@ function artifactPackage(artifact: PythonApplicationBundleArtifact): string {
 function publicationSemanticContent(
   index: PythonApplicationBundleIndex,
   giteaBaseUrl: string,
-  profile: ResolvedPythonPublicationProfile
+  profile: ResolvedPythonPublicationProfile,
+  applications: {
+    documents: PythonPublicationDocument[];
+    planId: string;
+    targetId: string;
+  }[]
 ): unknown {
   return {
-    applications: index.applications
-      .map((application) => ({
-        planId: application.planId,
-        targetId: application.targetId,
-      }))
-      .sort((left, right) => left.targetId.localeCompare(right.targetId)),
+    applications,
     artifacts: index.artifacts
       .filter((artifact) => artifact.kind !== 'wheel')
       .map((artifact) => ({
@@ -119,8 +125,45 @@ function publicationSemanticContent(
       generic: profile.genericOwner,
       pypi: profile.pypiOwner,
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
   };
+}
+
+async function publicationSourceDocuments(
+  bundleDir: string,
+  index: PythonApplicationBundleIndex
+): Promise<
+  {
+    documents: PythonPublicationDocument[];
+    planId: string;
+    targetId: string;
+  }[]
+> {
+  return Promise.all(
+    [...index.applications]
+      .sort((left, right) => left.targetId.localeCompare(right.targetId))
+      .map(async (application) => {
+        const files = [
+          ...new Set([
+            application.planPath,
+            application.planDiffPath,
+            application.prerequisiteReportPath,
+            ...application.locks.map((lock) => lock.file),
+          ]),
+        ].sort();
+        const documents = await Promise.all(
+          files.map(async (file) => ({
+            digest: contentDigest(await fs.readFile(safeBundleFile(bundleDir, file), 'utf8')),
+            file,
+          }))
+        );
+        return {
+          documents,
+          planId: application.planId,
+          targetId: application.targetId,
+        };
+      })
+  );
 }
 
 export function pythonPublicationManifestPath(publicationId: string): string {
@@ -132,8 +175,9 @@ export async function materializePythonPublication(
   options: MaterializePythonPublicationOptions
 ): Promise<PythonPublicationManifest> {
   const baseUrl = normalizeBaseUrl(giteaBaseUrl);
+  const sourceApplications = await publicationSourceDocuments(options.bundleDir, options.index);
   const publicationId = semanticDigest(
-    publicationSemanticContent(options.index, baseUrl, options.profile)
+    publicationSemanticContent(options.index, baseUrl, options.profile, sourceApplications)
   );
   const publicationDirectory = path.posix.join(publicationsDirectory, publicationId);
   const pypiIndexUrl = `${baseUrl}/api/packages/${encodeURIComponent(options.profile.pypiOwner.name)}/pypi/simple`;
@@ -150,6 +194,12 @@ export async function materializePythonPublication(
         `Python application plan does not match bundle index: ${application.targetId}`
       );
     }
+    const sourceApplication = sourceApplications.find(
+      (candidate) => candidate.targetId === application.targetId
+    );
+    if (!sourceApplication) {
+      throw new Error(`Python application source documents are missing: ${application.targetId}`);
+    }
     const consumer = createPythonConsumerBundleDocuments(plan, {
       genericOwner: options.profile.genericOwner.name,
       giteaBaseUrl: baseUrl,
@@ -160,7 +210,7 @@ export async function materializePythonPublication(
     const documents = consumer.documents
       .map((document) => ({
         content: document.content,
-        digest: semanticDigest(document.content),
+        digest: contentDigest(document.content),
         file: path.posix.join(directory, document.path),
       }))
       .sort((left, right) => left.file.localeCompare(right.file));
@@ -176,6 +226,7 @@ export async function materializePythonPublication(
       genericPackage: consumer.contract.publication!,
       planId: application.planId,
       pypiIndexUrl,
+      sourceDocuments: sourceApplication.documents,
       targetId: application.targetId,
     });
   }
@@ -200,7 +251,7 @@ export async function materializePythonPublication(
       pypi: options.profile.pypiOwner,
     },
     publicationId,
-    schemaVersion: 1,
+    schemaVersion: 2,
   };
   if (options.write !== false) {
     await fs.writeJsonAtomic(
