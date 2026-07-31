@@ -111,6 +111,7 @@ import type {
   CollectProgressEvent,
   FetchSeedBundleResult,
   GitFetchProgressEvent,
+  GitApplyProgressEvent,
   GitOwnerStrategy,
   GitPublishOwnerKind,
   LatestPolicy,
@@ -1133,8 +1134,10 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
   const lastOutputAt = new Map<ApplyProgressPhase, number>();
   const heartbeatTimers = new Map<ApplyProgressPhase, ReturnType<typeof setInterval>>();
 
-  function isPythonPublishPhase(phase: ApplyProgressPhase): boolean {
-    return phase === 'python-publish' || phase === 'python-application-publish';
+  function needsHeartbeat(phase: ApplyProgressPhase): boolean {
+    return (
+      phase === 'git-apply' || phase === 'python-publish' || phase === 'python-application-publish'
+    );
   }
 
   function stopHeartbeat(phase: ApplyProgressPhase): void {
@@ -1167,7 +1170,7 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
       console.error(`[publish] ${label}: started${total}`);
       lastOutputAt.set(event.phase, Date.now());
       stopHeartbeat(event.phase);
-      if (isPythonPublishPhase(event.phase)) {
+      if (needsHeartbeat(event.phase)) {
         const timer = setInterval(() => {
           const latest = lastEvents.get(event.phase);
           if (!latest) {
@@ -1206,7 +1209,9 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
     const last = lastLogged.get(event.phase) ?? 0;
     const threshold =
       event.total && event.total > 0 ? Math.max(1, Math.ceil(event.total / 20)) : 25;
-    const artifactCompleted = /^(?:error|planned|published|skipped) /u.test(event.detail ?? '');
+    const artifactCompleted = /^(?:error|missing-mirror|planned|published|pushed|skipped) /u.test(
+      event.detail ?? ''
+    );
     const shouldLog =
       !lastLogged.has(event.phase) ||
       (artifactCompleted && (event.current === 1 || event.current - last >= threshold)) ||
@@ -1405,6 +1410,24 @@ function createGitFetchProgressLogger(): (event: GitFetchProgressEvent) => void 
       current: event.current,
       ...(detail ? { detail } : {}),
       phase: 'git-fetch',
+      status: event.status,
+      total: event.total,
+    });
+  };
+}
+
+function createGitApplyProgressLogger(): (event: GitApplyProgressEvent) => void {
+  const logger = createApplyProgressLogger();
+  return (event) => {
+    const detail = event.action
+      ? `${event.action.status} ${event.action.repository}`
+      : event.repository
+        ? `pushing ${event.repository}`
+        : undefined;
+    logger({
+      current: event.current,
+      ...(detail ? { detail } : {}),
+      phase: 'git-apply',
       status: event.status,
       total: event.total,
     });
@@ -4476,6 +4499,7 @@ gitCommand
         ...(gitAuth ? { gitAuth } : {}),
         giteaBaseUrl: options.gitea,
         manifest,
+        onProgress: createGitApplyProgressLogger(),
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
       });
 

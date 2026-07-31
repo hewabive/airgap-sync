@@ -272,7 +272,12 @@ export type {
   FetchSeedBundleOptions,
   FetchSeedBundleResult,
 } from './core/fetcher.js';
-export type { ApplyGitSourcesOptions, GitHttpAuth } from './core/git-apply.js';
+export type {
+  ApplyGitSourcesOptions,
+  GitApplyProgressEvent,
+  GitApplyProgressStatus,
+  GitHttpAuth,
+} from './core/git-apply.js';
 export type { ConfigureGitRewritesOptions } from './core/git-config.js';
 export type {
   AssumeGiteaRepositoriesExistOptions,

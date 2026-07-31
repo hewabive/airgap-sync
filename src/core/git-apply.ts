@@ -20,12 +20,23 @@ export interface ApplyGitSourcesOptions {
   gitAuth?: GitHttpAuth;
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
+  onProgress?: (event: GitApplyProgressEvent) => void;
   runner?: GitCommandRunner;
 }
 
 export interface GitHttpAuth {
   password: string;
   username: string;
+}
+
+export type GitApplyProgressStatus = 'start' | 'progress' | 'done';
+
+export interface GitApplyProgressEvent {
+  action?: GitApplyActionResult;
+  current: number;
+  repository?: string;
+  status: GitApplyProgressStatus;
+  total: number;
 }
 
 function quoteGitConfigPart(value: string): string {
@@ -197,22 +208,55 @@ export async function applyGitSources(options: ApplyGitSourcesOptions): Promise<
     options.mirrorsDir ?? path.join(options.bundleDir, 'git-mirrors')
   );
   const actions: GitApplyActionResult[] = [];
+  const total = options.manifest.sources.length;
+  options.onProgress?.({
+    current: 0,
+    status: 'start',
+    total,
+  });
 
   if (options.dryRun === true) {
-    for (const source of options.manifest.sources) {
-      actions.push({
+    for (const [index, source] of options.manifest.sources.entries()) {
+      const action: GitApplyActionResult = {
         repository: source.id,
         sourcePath: sourcePath(source, options),
         status: 'planned',
         targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
+      };
+      actions.push(action);
+      options.onProgress?.({
+        action,
+        current: index + 1,
+        repository: source.id,
+        status: 'progress',
+        total,
       });
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    for (const source of options.manifest.sources) {
-      actions.push(await applyRepository(source, options, runner));
+    for (const [index, source] of options.manifest.sources.entries()) {
+      options.onProgress?.({
+        current: index,
+        repository: source.id,
+        status: 'progress',
+        total,
+      });
+      const action = await applyRepository(source, options, runner);
+      actions.push(action);
+      options.onProgress?.({
+        action,
+        current: index + 1,
+        repository: source.id,
+        status: 'progress',
+        total,
+      });
     }
   }
+  options.onProgress?.({
+    current: actions.length,
+    status: 'done',
+    total,
+  });
 
   const errors = actions.filter(
     (action) => action.status === 'error' || action.status === 'missing-mirror'

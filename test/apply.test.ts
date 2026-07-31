@@ -324,6 +324,7 @@ describe('applyBundle', () => {
 
   it('plans Gitea provisioning, mirror push, and optional Git config', async () => {
     await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
+    const progress: ApplyProgressEvent[] = [];
 
     const report = await applyBundle({
       bundleDir,
@@ -332,6 +333,7 @@ describe('applyBundle', () => {
       generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
       giteaClient: noopClient,
+      onProgress: (event) => progress.push(event),
       registryUrl: 'http://verdaccio.local:4873',
     });
 
@@ -368,6 +370,25 @@ describe('applyBundle', () => {
       },
     ]);
     expect(await fs.pathExists(path.join(bundleDir, 'git-config-report.json'))).toBe(true);
+    expect(progress).toContainEqual({
+      current: 0,
+      phase: 'git-apply',
+      status: 'start',
+      total: 1,
+    });
+    expect(progress).toContainEqual({
+      current: 1,
+      detail: 'planned github.com/acme/app',
+      phase: 'git-apply',
+      status: 'progress',
+      total: 1,
+    });
+    expect(progress).toContainEqual({
+      current: 1,
+      phase: 'git-apply',
+      status: 'done',
+      total: 1,
+    });
   });
 
   it('passes Gitea token auth to mirror push', async () => {

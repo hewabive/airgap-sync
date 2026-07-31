@@ -9,7 +9,7 @@ import {
   writeGiteaRepositoryProvisionReport,
   writePublishReport,
 } from './bundle.js';
-import { applyGitSources, type GitHttpAuth } from './git-apply.js';
+import { applyGitSources, type GitApplyProgressEvent, type GitHttpAuth } from './git-apply.js';
 import { configureGitRewrites } from './git-config.js';
 import { type GitCommandRunner } from './git-fetch.js';
 import {
@@ -229,6 +229,13 @@ function mergeAssumedGitWithPackageOwners(
   };
 }
 
+function gitApplyProgressDetail(event: GitApplyProgressEvent): string | undefined {
+  if (event.action) {
+    return `${event.action.status} ${event.action.repository}`;
+  }
+  return event.repository ? `pushing ${event.repository}` : undefined;
+}
+
 export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBundleReport> {
   const bundleDir = path.resolve(options.bundleDir);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
@@ -422,7 +429,6 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     };
   }
 
-  options.onProgress?.({ phase: 'git-apply', status: 'start' });
   const gitApply = await applyGitSources({
     bundleDir,
     dryRun,
@@ -431,10 +437,23 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     giteaBaseUrl: options.giteaBaseUrl,
     manifest: gitSources,
     ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+    ...(options.onProgress
+      ? {
+          onProgress: (event: GitApplyProgressEvent) => {
+            const detail = gitApplyProgressDetail(event);
+            options.onProgress?.({
+              current: event.current,
+              ...(detail ? { detail } : {}),
+              phase: 'git-apply',
+              status: event.status,
+              total: event.total,
+            });
+          },
+        }
+      : {}),
     ...(options.runGitCommand ? { runner: options.runGitCommand } : {}),
   });
   await writeGitApplyReport(bundleDir, gitApply);
-  options.onProgress?.({ phase: 'git-apply', status: 'done' });
 
   const gitConfig = options.configureGitGlobal
     ? await (async () => {

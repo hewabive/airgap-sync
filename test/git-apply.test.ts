@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyGitSources,
   createGitConfigRewriteRules,
+  type GitApplyProgressEvent,
   type GitCommandInvocation,
 } from '../src/index.js';
 import type { GitSourcesManifest } from '../src/types.js';
@@ -146,12 +147,14 @@ describe('applyGitSources', () => {
     const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
     await fs.ensureDir(sourcePath);
     const calls: GitCommandInvocation[] = [];
+    const progress: GitApplyProgressEvent[] = [];
 
     const report = await applyGitSources({
       bundleDir,
       generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
       manifest,
+      onProgress: (event) => progress.push(event),
       runner: (invocation) => {
         calls.push(invocation);
         return Promise.resolve();
@@ -188,6 +191,36 @@ describe('applyGitSources', () => {
       pushed: 1,
       totalRepositories: 1,
     });
+    expect(progress).toEqual([
+      {
+        current: 0,
+        status: 'start',
+        total: 1,
+      },
+      {
+        current: 0,
+        repository: 'github.com/owner/repo',
+        status: 'progress',
+        total: 1,
+      },
+      {
+        action: {
+          repository: 'github.com/owner/repo',
+          sourcePath,
+          status: 'pushed',
+          targetUrl: 'http://gitea.local/owner/repo.git',
+        },
+        current: 1,
+        repository: 'github.com/owner/repo',
+        status: 'progress',
+        total: 1,
+      },
+      {
+        current: 1,
+        status: 'done',
+        total: 1,
+      },
+    ]);
   });
 
   it('passes Gitea token auth to Git push without changing report URLs', async () => {
