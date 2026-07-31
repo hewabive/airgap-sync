@@ -275,8 +275,10 @@ Verdaccio updates. If the same registry is updated through other paths or indepe
 generated bundles, prefer `refresh` policies; reused dependency tags are restored
 strictly and can move shared registry tags backward.
 
-`--concurrency` controls parallel npm resolve/download workers. The default is `8`.
-Use a lower value such as `4` on slow removable media or unstable network links.
+`--concurrency` controls parallel npm resolution/download, Git mirror/update/manifest
+scan, and Python resolution/download workers. The default is `8`. Use a lower value
+such as `4` on slow removable media, interactive SSH connections, or unstable network
+links.
 
 `--registry-timeout-ms` controls npm metadata request timeout. The default is 60000.
 `--tarball-timeout-ms` controls tarball download timeout. The default is 180000.
@@ -481,13 +483,15 @@ paths such as `git-mirrors/github.com/antvis/G2.git`.
 airgap-sync git fetch ./airgap-bundle
 airgap-sync git fetch ./airgap-bundle --dry-run
 airgap-sync git fetch ./airgap-bundle --mirrors-dir ./git-mirrors
+airgap-sync git fetch ./airgap-bundle --concurrency 4
 ```
 
 Reads `git-sources.json` and stores local bare mirror repositories using preserved
 source paths such as `git-mirrors/github.com/antvis/G2.git`. Missing mirrors are
 created as bare repositories and fetched through explicit branch/tag refspecs.
-Existing mirrors run `git remote set-url origin` and `git fetch --prune origin` for
-`refs/heads/*` and `refs/tags/*`. After each fetch, the mirror's symbolic `HEAD` is
+Existing mirrors repair the origin URL/refspecs when needed and run
+`git fetch --prune origin` for `refs/heads/*` and `refs/tags/*`. Independent mirrors
+are processed concurrently (8 workers by default). After each fetch, the mirror's symbolic `HEAD` is
 synchronized with the upstream default branch; this also repairs mirrors created by
 older versions with a stale or dangling `HEAD`. Provider-specific refs such as GitHub
 pull-request refs are intentionally not downloaded into new mirrors. The command

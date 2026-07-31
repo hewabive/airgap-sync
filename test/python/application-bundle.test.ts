@@ -431,6 +431,98 @@ describe('Python application bundle', () => {
     expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
   });
 
+  it('downloads independent application artifacts concurrently', async () => {
+    const firstContent = wheelBuffer('1.0.0');
+    const secondContent = wheelBuffer('2.0.0');
+    const firstUrl = 'https://files.test/shared-1.0.0-py3-none-any.whl';
+    const secondUrl = 'https://files.test/shared-2.0.0-py3-none-any.whl';
+    const bodies = new Map([
+      [firstUrl, firstContent],
+      [secondUrl, secondContent],
+    ]);
+    const first = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(firstUrl),
+        sha256: createHash('sha256').update(firstContent).digest('hex'),
+        size: firstContent.byteLength,
+        sourceUrl: firstUrl,
+      })
+    );
+    const second = activePlan(
+      createPlan({
+        application: 'second-app',
+        filename: path.basename(secondUrl),
+        sha256: createHash('sha256').update(secondContent).digest('hex'),
+        size: secondContent.byteLength,
+        sourceUrl: secondUrl,
+        wheelVersion: '2.0.0',
+      })
+    );
+    let release!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = 0;
+    let maxActive = 0;
+    const fetchImplementation = (async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      const body = bodies.get(url);
+      if (!body) {
+        return new Response(null, { status: 404 });
+      }
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (active === 2) {
+        release();
+      }
+      await bothStarted;
+      active -= 1;
+      return new Response(body);
+    }) as typeof globalThis.fetch;
+
+    const report = await downloadPythonApplicationPlans({
+      bundleDir: path.join(tempDir, 'bundle'),
+      concurrency: 2,
+      fetch: fetchImplementation,
+      targets: [
+        { activePlan: first, targetId: first.manifest.targetId },
+        { activePlan: second, targetId: second.manifest.targetId },
+      ],
+    });
+
+    expect(maxActive).toBe(2);
+    expect(report).toMatchObject({ downloaded: 2, errors: [] });
+  });
+
+  it('uses the activated content index for incremental checks and leaves full hashing to verify', async () => {
+    const content = wheelBuffer('1.0.0');
+    const source = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    const bundleDir = path.join(tempDir, 'bundle');
+    await fs.writeFile(source, content);
+    const plan = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(source),
+        sha256: createHash('sha256').update(content).digest('hex'),
+        size: content.byteLength,
+        sourceUrl: pathToFileURL(source).toString(),
+      })
+    );
+    const targets = [{ activePlan: plan, targetId: plan.manifest.targetId }];
+    await downloadPythonApplicationPlans({ bundleDir, targets });
+    const index = await readPythonApplicationBundleIndex(bundleDir);
+    const artifactPath = path.join(bundleDir, index!.artifacts[0]!.file);
+    await fs.writeFile(artifactPath, Buffer.alloc(content.byteLength));
+
+    const repeated = await downloadPythonApplicationPlans({ bundleDir, targets });
+
+    expect(repeated).toMatchObject({ downloaded: 0, errors: [], existing: 1 });
+    expect((await verifyPythonApplicationBundle(bundleDir)).errors).toContain(
+      `Python application artifact SHA-256 mismatch: ${index!.artifacts[0]!.file}`
+    );
+  });
+
   it('preserves unselected references during a partial target update', async () => {
     const oldContent = wheelBuffer('1.0.0');
     const oldSha = createHash('sha256').update(oldContent).digest('hex');

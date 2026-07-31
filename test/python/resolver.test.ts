@@ -258,6 +258,42 @@ describe('resolvePython', () => {
     ]);
   });
 
+  it('resolves independent approximate packages concurrently and shares project lookups', async () => {
+    const index = new FakeIndex();
+    index.add('first', '1.0');
+    index.add('second', '1.0');
+    const originalGetProject = index.getProject.bind(index);
+    let active = 0;
+    let maxActive = 0;
+    let release!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    index.getProject = async (name: string) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (active === 2) {
+        release();
+      }
+      await bothStarted;
+      active -= 1;
+      return await originalGetProject(name);
+    };
+
+    const result = await resolvePython({
+      allowApproximate: true,
+      cache: new PythonMetadataCache(),
+      concurrency: 2,
+      environments,
+      index,
+      requirements: [requirement('first==1.0'), requirement('second==1.0')],
+    });
+
+    expect(maxActive).toBe(2);
+    expect(result.errors).toEqual([]);
+    expect(result.artifacts).toHaveLength(4);
+  });
+
   it('reports packages without compatible wheels', async () => {
     const index = new FakeIndex();
     index.add('native', '1.0', [], wheel('native', '1.0', 'cp311-cp311-win_amd64'));

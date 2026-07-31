@@ -6,8 +6,14 @@ import type {
 } from './input-types.js';
 import type { ParsedRequirement } from './requirements.js';
 import { parseRequirement } from './requirements.js';
-import type { PythonIndexClient, PythonIndexFile, PythonProjectIndex } from './index-client.js';
+import type {
+  PythonIndexClient,
+  PythonIndexFile,
+  PythonMetadataResult,
+  PythonProjectIndex,
+} from './index-client.js';
 import { PythonMetadataCache } from './metadata.js';
+import { mapConcurrent } from '../concurrency.js';
 import type { ResolvedTargetEnvironment } from './environments.js';
 import {
   environmentSatisfiesRequiresPython,
@@ -46,6 +52,7 @@ interface SelectedPackage {
 export interface ResolvePythonOptions {
   allowApproximate?: boolean;
   cache: PythonMetadataCache;
+  concurrency?: number;
   defaultResolutionMode?: PythonResolutionMode;
   environments: PythonTargetEnvironmentConfig[];
   includeDev?: boolean;
@@ -204,11 +211,10 @@ function uniqueEdges(edges: RequirementEdge[]): RequirementEdge[] {
 }
 
 async function selectUnlockedPackage(options: {
-  cache: PythonMetadataCache;
   edges: RequirementEdge[];
   environment: ResolvedTargetEnvironment;
+  getMetadata: (file: PythonIndexFile) => Promise<PythonMetadataResult>;
   getProject: (name: string) => Promise<PythonProjectIndex>;
-  index: PythonIndexClient;
 }): Promise<SelectedPackage> {
   const name = options.edges[0]!.requirement.normalizedName;
   const project = await options.getProject(name);
@@ -234,7 +240,7 @@ async function selectUnlockedPackage(options: {
       remaining.splice(remaining.indexOf(version), 1);
       continue;
     }
-    const metadata = (await options.index.getMetadata(file, options.cache)).metadata;
+    const metadata = (await options.getMetadata(file)).metadata;
     if (
       metadata.requiresPython &&
       !environmentSatisfiesRequiresPython(options.environment, metadata.requiresPython)
@@ -326,22 +332,13 @@ function selectionSignature(selected: Map<string, SelectedPackage>): string {
 }
 
 async function resolveUnlockedEnvironment(options: {
-  cache: PythonMetadataCache;
+  concurrency?: number;
   environment: ResolvedTargetEnvironment;
-  index: PythonIndexClient;
+  getMetadata: (file: PythonIndexFile) => Promise<PythonMetadataResult>;
+  getProject: (name: string) => Promise<PythonProjectIndex>;
   requirements: PythonRequirementInput[];
 }): Promise<{ artifacts: ResolvedPythonArtifact[]; errors: PythonResolutionError[] }> {
   const errors: PythonResolutionError[] = [];
-  const projects = new Map<string, Promise<PythonProjectIndex>>();
-  const getProject = (name: string): Promise<PythonProjectIndex> => {
-    const existing = projects.get(name);
-    if (existing) {
-      return existing;
-    }
-    const request = options.index.getProject(name);
-    projects.set(name, request);
-    return request;
-  };
   let roots: RequirementEdge[];
   try {
     roots = rootEdges(options.requirements, options.environment);
@@ -368,31 +365,42 @@ async function resolveUnlockedEnvironment(options: {
       group.push(edge);
       groups.set(edge.requirement.normalizedName, group);
     }
-    const next = new Map<string, SelectedPackage>();
-    for (const [name, edges] of [...groups].sort(([left], [right]) => left.localeCompare(right))) {
-      if (!edges.some((edge) => !edge.constraint)) {
-        continue;
+    const packageGroups = [...groups]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .filter(([, edges]) => edges.some((edge) => !edge.constraint));
+    const selections = await mapConcurrent(
+      packageGroups,
+      options.concurrency,
+      async ([name, edges]) => {
+        try {
+          return {
+            name,
+            selected: await selectUnlockedPackage({
+              edges,
+              environment: options.environment,
+              getMetadata: options.getMetadata,
+              getProject: options.getProject,
+            }),
+          };
+        } catch (error) {
+          return { error: (error as Error).message, name };
+        }
       }
-      try {
-        next.set(
-          name,
-          await selectUnlockedPackage({
-            cache: options.cache,
-            edges,
-            environment: options.environment,
-            getProject,
-            index: options.index,
-          })
-        );
-      } catch (error) {
+    );
+    const next = new Map<string, SelectedPackage>();
+    for (const selection of selections) {
+      const edges = groups.get(selection.name)!;
+      if ('error' in selection) {
         const first = edges.find((edge) => !edge.constraint) ?? edges[0]!;
         errors.push({
           environment: options.environment.name,
-          name,
+          name: selection.name,
           raw: first.reason.raw,
-          reason: (error as Error).message,
+          reason: selection.error,
           requiredBy: first.reason.requiredBy,
         });
+      } else {
+        next.set(selection.name, selection.selected);
       }
     }
     if (errors.length > 0) {
@@ -630,6 +638,30 @@ export async function resolvePython(
   const errors: PythonResolutionError[] = [];
   const lockfiles = options.lockfiles ?? [];
   const requirements = unlockedRequirements(options.requirements ?? [], lockfiles);
+  const projectRequests = new Map<string, Promise<PythonProjectIndex>>();
+  const metadataRequests = new Map<string, Promise<PythonMetadataResult>>();
+  const getProject = (name: string): Promise<PythonProjectIndex> => {
+    const existing = projectRequests.get(name);
+    if (existing) {
+      return existing;
+    }
+    const request = options.index.getProject(name);
+    projectRequests.set(name, request);
+    return request;
+  };
+  const getMetadata = (file: PythonIndexFile): Promise<PythonMetadataResult> => {
+    const key = JSON.stringify({
+      hashes: Object.entries(file.hashes).sort(([left], [right]) => left.localeCompare(right)),
+      url: file.url,
+    });
+    const existing = metadataRequests.get(key);
+    if (existing) {
+      return existing;
+    }
+    const request = options.index.getMetadata(file, options.cache);
+    metadataRequests.set(key, request);
+    return request;
+  };
   for (const environment of environments) {
     const locked = resolveLockedEnvironment(lockfiles, environment, options.includeDev === true);
     errors.push(...locked.errors);
@@ -645,9 +677,10 @@ export async function resolvePython(
     );
     const unlocked = approximateRequirements.some((input) => !input.constraint)
       ? await resolveUnlockedEnvironment({
-          cache: options.cache,
+          ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
           environment,
-          index: options.index,
+          getMetadata,
+          getProject,
           requirements: approximateRequirements,
         })
       : { artifacts: [], errors: [] };

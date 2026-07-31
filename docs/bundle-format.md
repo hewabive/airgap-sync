@@ -138,6 +138,9 @@ needs to open wheel archives.
 `python-metadata-cache.json` stores Core Metadata keyed by source index, artifact URL,
 and source hashes. `python-fetch-report.json` records per-environment totals, planned or
 downloaded files, unsupported inputs, and resolution/download errors.
+When the source index supplies an artifact size, incremental download can reuse a file
+whose active seed-manifest identity and current size still match; an explicit bundle
+verification remains the full-content integrity check.
 
 For schema-v2 `python-app` bundles, this manifest is also a publication-compatibility
 view over content-addressed wheel paths. The authoritative application contract is
@@ -165,6 +168,12 @@ An interrupted download may leave verified content-addressed files, but the inde
 application document set are replaced only after the whole requested run succeeds.
 Retry reuses those files. Partial target downloads merge references and never remove
 objects belonging to unselected applications.
+
+Incremental `download` treats an artifact recorded by the active index as previously
+verified when its path, identity, source URL, and current size still match. This avoids
+rehashing an unchanged multi-gigabyte bundle on every update check. New files and files
+not covered by the active index are always SHA-256 verified before use. Run
+`airgap-sync verify` for an explicit full-content integrity check.
 
 The application index schema is version 2. A schema-v1 application bundle must be
 downloaded once with the current version before publication; existing content-addressed

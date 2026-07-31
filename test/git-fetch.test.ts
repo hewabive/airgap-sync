@@ -6,6 +6,7 @@ import {
   fetchGitSources,
   runGitCommand,
   type GitCommandInvocation,
+  type GitCommandResult,
 } from '../src/core/git-fetch.js';
 import type { GitSourcesManifest } from '../src/types.js';
 
@@ -55,6 +56,12 @@ function mirrorHeadSyncCalls(mirrorPath: string): GitCommandInvocation[] {
       args: mirrorGitArgs(mirrorPath, ['symbolic-ref', 'HEAD', 'refs/heads/main']),
     },
   ];
+}
+
+function mirrorConfigCheckCall(mirrorPath: string): GitCommandInvocation {
+  return {
+    args: mirrorGitArgs(mirrorPath, ['config', '--get-regexp', '^remote\\.origin\\.(url|fetch)$']),
+  };
 }
 
 describe('fetchGitSources', () => {
@@ -195,6 +202,7 @@ describe('fetchGitSources', () => {
           'refs/tags',
         ]),
       },
+      mirrorConfigCheckCall(targetPath),
       {
         args: mirrorGitArgs(targetPath, [
           'remote',
@@ -277,6 +285,7 @@ describe('fetchGitSources', () => {
           'refs/tags',
         ]),
       },
+      mirrorConfigCheckCall(targetPath),
       {
         args: mirrorGitArgs(targetPath, [
           'remote',
@@ -414,6 +423,87 @@ describe('fetchGitSources', () => {
       },
       ...mirrorHeadSyncCalls(path.join(mirrorsDir, 'github.com/owner/repo.git')),
     ]);
+  });
+
+  it('fetches independent mirrors concurrently while keeping report order stable', async () => {
+    const manifest: GitSourcesManifest = {
+      ...sourcesManifest,
+      sources: [
+        sourcesManifest.sources[0]!,
+        {
+          ...sourcesManifest.sources[0]!,
+          id: 'github.com/owner/second',
+          localMirrorPath: 'git-mirrors/github.com/owner/second.git',
+          repo: 'second',
+          sourceUrl: 'https://github.com/owner/second.git',
+        },
+      ],
+    };
+    const blockedFetches: (() => void)[] = [];
+    let activeFetches = 0;
+    let maxActiveFetches = 0;
+
+    const report = await fetchGitSources({
+      bundleDir,
+      concurrency: 2,
+      manifest,
+      runner: (invocation) => {
+        if (invocation.args.includes('fetch')) {
+          activeFetches += 1;
+          maxActiveFetches = Math.max(maxActiveFetches, activeFetches);
+          return new Promise<GitCommandResult>((resolve) => {
+            blockedFetches.push(() => {
+              activeFetches -= 1;
+              resolve({ stderr: '', stdout: '' });
+            });
+            if (blockedFetches.length === 2) {
+              blockedFetches.splice(0).forEach((release) => {
+                release();
+              });
+            }
+          });
+        }
+        return Promise.resolve(remoteHeadCommandResult(invocation) ?? { stderr: '', stdout: '' });
+      },
+    });
+
+    expect(maxActiveFetches).toBe(2);
+    expect(report.actions.map((action) => action.repository)).toEqual([
+      'github.com/owner/repo',
+      'github.com/owner/second',
+    ]);
+  });
+
+  it('does not rewrite an already correct mirror remote configuration', async () => {
+    const targetPath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(targetPath);
+    const calls: GitCommandInvocation[] = [];
+
+    await fetchGitSources({
+      bundleDir,
+      manifest: sourcesManifest,
+      runner: (invocation) => {
+        calls.push(invocation);
+        if (invocation.args.includes('--get-regexp')) {
+          return Promise.resolve({
+            stderr: '',
+            stdout: [
+              'remote.origin.url https://github.com/owner/repo.git',
+              'remote.origin.fetch +refs/heads/*:refs/heads/*',
+              'remote.origin.fetch +refs/tags/*:refs/tags/*',
+            ].join('\n'),
+          });
+        }
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({ stderr: '', stdout: 'refs/heads/main abc123\n' });
+        }
+        return Promise.resolve(remoteHeadCommandResult(invocation) ?? { stderr: '', stdout: '' });
+      },
+    });
+
+    expect(calls.some((call) => call.args.includes('set-url'))).toBe(false);
+    expect(calls.filter((call) => call.args.includes('--replace-all'))).toHaveLength(0);
+    expect(calls.filter((call) => call.args.includes('--get-regexp'))).toHaveLength(1);
   });
 
   it('sets and repairs a mirror HEAD from the upstream default branch', async () => {

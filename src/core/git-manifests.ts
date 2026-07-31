@@ -6,6 +6,7 @@ import {
   type ReadManifestRequirementsOptions,
 } from './manifests.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
+import { mapConcurrent } from './concurrency.js';
 import { parseLockfileRequirementsFromContent } from './lockfiles.js';
 import { parsePackageManagerRequirements } from './package-managers.js';
 import { runGitOutputCommand, type GitOutputCommandRunner } from './repos.js';
@@ -33,6 +34,7 @@ const ignoredPathParts = new Set([
 ]);
 
 export interface ReadGitSourceManifestRequirementsOptions extends ReadManifestRequirementsOptions {
+  concurrency?: number;
   includePython?: boolean;
   mirrorPath: string;
   runner?: GitOutputCommandRunner;
@@ -199,10 +201,10 @@ export async function readGitSourceManifestRequirements(
       .filter((lockfilePath) => path.posix.basename(lockfilePath) === 'pnpm-lock.yaml')
       .map(directoryName)
   );
-  const entriesByPath = new Map<string, ProjectManifestEntry>();
-
-  for (const manifestPath of manifestPaths) {
-    entriesByPath.set(manifestPath, {
+  const manifestEntries = await mapConcurrent(
+    manifestPaths,
+    options.concurrency,
+    async (manifestPath): Promise<ProjectManifestEntry> => ({
       manifest: await readPackageJsonFromGit({
         filePath: manifestPath,
         mirrorPath,
@@ -210,8 +212,9 @@ export async function readGitSourceManifestRequirements(
         runner,
       }),
       path: manifestPath,
-    });
-  }
+    })
+  );
+  const entriesByPath = new Map(manifestEntries.map((entry) => [entry.path, entry] as const));
   const entries = unlockedManifestPaths.map((manifestPath) => entriesByPath.get(manifestPath)!);
   const parsedManifests = parseManifestRequirementsFromEntries(entries, subdir, {
     includeDev: options.includeDev === true,
@@ -230,9 +233,10 @@ export async function readGitSourceManifestRequirements(
       };
     })
   );
-  const parsedLockfiles: ParseRootSpecsResult[] = [];
-  for (const lockfilePath of lockfilePaths) {
-    parsedLockfiles.push(
+  const parsedLockfiles = await mapConcurrent(
+    lockfilePaths,
+    options.concurrency,
+    async (lockfilePath): Promise<ParseRootSpecsResult> =>
       parseLockfileRequirementsFromContent(
         path.basename(lockfilePath),
         await readFileFromGit({
@@ -243,8 +247,7 @@ export async function readGitSourceManifestRequirements(
         }),
         `lockfile:${lockfilePath}`
       )
-    );
-  }
+  );
   const python = options.includePython
     ? await discoverPythonInputsFromPaths(
         repositoryPaths.filter((filePath) => !isIgnoredRepositoryPath(filePath)),

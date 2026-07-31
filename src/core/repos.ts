@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import * as fs from './fs.js';
 import type { RepositoryUpdateReport, RepositoryUpdateResult } from '../types.js';
+import { mapConcurrent } from './concurrency.js';
 
 const ignoredDirectoryNames = new Set([
   '.git',
@@ -31,6 +32,7 @@ export type GitOutputCommandRunner = (
 ) => Promise<GitOutputCommandResult>;
 
 export interface UpdateRepositoriesOptions {
+  concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
   onProgress?: (event: RepositoryUpdateProgressEvent) => void;
@@ -179,22 +181,24 @@ export async function updateRepositories(
   const root = path.resolve(options.root);
   const runner = options.runner ?? runGitOutputCommand;
   const repositories = await findGitRepositories(root);
-  const results: RepositoryUpdateResult[] = [];
   options.onProgress?.({
     current: 0,
     status: 'start',
     total: repositories.length,
   });
 
-  for (const [index, repository] of repositories.entries()) {
-    results.push(await updateRepository(repository, options.dryRun === true, runner));
+  let completed = 0;
+  const results = await mapConcurrent(repositories, options.concurrency, async (repository) => {
+    const result = await updateRepository(repository, options.dryRun === true, runner);
+    completed += 1;
     options.onProgress?.({
-      current: index + 1,
+      current: completed,
       repository,
       status: 'progress',
       total: repositories.length,
     });
-  }
+    return result;
+  });
   options.onProgress?.({
     current: results.length,
     status: 'done',

@@ -160,4 +160,101 @@ describe('fetchPythonBundle', () => {
     expect(failed.manifest).toBeUndefined();
     expect(failed.report.errors[0]?.reason).toContain('sha256 mismatch');
   });
+
+  it('downloads independent wheels concurrently', async () => {
+    const firstWheel = createStoredZip([
+      {
+        data: Buffer.from('Metadata-Version: 2.4\nName: first\nVersion: 1.0\n'),
+        name: 'first-1.0.dist-info/METADATA',
+      },
+    ]);
+    const secondWheel = createStoredZip([
+      {
+        data: Buffer.from('Metadata-Version: 2.4\nName: second\nVersion: 2.0\n'),
+        name: 'second-2.0.dist-info/METADATA',
+      },
+    ]);
+    const bodies = new Map([
+      ['/first-1.0-py3-none-any.whl', firstWheel],
+      ['/second-2.0-py3-none-any.whl', secondWheel],
+    ]);
+    const pending: { body: Buffer; response: http.ServerResponse }[] = [];
+    let maxActive = 0;
+    const server = http.createServer((request, response) => {
+      const body = bodies.get(request.url ?? '');
+      if (!body) {
+        response.writeHead(404).end();
+        return;
+      }
+      pending.push({ body, response });
+      maxActive = Math.max(maxActive, pending.length);
+      if (pending.length === 2) {
+        pending.splice(0).forEach((entry) => entry.response.end(entry.body));
+      }
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${String(address.port)}`;
+    const environments = configs.map(resolveTargetEnvironment);
+    const resolved: PythonResolutionResult = {
+      approximate: false,
+      artifacts: [
+        {
+          approximate: false,
+          environment: environments[0]!.name,
+          file: {
+            filename: 'first-1.0-py3-none-any.whl',
+            hashes: { sha256: sha256(firstWheel) },
+            size: firstWheel.length,
+            url: `${baseUrl}/first-1.0-py3-none-any.whl`,
+          },
+          name: 'first',
+          reasons: [
+            {
+              raw: 'first==1.0',
+              requiredBy: 'root',
+              sourcePath: 'requirements.txt',
+              type: 'requirement',
+            },
+          ],
+          version: '1.0',
+        },
+        {
+          approximate: false,
+          environment: environments[1]!.name,
+          file: {
+            filename: 'second-2.0-py3-none-any.whl',
+            hashes: { sha256: sha256(secondWheel) },
+            size: secondWheel.length,
+            url: `${baseUrl}/second-2.0-py3-none-any.whl`,
+          },
+          name: 'second',
+          reasons: [
+            {
+              raw: 'second==2.0',
+              requiredBy: 'root',
+              sourcePath: 'requirements.txt',
+              type: 'requirement',
+            },
+          ],
+          version: '2.0',
+        },
+      ],
+      environments,
+      errors: [],
+    };
+
+    const result = await fetchPythonBundle({
+      bundleDir: tempDir,
+      cache: new PythonMetadataCache(),
+      concurrency: 2,
+      resolution: resolved,
+      sourceIndex: 'https://pypi.org/simple',
+      targetEnvironments: configs,
+    });
+
+    expect(maxActive).toBe(2);
+    expect(result.report).toMatchObject({ downloaded: 2, errors: [] });
+  });
 });

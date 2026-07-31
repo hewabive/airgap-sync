@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { semanticDigest } from '../canonical-json.js';
+import { mapConcurrent } from '../concurrency.js';
 import * as fs from '../fs.js';
 import {
   pythonApplicationIndexPath,
@@ -143,6 +144,7 @@ export interface PythonApplicationDownloadProgressEvent {
 
 export interface DownloadPythonApplicationPlansOptions {
   bundleDir: string;
+  concurrency?: number;
   dryRun?: boolean;
   fetch?: typeof globalThis.fetch;
   generatedAt?: string;
@@ -580,6 +582,13 @@ async function createPythonSeedCompatibilityManifest(
       )
       .map((pkg) => `${pkg.name}==${pkg.version}`)
   );
+  const previousApplicationFiles = new Map(
+    (existing?.packages ?? []).flatMap((pkg) =>
+      pkg.files
+        .filter((file) => file.file.startsWith(`${pythonWheelArtifactsDirectory}/`))
+        .map((file) => [file.file, file] as const)
+    )
+  );
   const packages = new Map<string, PythonSeedPackage>();
   for (const pkg of existing?.packages ?? []) {
     const legacyFiles = pkg.files.filter(
@@ -594,9 +603,13 @@ async function createPythonSeedCompatibilityManifest(
       throw new Error(`Python wheel artifact has no package identity: ${artifact.id}`);
     }
     const packageName = artifact.package;
-    const metadata = parseCoreMetadata(
-      await readWheelMetadata(path.join(bundleDir, artifact.file))
-    );
+    const previousFile = previousApplicationFiles.get(artifact.file);
+    const metadata =
+      previousFile?.filename === artifact.filename &&
+      previousFile.sha256 === artifact.sha256 &&
+      previousFile.url === artifact.sourceUrl
+        ? previousFile.coreMetadata
+        : parseCoreMetadata(await readWheelMetadata(path.join(bundleDir, artifact.file)));
     const environments = [
       ...new Set(
         artifact.references.flatMap((reference) => {
@@ -782,6 +795,10 @@ export async function downloadPythonApplicationPlans(
   const bundleDir = path.resolve(options.bundleDir);
   const dryRun = options.dryRun === true;
   const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const currentIndex = await readCurrentIndex(bundleDir, true);
+  const indexedArtifacts = new Map(
+    (currentIndex?.artifacts ?? []).map((artifact) => [artifact.id, artifact])
+  );
   const plannedArtifacts = collectPlannedArtifacts(options.targets);
   const orderedArtifacts = [...plannedArtifacts.values()].sort((left, right) =>
     left.artifact.id.localeCompare(right.artifact.id)
@@ -796,112 +813,148 @@ export async function downloadPythonApplicationPlans(
     status: 'start',
     total: totalArtifacts,
   });
-  for (const [artifactIndex, planned] of orderedArtifacts.entries()) {
-    const targetPath = path.join(bundleDir, planned.artifact.file);
-    let lastByteDetail: string | undefined;
-    let lastByteProgressAt = 0;
-    const reportBytes = (detail: string, bytes: number, totalBytes?: number): void => {
-      const now = Date.now();
-      const detailChanged = detail !== lastByteDetail;
-      const reachedEnd = totalBytes !== undefined && bytes === totalBytes;
-      if (!detailChanged && !reachedEnd && now - lastByteProgressAt < 1_000) {
-        return;
-      }
-      lastByteDetail = detail;
-      lastByteProgressAt = now;
+  let completed = 0;
+  const artifactResults = await mapConcurrent(
+    orderedArtifacts,
+    options.concurrency,
+    async (planned) => {
+      const targetPath = path.join(bundleDir, planned.artifact.file);
+      let lastByteDetail: string | undefined;
+      let lastByteProgressAt = 0;
+      const reportBytes = (detail: string, bytes: number, totalBytes?: number): void => {
+        const now = Date.now();
+        const detailChanged = detail !== lastByteDetail;
+        const reachedEnd = totalBytes !== undefined && bytes === totalBytes;
+        if (!detailChanged && !reachedEnd && now - lastByteProgressAt < 1_000) {
+          return;
+        }
+        lastByteDetail = detail;
+        lastByteProgressAt = now;
+        options.onProgress?.({
+          bytes,
+          current: completed,
+          detail,
+          status: 'progress',
+          total: totalArtifacts,
+          ...(totalBytes === undefined ? {} : { totalBytes }),
+        });
+      };
       options.onProgress?.({
-        bytes,
-        current: artifactIndex,
-        detail,
+        current: completed,
+        detail: `inspect ${planned.artifact.filename}`,
         status: 'progress',
         total: totalArtifacts,
-        ...(totalBytes === undefined ? {} : { totalBytes }),
       });
-    };
-    options.onProgress?.({
-      current: artifactIndex,
-      detail: `inspect ${planned.artifact.filename}`,
-      status: 'progress',
-      total: totalArtifacts,
-    });
-    try {
-      const existing = (await fs.pathExists(targetPath))
-        ? await hashFile(targetPath, (bytes) => {
-            reportBytes(
-              `verify ${planned.artifact.filename}`,
-              bytes,
-              planned.artifact.expectedSize
-            );
-          })
-        : undefined;
-      const matches =
-        existing?.sha256 === planned.artifact.sha256 &&
-        (planned.artifact.expectedSize === undefined ||
-          existing.size === planned.artifact.expectedSize);
-      let status: PythonApplicationDownloadStatus;
-      let size: number;
-      if (matches) {
-        status = 'existing';
-        size = existing.size;
-      } else if (
-        !dryRun &&
-        (await reuseLegacyWheel(bundleDir, planned.artifact, targetPath, (bytes) => {
-          reportBytes(`reuse ${planned.artifact.filename}`, bytes, planned.artifact.expectedSize);
-        }))
-      ) {
-        status = 'reused';
-        size = (await fs.stat(targetPath)).size;
-      } else if (dryRun) {
-        status = 'would-download';
-        size = planned.artifact.expectedSize ?? 0;
-        incrementalIds.add(planned.artifact.id);
-      } else {
-        size = await downloadArtifact(
-          planned.artifact,
-          targetPath,
-          options.fetch ?? globalThis.fetch,
-          (bytes, totalBytes) => {
-            reportBytes(`download ${planned.artifact.filename}`, bytes, totalBytes);
+      let result:
+        | {
+            action: PythonApplicationDownloadAction;
+            artifact: PythonApplicationBundleArtifact;
+            incremental: boolean;
           }
-        );
-        status = 'downloaded';
-        incrementalIds.add(planned.artifact.id);
+        | { action: PythonApplicationDownloadAction };
+      try {
+        const indexed = indexedArtifacts.get(planned.artifact.id);
+        const indexedMatch =
+          indexed?.file === planned.artifact.file &&
+          indexed.filename === planned.artifact.filename &&
+          indexed.sha256 === planned.artifact.sha256 &&
+          indexed.sourceUrl === planned.artifact.sourceUrl &&
+          (planned.artifact.expectedSize === undefined ||
+            indexed.size === planned.artifact.expectedSize);
+        const indexedStat =
+          indexedMatch && (await fs.pathExists(targetPath)) ? await fs.stat(targetPath) : undefined;
+        const existing =
+          indexed && indexedStat?.size === indexed.size
+            ? { sha256: indexed.sha256, size: indexed.size }
+            : (await fs.pathExists(targetPath))
+              ? await hashFile(targetPath, (bytes) => {
+                  reportBytes(
+                    `verify ${planned.artifact.filename}`,
+                    bytes,
+                    planned.artifact.expectedSize
+                  );
+                })
+              : undefined;
+        const matches =
+          existing?.sha256 === planned.artifact.sha256 &&
+          (planned.artifact.expectedSize === undefined ||
+            existing.size === planned.artifact.expectedSize);
+        let status: PythonApplicationDownloadStatus;
+        let size: number;
+        if (matches) {
+          status = 'existing';
+          size = existing.size;
+        } else if (
+          !dryRun &&
+          (await reuseLegacyWheel(bundleDir, planned.artifact, targetPath, (bytes) => {
+            reportBytes(`reuse ${planned.artifact.filename}`, bytes, planned.artifact.expectedSize);
+          }))
+        ) {
+          status = 'reused';
+          size = (await fs.stat(targetPath)).size;
+        } else if (dryRun) {
+          status = 'would-download';
+          size = planned.artifact.expectedSize ?? 0;
+        } else {
+          size = await downloadArtifact(
+            planned.artifact,
+            targetPath,
+            options.fetch ?? globalThis.fetch,
+            (bytes, totalBytes) => {
+              reportBytes(`download ${planned.artifact.filename}`, bytes, totalBytes);
+            }
+          );
+          status = 'downloaded';
+        }
+        result = {
+          action: {
+            file: planned.artifact.file,
+            id: planned.artifact.id,
+            kind: planned.artifact.kind,
+            size,
+            status,
+          },
+          artifact: {
+            ...planned.artifact,
+            references: planned.references.sort((left, right) =>
+              left.targetId.localeCompare(right.targetId)
+            ),
+            size,
+          },
+          incremental: status === 'downloaded' || status === 'would-download',
+        };
+      } catch (error) {
+        const message = (error as Error).message;
+        result = {
+          action: {
+            error: message,
+            file: planned.artifact.file,
+            id: planned.artifact.id,
+            kind: planned.artifact.kind,
+            status: 'error',
+          },
+        };
       }
-      downloadedArtifacts.set(planned.artifact.id, {
-        ...planned.artifact,
-        references: planned.references.sort((left, right) =>
-          left.targetId.localeCompare(right.targetId)
-        ),
-        size,
-      });
-      actions.push({
-        file: planned.artifact.file,
-        id: planned.artifact.id,
-        kind: planned.artifact.kind,
-        size,
-        status,
-      });
+      completed += 1;
       options.onProgress?.({
-        current: artifactIndex + 1,
-        detail: `${status} ${planned.artifact.filename}`,
+        current: completed,
+        detail:
+          result.action.status === 'error'
+            ? `failed ${planned.artifact.filename}: ${result.action.error ?? 'unknown error'}`
+            : `${result.action.status} ${planned.artifact.filename}`,
         status: 'progress',
         total: totalArtifacts,
       });
-    } catch (error) {
-      const message = (error as Error).message;
-      actions.push({
-        error: message,
-        file: planned.artifact.file,
-        id: planned.artifact.id,
-        kind: planned.artifact.kind,
-        status: 'error',
-      });
-      options.onProgress?.({
-        current: artifactIndex + 1,
-        detail: `failed ${planned.artifact.filename}: ${message}`,
-        status: 'progress',
-        total: totalArtifacts,
-      });
+      return result;
+    }
+  );
+  for (const result of artifactResults) {
+    actions.push(result.action);
+    if ('artifact' in result) {
+      downloadedArtifacts.set(result.action.id, result.artifact);
+      if (result.incremental) {
+        incrementalIds.add(result.action.id);
+      }
     }
   }
   options.onProgress?.({
@@ -957,9 +1010,8 @@ export async function downloadPythonApplicationPlans(
   let index: PythonApplicationBundleIndex | undefined;
   let compatibilityManifest: PythonSeedManifest | undefined;
   if (!dryRun && actions.every((action) => action.status !== 'error')) {
-    const current = await readCurrentIndex(bundleDir, true);
     index = mergeIndex(
-      current,
+      currentIndex,
       entries,
       [...downloadedArtifacts.values()],
       options.partial !== true,
@@ -1012,12 +1064,7 @@ export async function downloadPythonApplicationPlans(
       });
       await Promise.all(
         options.targets.map(({ activePlan, targetId }) =>
-          writeApplicationDocuments(
-            bundleDir,
-            targetId,
-            activePlan,
-            consumerLocks.get(targetId)!
-          )
+          writeApplicationDocuments(bundleDir, targetId, activePlan, consumerLocks.get(targetId)!)
         )
       );
       await Promise.all([

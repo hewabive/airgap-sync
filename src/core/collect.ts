@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import * as fs from './fs.js';
+import { mapConcurrent } from './concurrency.js';
 import type {
   CollectGitManifestScanError,
   CollectIterationReport,
@@ -377,6 +378,7 @@ function emptyGitFetchReport(options: {
 
 async function scanGitSourceManifests(options: {
   bundleDir: string;
+  concurrency?: number;
   includeDev: boolean;
   includePeer: boolean;
   includePython: boolean;
@@ -406,26 +408,24 @@ async function scanGitSourceManifests(options: {
     unsupported: new Set<string>(),
   };
 
-  for (const source of options.sources) {
-    if (options.scannedSourceIds.has(source.id)) {
-      continue;
-    }
-
+  const sources = options.sources.filter((source) => !options.scannedSourceIds.has(source.id));
+  const perSourceConcurrency = sources.length > 1 ? 1 : options.concurrency;
+  const sourceResults = await mapConcurrent(sources, options.concurrency, async (source) => {
     const mirrorPath = gitSourceMirrorPath({
       bundleDir: options.bundleDir,
       source,
     });
     if (!(await fs.pathExists(mirrorPath))) {
-      errors.push({
+      return {
         error: 'Local Git mirror does not exist',
         mirrorPath,
-        sourceId: source.id,
-      });
-      continue;
+        source,
+      };
     }
 
     try {
       const result = await readGitSourceManifestRequirements({
+        ...(perSourceConcurrency === undefined ? {} : { concurrency: perSourceConcurrency }),
         includeDev: options.includeDev,
         includePeer: options.includePeer,
         includePython: options.includePython,
@@ -433,6 +433,29 @@ async function scanGitSourceManifests(options: {
         ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
         source,
       });
+      return { mirrorPath, result, source };
+    } catch (error) {
+      return {
+        error: (error as Error).message,
+        mirrorPath,
+        source,
+      };
+    }
+  });
+
+  for (const sourceResult of sourceResults) {
+    const { mirrorPath, source } = sourceResult;
+    if ('error' in sourceResult) {
+      errors.push({
+        error: sourceResult.error,
+        mirrorPath,
+        sourceId: source.id,
+      });
+      continue;
+    }
+
+    try {
+      const { result } = sourceResult;
       options.scannedSourceIds.add(source.id);
       scanned++;
       if (options.unchangedSourceIds?.has(source.id)) {
@@ -487,6 +510,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   });
   const repositoryUpdate = root
     ? await updateRepositories({
+        ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
         dryRun,
         generatedAt,
         onProgress: (event: RepositoryUpdateProgressEvent) => {
@@ -690,6 +714,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     if (shouldFetchGitSources) {
       gitFetch = await fetchGitSources({
         bundleDir: outputDir,
+        ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
         dryRun,
         generatedAt,
         manifest: gitSources,
@@ -743,6 +768,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       });
       const scan = await scanGitSourceManifests({
         bundleDir: outputDir,
+        ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
         includeDev,
         includePeer,
         includePython: pythonEnabled,
@@ -867,6 +893,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     const pythonResolution = await resolvePython({
       allowApproximate: options.allowApproximatePython === true,
       cache: pythonMetadataCache,
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       defaultResolutionMode: options.pythonResolutionMode ?? 'locked-only',
       environments: options.pythonTargetEnvironments,
       includeDev,
@@ -877,6 +904,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     pythonResult = await fetchPythonBundle({
       bundleDir: outputDir,
       cache: pythonMetadataCache,
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       dryRun,
       generatedAt,
       resolution: pythonResolution,

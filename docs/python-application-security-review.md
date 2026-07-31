@@ -27,6 +27,10 @@ service management, and rollback are outside its authority.
 - Artifact downloads use a temporary file, hash and size validation, and atomic rename.
   A failed multi-artifact run does not replace the bundle index; retry reuses already
   verified content-addressed files.
+- Incremental download uses the atomically activated content index plus file size as its
+  verified-object cache. It fully hashes new or unindexed files; the explicit `verify`
+  workflow rehashes every indexed artifact and should be used after untrusted storage
+  or transport.
 - Application document directories are prepared separately and atomically swapped.
 - Gitea Generic Package publication is immutable. On retry, a conflict is accepted
   only after downloading the existing object and matching its SHA-256.

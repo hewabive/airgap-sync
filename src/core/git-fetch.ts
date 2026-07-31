@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import * as fs from './fs.js';
 import type { GitFetchActionResult, GitFetchReport, GitSourcesManifest } from '../types.js';
+import { mapConcurrent } from './concurrency.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
 import { gitSourceMirrorPath } from './git-targets.js';
 
@@ -22,6 +23,7 @@ export type GitCommandRunner = (
 
 export interface FetchGitSourcesOptions {
   bundleDir: string;
+  concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
   manifest: GitSourcesManifest;
@@ -232,7 +234,10 @@ async function summarizeRefChanges(options: {
   };
 }
 
-async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Promise<void> {
+async function configureMirrorFetchRefspecs(
+  targetPath: string,
+  runner: GitCommandRunner
+): Promise<void> {
   await runner({
     args: safeDirectoryGitArgs(targetPath, [
       '-C',
@@ -253,6 +258,9 @@ async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Pr
       mirrorTagRefspec,
     ]),
   });
+}
+
+async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Promise<void> {
   await runner({
     args: safeDirectoryGitArgs(targetPath, ['-C', targetPath, 'fetch', '--prune', 'origin']),
   });
@@ -296,6 +304,61 @@ async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Pr
   });
 }
 
+function configuredRemoteMatches(stdout: string, sourceUrl: string): boolean {
+  const values = new Map<string, string[]>();
+  for (const line of stdout.split(/\r?\n/u)) {
+    const separator = line.search(/\s/u);
+    if (separator < 1) {
+      continue;
+    }
+    const key = line.slice(0, separator);
+    const entries = values.get(key) ?? [];
+    entries.push(line.slice(separator).trim());
+    values.set(key, entries);
+  }
+  const fetchRefspecs = values.get('remote.origin.fetch') ?? [];
+  return (
+    values.get('remote.origin.url')?.length === 1 &&
+    values.get('remote.origin.url')?.[0] === sourceUrl &&
+    fetchRefspecs.length === 2 &&
+    fetchRefspecs.includes(mirrorBranchRefspec) &&
+    fetchRefspecs.includes(mirrorTagRefspec)
+  );
+}
+
+async function ensureMirrorRemote(entry: FetchEntry, runner: GitCommandRunner): Promise<void> {
+  let configured = false;
+  try {
+    const result = await runner({
+      args: safeDirectoryGitArgs(entry.targetPath, [
+        '-C',
+        entry.targetPath,
+        'config',
+        '--get-regexp',
+        '^remote\\.origin\\.(url|fetch)$',
+      ]),
+    });
+    configured = result ? configuredRemoteMatches(result.stdout, entry.sourceUrl) : false;
+  } catch {
+    // A missing or malformed origin is repaired by the commands below.
+  }
+  if (configured) {
+    return;
+  }
+
+  await runner({
+    args: safeDirectoryGitArgs(entry.targetPath, [
+      '-C',
+      entry.targetPath,
+      'remote',
+      'set-url',
+      'origin',
+      entry.sourceUrl,
+    ]),
+  });
+  await configureMirrorFetchRefspecs(entry.targetPath, runner);
+}
+
 async function fetchEntry(
   entry: FetchEntry,
   runner: GitCommandRunner
@@ -303,16 +366,7 @@ async function fetchEntry(
   try {
     if (await fs.pathExists(entry.targetPath)) {
       const before = await refsSnapshot(entry.targetPath, runner);
-      await runner({
-        args: safeDirectoryGitArgs(entry.targetPath, [
-          '-C',
-          entry.targetPath,
-          'remote',
-          'set-url',
-          'origin',
-          entry.sourceUrl,
-        ]),
-      });
+      await ensureMirrorRemote(entry, runner);
       await fetchMirrorRefs(entry.targetPath, runner);
       const after = await refsSnapshot(entry.targetPath, runner);
       const changes =
@@ -355,6 +409,7 @@ async function fetchEntry(
         entry.sourceUrl,
       ]),
     });
+    await configureMirrorFetchRefspecs(entry.targetPath, runner);
     await fetchMirrorRefs(entry.targetPath, runner);
     return {
       changed: true,
@@ -375,6 +430,7 @@ async function fetchEntry(
 }
 
 async function fetchEntries(options: {
+  concurrency?: number;
   dryRun: boolean;
   entries: FetchEntry[];
   generatedAt?: string;
@@ -408,17 +464,20 @@ async function fetchEntries(options: {
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    for (const [index, entry] of options.entries.entries()) {
+    let completed = 0;
+    const results = await mapConcurrent(options.entries, options.concurrency, async (entry) => {
       const action = await fetchEntry(entry, runner);
-      actions.push(action);
+      completed += 1;
       options.onProgress?.({
         action,
-        current: index + 1,
+        current: completed,
         repository: entry.id,
         status: 'progress',
         total: options.entries.length,
       });
-    }
+      return action;
+    });
+    actions.push(...results);
   }
   options.onProgress?.({
     current: actions.length,
@@ -458,6 +517,7 @@ export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<
   }));
 
   return await fetchEntries({
+    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     dryRun: options.dryRun === true,
     entries,
     mirrorsDir,

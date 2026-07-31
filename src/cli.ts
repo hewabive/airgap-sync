@@ -1058,6 +1058,7 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
 }
 
 interface GitFetchOptions {
+  concurrency: number;
   dryRun?: boolean;
   mirrorsDir?: string;
 }
@@ -3750,7 +3751,12 @@ program
     'Range dependency policy: reuse-stable or refresh',
     parseRangeResolutionPolicy
   )
-  .option('--concurrency <count>', 'Parallel npm resolve/download workers', parsePositiveInteger, 8)
+  .option(
+    '--concurrency <count>',
+    'Parallel npm, Git, and Python operations',
+    parsePositiveInteger,
+    8
+  )
   .option(
     '--registry-timeout-ms <ms>',
     'Timeout for npm registry metadata requests',
@@ -3906,6 +3912,7 @@ program
         if (pythonApplicationPlans.length > 0 || targetSelection === undefined) {
           report.pythonApplications = await downloadPythonApplicationPlans({
             bundleDir: outputDir,
+            concurrency: options.concurrency,
             dryRun: options.dryRun === true,
             generatedAt: report.generatedAt,
             ...(activeConfig.giteaUrl ? { giteaBaseUrl: activeConfig.giteaUrl } : {}),
@@ -4402,12 +4409,14 @@ gitCommand
   .description('Clone or update local bare mirrors from Git source metadata')
   .argument('<bundle>', 'Path to airgap bundle directory')
   .option('--mirrors-dir <dir>', 'Directory for bare Git mirrors')
+  .option('--concurrency <count>', 'Parallel Git mirror workers', parsePositiveInteger, 8)
   .option('--dry-run', 'Print planned mirror fetch operations without running Git')
   .action(async (bundle: string, options: GitFetchOptions) => {
     try {
       const manifest = await readGitSourcesManifest(bundle);
       const report = await fetchGitSources({
         bundleDir: bundle,
+        concurrency: options.concurrency,
         dryRun: options.dryRun === true,
         manifest,
         onProgress: createGitFetchProgressLogger(),

@@ -1122,6 +1122,7 @@ describe('collectBundle', () => {
     });
     expect(gitCalls.map(gitCommand)).toEqual([
       `-C ${mirrorPath} for-each-ref --format=%(refname) %(objectname) refs/heads refs/tags`,
+      `-C ${mirrorPath} config --get-regexp ^remote\\.origin\\.(url|fetch)$`,
       `-C ${mirrorPath} remote set-url origin https://github.com/acme/app.git`,
       `-C ${mirrorPath} config --replace-all remote.origin.fetch +refs/heads/*:refs/heads/*`,
       `-C ${mirrorPath} config --add remote.origin.fetch +refs/tags/*:refs/tags/*`,

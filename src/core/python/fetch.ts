@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import * as fs from '../fs.js';
+import { mapConcurrent } from '../concurrency.js';
 import { HttpStatusError, isRetryableFetchError, retry } from '../retry.js';
 import type { PythonTargetEnvironmentConfig } from './environments.js';
 import type { UnsupportedPythonInput } from './input-types.js';
@@ -23,12 +24,14 @@ import {
   type PythonSeedManifest,
   type PythonSeedPackage,
   type PythonSeedReason,
+  readPythonSeedManifest,
   resolutionErrors,
 } from './bundle.js';
 
 export interface FetchPythonBundleOptions {
   bundleDir: string;
   cache: PythonMetadataCache;
+  concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
   resolution: PythonResolutionResult;
@@ -145,16 +148,48 @@ async function existingFile(
   return { sha256: actual.sha256, size: actual.size, status: 'skipped' };
 }
 
+async function indexedExistingFile(
+  targetPath: string,
+  group: ArtifactGroup,
+  previous: PythonSeedFile | undefined
+): Promise<DownloadResult | undefined> {
+  const expected = selectStrongHash(group.file.hashes);
+  if (
+    !expected ||
+    !previous ||
+    group.file.size === undefined ||
+    previous.filename !== group.file.filename ||
+    previous.url !== group.file.url ||
+    previous.sourceHashes[expected.algorithm]?.toLowerCase() !== expected.digest.toLowerCase() ||
+    !/^[a-f0-9]{64}$/u.test(previous.sha256)
+  ) {
+    return undefined;
+  }
+  try {
+    const stat = await fs.stat(targetPath);
+    if (stat.size !== group.file.size) {
+      return undefined;
+    }
+    return { sha256: previous.sha256, size: stat.size, status: 'skipped' };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 async function downloadArtifact(
   group: ArtifactGroup,
   targetPath: string,
-  options: Pick<FetchPythonBundleOptions, 'retryDelaysMs' | 'timeoutMs'>
+  options: Pick<FetchPythonBundleOptions, 'retryDelaysMs' | 'timeoutMs'>,
+  knownExisting?: DownloadResult
 ): Promise<DownloadResult> {
   const expected = selectStrongHash(group.file.hashes);
   if (!expected) {
     throw new Error(`${group.file.filename} has no valid sha256-or-stronger source hash`);
   }
-  const existing = await existingFile(targetPath, expected, group.file.size);
+  const existing = knownExisting ?? (await existingFile(targetPath, expected, group.file.size));
   if (existing) {
     return existing;
   }
@@ -273,6 +308,21 @@ export async function fetchPythonBundle(
   const sizes = new Map<string, number>();
   const seedFiles = new Map<string, PythonSeedFile>();
   const filenames = new Map<string, string>();
+  const downloadableGroups: ArtifactGroup[] = [];
+  let previousFiles = new Map<string, PythonSeedFile>();
+
+  if (!dryRun) {
+    try {
+      const previous = await readPythonSeedManifest(options.bundleDir);
+      if (previous.sourceIndex === options.sourceIndex) {
+        previousFiles = new Map(
+          previous.packages.flatMap((pkg) => pkg.files.map((file) => [file.file, file] as const))
+        );
+      }
+    } catch {
+      // A missing or obsolete manifest simply disables the indexed fast path.
+    }
+  }
 
   for (const group of groups) {
     const identity = artifactKey(group.artifacts[0]!);
@@ -287,22 +337,31 @@ export async function fetchPythonBundle(
       continue;
     }
     filenames.set(group.file.filename, identity);
+    downloadableGroups.push(group);
+  }
+
+  const results = await mapConcurrent(downloadableGroups, options.concurrency, async (group) => {
+    const identity = artifactKey(group.artifacts[0]!);
     const relativeFile = path.posix.join('python-packages', group.file.filename);
     if (dryRun) {
-      actions.push({
-        environments: group.environments,
-        file: relativeFile,
-        package: `${group.name}@${group.version}`,
-        status: 'planned',
-      });
-      sizes.set(identity, group.file.size ?? 0);
-      continue;
+      return {
+        action: {
+          environments: group.environments,
+          file: relativeFile,
+          package: `${group.name}@${group.version}`,
+          status: 'planned' as const,
+        },
+        identity,
+        size: group.file.size ?? 0,
+      };
     }
 
     const targetPath = path.join(options.bundleDir, relativeFile);
     try {
-      const download = await downloadArtifact(group, targetPath, options);
-      let metadata = group.metadata;
+      const indexed = await indexedExistingFile(targetPath, group, previousFiles.get(relativeFile));
+      const download = await downloadArtifact(group, targetPath, options, indexed);
+      let metadata =
+        group.metadata ?? (indexed ? previousFiles.get(relativeFile)?.coreMetadata : undefined);
       if (!metadata) {
         metadata = parseCoreMetadata(await readWheelMetadata(targetPath));
         validateLocalMetadata(group, metadata);
@@ -315,33 +374,56 @@ export async function fetchPythonBundle(
           metadata
         );
       }
-      sizes.set(identity, download.size);
-      seedFiles.set(identity, {
-        coreMetadata: metadata,
-        environments: group.environments,
-        file: relativeFile,
-        filename: group.file.filename,
-        kind: 'wheel',
-        sha256: download.sha256,
-        sourceHashes: group.file.hashes,
-        url: group.file.url,
-      });
-      actions.push({
-        environments: group.environments,
-        file: relativeFile,
-        package: `${group.name}@${group.version}`,
-        status: download.status,
-      });
+      return {
+        action: {
+          environments: group.environments,
+          file: relativeFile,
+          package: `${group.name}@${group.version}`,
+          status: download.status,
+        },
+        identity,
+        seedFile: {
+          coreMetadata: metadata,
+          environments: group.environments,
+          file: relativeFile,
+          filename: group.file.filename,
+          kind: 'wheel' as const,
+          sha256: download.sha256,
+          sourceHashes: group.file.hashes,
+          url: group.file.url,
+        },
+        size: download.size,
+      };
     } catch (error) {
       const reason = (error as Error).message;
-      errors.push({ file: group.file.filename, name: group.name, reason, stage: 'download' });
-      actions.push({
-        environments: group.environments,
-        error: reason,
-        file: relativeFile,
-        package: `${group.name}@${group.version}`,
-        status: 'error',
-      });
+      return {
+        action: {
+          environments: group.environments,
+          error: reason,
+          file: relativeFile,
+          package: `${group.name}@${group.version}`,
+          status: 'error' as const,
+        },
+        error: {
+          file: group.file.filename,
+          name: group.name,
+          reason,
+          stage: 'download' as const,
+        },
+        identity,
+      };
+    }
+  });
+
+  for (const result of results) {
+    actions.push(result.action);
+    if ('error' in result) {
+      errors.push(result.error);
+      continue;
+    }
+    sizes.set(result.identity, result.size);
+    if ('seedFile' in result) {
+      seedFiles.set(result.identity, result.seedFile);
     }
   }
 
