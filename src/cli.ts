@@ -1125,8 +1125,6 @@ const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
 };
 
 const PROGRESS_HEARTBEAT_MS = 10_000;
-const gitFetchInteractivePromptHint =
-  'If SSH asked for a passphrase, type it now and press Enter; the prompt is still active.';
 
 function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
   const lastEvents = new Map<ApplyProgressPhase, ApplyProgressEvent>();
@@ -1266,13 +1264,14 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
     return `${prefix} ${label}: ${formatProgressState(event)}`;
   }
 
-  function formatHeartbeatLine(
-    event: DownloadProgressEvent,
-    label: string,
-    prefix: string
-  ): string {
-    const hint = event.phase === 'git-fetch' ? ` ${gitFetchInteractivePromptHint}` : '';
-    return `${prefix} ${label}: still running ${formatProgressState(event)}${hint}`;
+  function shouldHeartbeat(event: DownloadProgressEvent): boolean {
+    // SSH reads passphrases from the controlling terminal. A heartbeat written while
+    // it is waiting for input obscures that prompt even though the prompt remains active.
+    return !(
+      event.phase === 'git-fetch' &&
+      process.stdin.isTTY === true &&
+      process.stderr.isTTY === true
+    );
   }
 
   function recordOutput(key: string): void {
@@ -1301,6 +1300,9 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
       recordOutput(key);
 
       stopHeartbeat(key);
+      if (!shouldHeartbeat(event)) {
+        return;
+      }
       const timer = setInterval(() => {
         const latest = lastEvents.get(key);
         if (!latest) {
@@ -1310,7 +1312,7 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
         if (Date.now() - previousOutputAt < PROGRESS_HEARTBEAT_MS) {
           return;
         }
-        console.error(formatHeartbeatLine(latest, label, prefix));
+        console.error(`${prefix} ${label}: still running ${formatProgressState(latest)}`);
         recordOutput(key);
       }, PROGRESS_HEARTBEAT_MS);
       timer.unref();
