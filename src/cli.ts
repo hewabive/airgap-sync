@@ -30,6 +30,7 @@ import {
   createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   defaultPythonPublicationProfile,
+  defaultWorkspaceGiteaUrl,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
   fetchGitSources,
@@ -1913,7 +1914,7 @@ async function configureConnectionSettings(
   const giteaUrl = await ask(
     rl,
     'Closed-network Gitea URL',
-    config.giteaUrl ?? 'http://gitea.local:3000'
+    config.giteaUrl ?? defaultWorkspaceGiteaUrl
   );
   const nextConfig: WorkspaceConfig = {
     ...config,
@@ -2894,7 +2895,7 @@ async function giteaUrlFromMenu(workspaceDir: string, rl: ReadlineInterface): Pr
     return config.giteaUrl;
   }
 
-  const giteaUrl = await ask(rl, 'Closed-network Gitea URL', 'http://gitea.local:3000');
+  const giteaUrl = await ask(rl, 'Closed-network Gitea URL', defaultWorkspaceGiteaUrl);
   if (!giteaUrl) {
     throw new Error('Closed-network Gitea URL is required');
   }
@@ -2935,7 +2936,7 @@ async function configureCredentialsMenu(
         const giteaUrl = await ask(
           rl,
           'Closed-network Gitea URL',
-          config.giteaUrl ?? 'http://gitea.local'
+          config.giteaUrl ?? defaultWorkspaceGiteaUrl
         );
         const token = await giteaTokenFromMenu(workspaceDir, rl);
         const login = await checkGiteaToken(giteaUrl, token);

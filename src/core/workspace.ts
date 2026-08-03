@@ -46,6 +46,7 @@ export const workspaceConfigPythonPublicationProfileBackupFileName = `${workspac
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
+export const defaultWorkspaceGiteaUrl = 'http://127.0.0.1:3000';
 const defaultWorkspacePythonSourceIndex = 'https://pypi.org/simple/';
 const defaultWorkspacePythonApplicationArtifactOwner = 'python-apps';
 const defaultWorkspacePythonPublishOwner = 'pypi';
@@ -275,23 +276,23 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
       coveragePolicies: [
         {
           id: 'desktop-x64',
-          platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+          platforms: ['linux-glibc-x86_64'],
           version: 1,
           wheelStrategy: 'all-compatible',
         },
       ],
       defaults: {
         download: {
-          includeDev: 'ask',
-          includePeer: false,
+          includeDev: true,
+          includePeer: true,
           latestPolicy: 'bundled',
-          prune: false,
+          prune: true,
           rangeResolutionPolicy: 'reuse-stable',
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
-          configureGitGlobal: 'ask',
-          publicRepositories: false,
+          configureGitGlobal: false,
+          publicRepositories: true,
         },
         verifyInstall: {
           ignoreScripts: true,
@@ -315,16 +316,16 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
   return {
     defaults: {
       download: {
-        includeDev: 'ask',
-        includePeer: false,
+        includeDev: true,
+        includePeer: true,
         latestPolicy: 'bundled',
-        prune: false,
+        prune: true,
         rangeResolutionPolicy: 'reuse-stable',
         tagResolutionPolicy: 'reuse-stable',
       },
       publish: {
-        configureGitGlobal: 'ask',
-        publicRepositories: false,
+        configureGitGlobal: false,
+        publicRepositories: true,
       },
       verifyInstall: {
         ignoreScripts: true,

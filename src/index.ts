@@ -212,6 +212,7 @@ export {
   createWorkspacePythonRootWheels,
   createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
+  defaultWorkspaceGiteaUrl,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
   initWorkspace,

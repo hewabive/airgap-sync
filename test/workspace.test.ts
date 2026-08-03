@@ -46,16 +46,16 @@ describe('workspace config', () => {
     expect(config).toEqual({
       defaults: {
         download: {
-          includeDev: 'ask',
-          includePeer: false,
+          includeDev: true,
+          includePeer: true,
           latestPolicy: 'bundled',
-          prune: false,
+          prune: true,
           rangeResolutionPolicy: 'reuse-stable',
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
-          configureGitGlobal: 'ask',
-          publicRepositories: false,
+          configureGitGlobal: false,
+          publicRepositories: true,
         },
         verifyInstall: {
           ignoreScripts: true,
@@ -64,7 +64,7 @@ describe('workspace config', () => {
       coveragePolicies: [
         {
           id: 'desktop-x64',
-          platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+          platforms: ['linux-glibc-x86_64'],
           version: 1,
           wheelStrategy: 'all-compatible',
         },
@@ -200,16 +200,16 @@ describe('workspace config', () => {
     expect(await readWorkspaceConfig(tempDir)).toMatchObject({
       defaults: {
         download: {
-          includeDev: 'ask',
-          includePeer: false,
+          includeDev: true,
+          includePeer: true,
           latestPolicy: 'bundled',
-          prune: false,
+          prune: true,
           rangeResolutionPolicy: 'reuse-stable',
           tagResolutionPolicy: 'reuse-stable',
         },
         publish: {
-          configureGitGlobal: 'ask',
-          publicRepositories: false,
+          configureGitGlobal: false,
+          publicRepositories: true,
         },
         verifyInstall: {
           ignoreScripts: true,

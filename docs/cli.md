@@ -14,7 +14,7 @@ airgap-sync init
 airgap-sync init /media/USB/airgap-sync
 ```
 
-Creates a schema-v2 `airgap-sync.json`, broad Windows/Linux x86-64 Python coverage,
+Creates a schema-v2 `airgap-sync.json`, Linux x86-64 Python coverage,
 maintained workspace-local application recipes, and the default directories:
 
 ```text

@@ -108,7 +108,7 @@ New workspaces use application-first schema v2:
   "coveragePolicies": [
     {
       "id": "desktop-x64",
-      "platforms": ["windows-x86_64", "linux-glibc-x86_64"],
+      "platforms": ["linux-glibc-x86_64"],
       "version": 1,
       "wheelStrategy": "all-compatible"
     }
