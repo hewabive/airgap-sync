@@ -115,6 +115,7 @@ airgap-sync coverage explain desktop-x64
 airgap-sync plan
 airgap-sync plan --update ktransformers
 airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z --json
+airgap-sync plan --retry-delays-ms 1000,5000,15000,60000
 airgap-sync probe --compare .airgap-sync/python-plans/<target>/environment-plan.json
 ```
 
@@ -132,6 +133,13 @@ and stores an immutable active plan under `.airgap-sync/python-plans/`. Planning
 succeeds only when every requested platform is complete. Unsupported coverage is
 reported with suggestions to narrow the target, select another application version, or
 supply a reviewed recipe/wheel.
+
+The pinned `uv` archive is streamed to disk. A slow transfer may continue for as long
+as it keeps making progress; an attempt is retried when the server does not respond or
+the body receives no data for one minute. Progress is reported every 15 seconds, and a
+partial archive is resumed across retries and command restarts when the server supports
+byte ranges. `plan --retry-delays-ms` and `download --retry-delays-ms` override the
+default retry schedule for this acquisition.
 
 `probe` is optional consumer diagnostics. It compares one machine to an existing plan
 and collects only plan-referenced OS, architecture, libc/Python, and explicitly

@@ -4,7 +4,7 @@ export interface RetryOptions {
   onRetry?: (event: RetryEvent) => void;
 }
 
-interface RetryEvent {
+export interface RetryEvent {
   attempt: number;
   delayMs: number;
   error: unknown;
@@ -30,7 +30,10 @@ function isRetryableNetworkError(error: unknown): boolean {
     return false;
   }
 
-  if (error.name === 'TypeError' && error.message === 'fetch failed') {
+  if (
+    error.name === 'TypeError' &&
+    (error.message === 'fetch failed' || error.message === 'terminated')
+  ) {
     return true;
   }
 
@@ -41,11 +44,14 @@ function isRetryableNetworkError(error: unknown): boolean {
   return [
     'aborted due to timeout',
     'fetch failed',
+    'other side closed',
+    'terminated',
     'ECONNRESET',
     'ECONNREFUSED',
     'EAI_AGAIN',
     'ENOTFOUND',
     'ETIMEDOUT',
+    'ERR_STREAM_PREMATURE_CLOSE',
   ].some((code) => error.message.includes(code));
 }
 

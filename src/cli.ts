@@ -281,6 +281,7 @@ interface ProbeOptions {
 interface PlanOptions {
   cutoff?: string;
   json?: boolean;
+  retryDelaysMs?: number[];
   update?: string;
   uvBin?: string;
 }
@@ -986,6 +987,7 @@ async function readWorkspacePythonRecipe(
 interface PlanWorkspacePythonApplicationsOptions {
   config: WorkspaceConfig;
   cutoff?: string;
+  retryDelaysMs?: number[];
   targetIndexes?: number[];
   uvBin?: string;
   workspaceDir: string;
@@ -1009,6 +1011,25 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
   const configuredUv = options.uvBin ?? process.env.UV_BIN;
   const uvPath = await acquireUv({
     cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'tool-cache'),
+    onDownloadStart: ({ downloadedBytes, size, url, version }) => {
+      console.error(
+        downloadedBytes > 0
+          ? `[python-plan] resuming pinned uv ${version} at ${formatProgressBytes(downloadedBytes)}/${formatProgressBytes(size)}: ${url}`
+          : `[python-plan] downloading pinned uv ${version} (${formatProgressBytes(size)}): ${url}`
+      );
+    },
+    onProgress: ({ downloadedBytes, size }) => {
+      console.error(
+        `[python-plan] uv download progress: ${formatProgressBytes(downloadedBytes)}/${formatProgressBytes(size)}`
+      );
+    },
+    onRetry: ({ attempt, delayMs, downloadedBytes, error, nextAttempt, size }) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[python-plan] uv download attempt ${String(attempt)} failed at ${formatProgressBytes(downloadedBytes)}/${formatProgressBytes(size)}: ${reason}; resuming with attempt ${String(nextAttempt)} in ${String(delayMs)}ms`
+      );
+    },
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
     ...(configuredUv ? { uvBin: configuredUv } : {}),
   });
   const plannerWorkDir = await mkdtemp(path.join(os.tmpdir(), 'airgap-sync-plan-'));
@@ -3271,6 +3292,11 @@ program
   .option('--update <target>', 'Replan one target by one-based index or package name')
   .option('--cutoff <timestamp>', 'Ignore artifacts uploaded after this ISO timestamp')
   .option('--uv-bin <path>', 'Use an existing pinned uv executable')
+  .option(
+    '--retry-delays-ms <list>',
+    'Comma-separated retry delays for transient network errors',
+    parseRetryDelaysMs
+  )
   .option('--json', 'Print machine-readable environment plans')
   .action(async (workspace: string, options: PlanOptions) => {
     const workspaceDir = path.resolve(workspace);
@@ -3294,6 +3320,7 @@ program
       const results = await planWorkspacePythonApplications({
         config,
         ...(options.cutoff ? { cutoff: options.cutoff } : {}),
+        ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         targetIndexes: selected.map(({ index }) => index),
         ...(options.uvBin ? { uvBin: options.uvBin } : {}),
         workspaceDir,
@@ -3849,6 +3876,7 @@ program
             }
             const results = await planWorkspacePythonApplications({
               config,
+              ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
               targetIndexes,
               workspaceDir,
             });
