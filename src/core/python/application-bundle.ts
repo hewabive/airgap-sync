@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { semanticDigest } from '../canonical-json.js';
 import { mapConcurrent } from '../concurrency.js';
 import * as fs from '../fs.js';
+import {
+  downloadResumableHttpFile,
+  type ResumableDownloadRetryEvent,
+} from '../resumable-download.js';
 import {
   pythonApplicationIndexPath,
   pythonApplicationPlanDirectory,
@@ -150,6 +152,9 @@ export interface DownloadPythonApplicationPlansOptions {
   generatedAt?: string;
   onProgress?: (event: PythonApplicationDownloadProgressEvent) => void;
   partial?: boolean;
+  requestTimeoutMs?: number;
+  retryDelaysMs?: number[];
+  stallTimeoutMs?: number;
   targets: {
     activePlan: ActivePythonApplicationPlan;
     targetId: string;
@@ -218,64 +223,65 @@ async function hashFile(
 async function downloadArtifact(
   artifact: PlannedArtifact['artifact'],
   targetPath: string,
-  fetchImplementation: typeof globalThis.fetch,
-  onProgress?: (bytes: number, totalBytes?: number) => void
-): Promise<number> {
-  const temporary = `${targetPath}.${String(process.pid)}.download.tmp`;
-  await fs.ensureDir(path.dirname(targetPath));
-  await fs.remove(temporary);
-  const hash = createHash('sha256');
-  let size = 0;
-  const hashingStream = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      hash.update(chunk);
-      size += chunk.byteLength;
-      onProgress?.(size, artifact.expectedSize);
-      callback(null, chunk);
-    },
-  });
-  try {
-    const url = new URL(artifact.sourceUrl);
-    if (url.username || url.password) {
-      throw new Error('Python application artifact URLs must not contain credentials');
-    }
-    onProgress?.(0, artifact.expectedSize);
-    if (url.protocol === 'file:') {
-      await pipeline(
-        fs.createReadStream(fileURLToPath(url)),
-        hashingStream,
-        fs.createWriteStream(temporary)
-      );
-    } else if (url.protocol === 'http:' || url.protocol === 'https:') {
-      const response = await fetchImplementation(url, {
-        redirect: 'follow',
-        signal: AbortSignal.timeout(300_000),
-      });
-      if (!response.ok || !response.body) {
-        throw new Error(`artifact download failed with HTTP ${String(response.status)}`);
-      }
-      await pipeline(
-        Readable.fromWeb(response.body),
-        hashingStream,
-        fs.createWriteStream(temporary)
-      );
-    } else {
-      throw new Error(`Unsupported Python application artifact URL: ${url.toString()}`);
-    }
-    const digest = hash.digest('hex');
-    if (digest !== artifact.sha256) {
-      throw new Error(`SHA-256 mismatch: expected ${artifact.sha256}, received ${digest}`);
-    }
-    if (artifact.expectedSize !== undefined && artifact.expectedSize !== size) {
-      throw new Error(
-        `size mismatch: expected ${String(artifact.expectedSize)}, received ${String(size)}`
-      );
-    }
-    await fs.rename(temporary, targetPath);
-    return size;
-  } finally {
-    await fs.remove(temporary);
+  options: Pick<
+    DownloadPythonApplicationPlansOptions,
+    'fetch' | 'requestTimeoutMs' | 'retryDelaysMs' | 'stallTimeoutMs'
+  > & {
+    onProgress?: (bytes: number, totalBytes?: number) => void;
+    onRetry?: (event: ResumableDownloadRetryEvent) => void;
   }
+): Promise<number> {
+  const partialPath = `${targetPath}.download.partial`;
+  await fs.ensureDir(path.dirname(targetPath));
+  const url = new URL(artifact.sourceUrl);
+  if (url.username || url.password) {
+    throw new Error('Python application artifact URLs must not contain credentials');
+  }
+  const validateFile = async (filePath: string): Promise<void> => {
+    const actual = await hashFile(filePath);
+    if (actual.sha256 !== artifact.sha256) {
+      throw new Error(`SHA-256 mismatch: expected ${artifact.sha256}, received ${actual.sha256}`);
+    }
+    if (artifact.expectedSize !== undefined && artifact.expectedSize !== actual.size) {
+      throw new Error(
+        `size mismatch: expected ${String(artifact.expectedSize)}, received ${String(actual.size)}`
+      );
+    }
+  };
+  options.onProgress?.(
+    (await fs.pathExists(partialPath)) ? (await fs.stat(partialPath)).size : 0,
+    artifact.expectedSize
+  );
+  if (url.protocol === 'file:') {
+    await fs.copyFile(fileURLToPath(url), partialPath);
+    try {
+      await validateFile(partialPath);
+    } catch (error) {
+      await fs.remove(partialPath);
+      throw error;
+    }
+    await fs.remove(targetPath);
+    await fs.rename(partialPath, targetPath);
+    return (await fs.stat(targetPath)).size;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Unsupported Python application artifact URL: ${url.toString()}`);
+  }
+  const result = await downloadResumableHttpFile({
+    ...(artifact.expectedSize === undefined ? {} : { expectedSize: artifact.expectedSize }),
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    onProgress: ({ downloadedBytes, totalBytes }) =>
+      options.onProgress?.(downloadedBytes, totalBytes),
+    ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+    partialPath,
+    ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+    ...(options.stallTimeoutMs ? { stallTimeoutMs: options.stallTimeoutMs } : {}),
+    targetPath,
+    url,
+    validateFile,
+  });
+  return result.size;
 }
 
 async function reuseLegacyWheel(
@@ -896,14 +902,23 @@ export async function downloadPythonApplicationPlans(
           status = 'would-download';
           size = planned.artifact.expectedSize ?? 0;
         } else {
-          size = await downloadArtifact(
-            planned.artifact,
-            targetPath,
-            options.fetch ?? globalThis.fetch,
-            (bytes, totalBytes) => {
+          size = await downloadArtifact(planned.artifact, targetPath, {
+            ...(options.fetch ? { fetch: options.fetch } : {}),
+            onProgress: (bytes, totalBytes) => {
               reportBytes(`download ${planned.artifact.filename}`, bytes, totalBytes);
-            }
-          );
+            },
+            onRetry: ({ delayMs, downloadedBytes, error, nextAttempt, totalBytes }) => {
+              const reason = error instanceof Error ? error.message : String(error);
+              reportBytes(
+                `retry ${planned.artifact.filename}: ${reason}; attempt ${String(nextAttempt)} in ${String(delayMs)}ms`,
+                downloadedBytes,
+                totalBytes
+              );
+            },
+            ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+            ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+            ...(options.stallTimeoutMs ? { stallTimeoutMs: options.stallTimeoutMs } : {}),
+          });
           status = 'downloaded';
         }
         result = {

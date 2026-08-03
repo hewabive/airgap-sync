@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as fs from '../fs.js';
+import { downloadResumableHttpFile } from '../resumable-download.js';
 import { HttpStatusError, isRetryableFetchError, retry } from '../retry.js';
 import { compareVersions } from './pep440.js';
 import { normalizePackageName } from './names.js';
@@ -271,32 +270,17 @@ export class HttpPythonIndexClient implements PythonIndexClient {
       throw new Error(`Wheel has no supported sha256-or-stronger hash: ${file.filename}`);
     }
 
-    await retry(
-      async () => {
-        await fs.remove(targetPath);
-        const response = await fetch(file.url, { signal: AbortSignal.timeout(this.#timeoutMs) });
-        if (response.status !== 200) {
-          throw new HttpStatusError(
-            `Wheel download failed with status ${String(response.status)}: ${file.url}`,
-            response.status
-          );
-        }
-        if (!response.body) {
-          throw new Error(`Wheel download returned an empty body: ${file.url}`);
-        }
-
+    await downloadResumableHttpFile({
+      ...(file.size === undefined ? {} : { expectedSize: file.size }),
+      ...(this.#retryDelaysMs ? { retryDelaysMs: this.#retryDelaysMs } : {}),
+      stallTimeoutMs: this.#timeoutMs,
+      targetPath,
+      url: file.url,
+      validateFile: async (filePath) => {
         const expectedHash = createHash(expected.algorithm);
-        const hashingStream = new Transform({
-          transform(chunk: Buffer, _encoding, callback) {
-            expectedHash.update(chunk);
-            callback(null, chunk);
-          },
-        });
-        await pipeline(
-          Readable.fromWeb(response.body),
-          hashingStream,
-          fs.createWriteStream(targetPath)
-        );
+        for await (const chunk of fs.createReadStream(filePath) as AsyncIterable<Buffer>) {
+          expectedHash.update(chunk);
+        }
         const actual = expectedHash.digest('hex');
         if (actual !== expected.digest) {
           throw new Error(
@@ -304,11 +288,7 @@ export class HttpPythonIndexClient implements PythonIndexClient {
           );
         }
       },
-      {
-        ...(this.#retryDelaysMs ? { delaysMs: this.#retryDelaysMs } : {}),
-        isRetryable: isRetryableFetchError,
-      }
-    );
+    });
   }
 
   async getMetadata(

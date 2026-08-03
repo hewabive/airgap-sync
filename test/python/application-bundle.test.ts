@@ -495,6 +495,56 @@ describe('Python application bundle', () => {
     expect(report).toMatchObject({ downloaded: 2, errors: [] });
   });
 
+  it('resumes a stalled application artifact download', async () => {
+    const content = wheelBuffer('1.0.0');
+    const sourceUrl = 'https://files.test/shared-1.0.0-py3-none-any.whl';
+    const splitAt = Math.floor(content.byteLength / 2);
+    const ranges: (string | null)[] = [];
+    const plan = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(sourceUrl),
+        sha256: createHash('sha256').update(content).digest('hex'),
+        size: content.byteLength,
+        sourceUrl,
+      })
+    );
+    const fetchImplementation: typeof globalThis.fetch = (_input, init) => {
+      ranges.push(new Headers(init?.headers).get('range'));
+      if (ranges.length === 1) {
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(content.subarray(0, splitAt));
+              },
+            }),
+            { headers: { 'Content-Length': String(content.byteLength) } }
+          )
+        );
+      }
+      return Promise.resolve(
+        new Response(content.subarray(splitAt), {
+          headers: {
+            'Content-Range': `bytes ${String(splitAt)}-${String(content.byteLength - 1)}/${String(content.byteLength)}`,
+          },
+          status: 206,
+        })
+      );
+    };
+
+    const report = await downloadPythonApplicationPlans({
+      bundleDir: path.join(tempDir, 'resumed-bundle'),
+      fetch: fetchImplementation,
+      retryDelaysMs: [1],
+      stallTimeoutMs: 20,
+      targets: [{ activePlan: plan, targetId: plan.manifest.targetId }],
+    });
+
+    expect(report).toMatchObject({ downloaded: 1, errors: [] });
+    expect(ranges).toEqual([null, `bytes=${String(splitAt)}-`]);
+  });
+
   it('uses the activated content index for incremental checks and leaves full hashing to verify', async () => {
     const content = wheelBuffer('1.0.0');
     const source = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');

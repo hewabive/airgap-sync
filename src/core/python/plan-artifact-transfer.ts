@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as fs from '../fs.js';
+import { downloadResumableHttpFile } from '../resumable-download.js';
 import type { PythonEnvironmentPlan, PythonPlanTransferArtifact } from './environment-plan.js';
 
 export interface PythonPlanArtifactManifestEntry extends PythonPlanTransferArtifact {
@@ -25,6 +24,7 @@ export interface TransferPythonPlanArtifactsOptions {
   fetch?: typeof globalThis.fetch;
   generatedAt?: string;
   plan: PythonEnvironmentPlan;
+  retryDelaysMs?: number[];
 }
 
 async function hashFile(filePath: string): Promise<{
@@ -59,64 +59,50 @@ function artifactFile(directory: string, artifact: PythonPlanTransferArtifact): 
 async function downloadArtifact(
   artifact: PythonPlanTransferArtifact,
   targetPath: string,
-  fetchImplementation: typeof globalThis.fetch
+  options: Pick<TransferPythonPlanArtifactsOptions, 'fetch' | 'retryDelaysMs'>
 ): Promise<void> {
-  const temporary = `${targetPath}.${String(process.pid)}.artifact.tmp`;
+  const partialPath = `${targetPath}.download.partial`;
   await fs.ensureDir(path.dirname(targetPath));
-  await fs.remove(temporary);
-  const hash = createHash('sha256');
-  let size = 0;
-  const hashingStream = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      hash.update(chunk);
-      size += chunk.byteLength;
-      callback(null, chunk);
-    },
-  });
-  try {
-    const url = new URL(artifact.sourceUrl);
-    if (url.username || url.password) {
-      throw new Error('Python plan artifact URLs must not contain credentials');
-    }
-    if (url.protocol === 'file:') {
-      await pipeline(
-        fs.createReadStream(fileURLToPath(url)),
-        hashingStream,
-        fs.createWriteStream(temporary)
-      );
-    } else if (url.protocol === 'http:' || url.protocol === 'https:') {
-      const response = await fetchImplementation(url, {
-        redirect: 'follow',
-        signal: AbortSignal.timeout(300_000),
-      });
-      if (!response.ok || !response.body) {
-        throw new Error(
-          `Python plan artifact download failed with HTTP ${String(response.status)}`
-        );
-      }
-      await pipeline(
-        Readable.fromWeb(response.body),
-        hashingStream,
-        fs.createWriteStream(temporary)
-      );
-    } else {
-      throw new Error(`Unsupported Python plan artifact URL: ${url.toString()}`);
-    }
-    const digest = hash.digest('hex');
-    if (digest !== artifact.sha256) {
-      throw new Error(
-        `Python plan artifact SHA-256 mismatch for ${artifact.filename}: expected ${artifact.sha256}, received ${digest}`
-      );
-    }
-    if (artifact.size !== undefined && size !== artifact.size) {
-      throw new Error(
-        `Python plan artifact size mismatch for ${artifact.filename}: expected ${String(artifact.size)}, received ${String(size)}`
-      );
-    }
-    await fs.rename(temporary, targetPath);
-  } finally {
-    await fs.remove(temporary);
+  const url = new URL(artifact.sourceUrl);
+  if (url.username || url.password) {
+    throw new Error('Python plan artifact URLs must not contain credentials');
   }
+  const validateFile = async (filePath: string): Promise<void> => {
+    const actual = await hashFile(filePath);
+    if (actual.sha256 !== artifact.sha256) {
+      throw new Error(
+        `Python plan artifact SHA-256 mismatch for ${artifact.filename}: expected ${artifact.sha256}, received ${actual.sha256}`
+      );
+    }
+    if (artifact.size !== undefined && actual.size !== artifact.size) {
+      throw new Error(
+        `Python plan artifact size mismatch for ${artifact.filename}: expected ${String(artifact.size)}, received ${String(actual.size)}`
+      );
+    }
+  };
+  if (url.protocol === 'file:') {
+    await fs.copyFile(fileURLToPath(url), partialPath);
+    try {
+      await validateFile(partialPath);
+    } catch (error) {
+      await fs.remove(partialPath);
+      throw error;
+    }
+    await fs.remove(targetPath);
+    await fs.rename(partialPath, targetPath);
+    return;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Unsupported Python plan artifact URL: ${url.toString()}`);
+  }
+  await downloadResumableHttpFile({
+    ...(artifact.size === undefined ? {} : { expectedSize: artifact.size }),
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+    targetPath,
+    url,
+    validateFile,
+  });
 }
 
 export async function transferPythonPlanArtifacts(
@@ -143,7 +129,7 @@ export async function transferPythonPlanArtifacts(
     } else if (options.dryRun) {
       status = 'would-download';
     } else {
-      await downloadArtifact(artifact, targetPath, options.fetch ?? globalThis.fetch);
+      await downloadArtifact(artifact, targetPath, options);
       status = 'downloaded';
     }
     artifacts.push({

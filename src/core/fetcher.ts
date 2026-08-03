@@ -58,11 +58,14 @@ export type FetchProgressPhase = 'resolve' | 'download' | 'scan';
 export type FetchProgressStatus = 'start' | 'progress' | 'done' | 'error';
 
 export interface FetchProgressEvent {
+  bytes?: number;
   current?: number;
+  detail?: string;
   package?: string;
   phase: FetchProgressPhase;
   queue?: number;
   status: FetchProgressStatus;
+  totalBytes?: number;
 }
 
 export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
@@ -529,6 +532,31 @@ export async function fetchSeedBundle(
           options.outputDir,
           {
             existingPackageFiles,
+            onProgress: ({ downloadedBytes, totalBytes }) => {
+              options.onProgress?.({
+                bytes: downloadedBytes,
+                current: result.downloaded + result.skipped,
+                detail: `download ${id}`,
+                package: id,
+                phase: 'download',
+                queue: queue.length,
+                status: 'progress',
+                ...(totalBytes === undefined ? {} : { totalBytes }),
+              });
+            },
+            onRetry: ({ delayMs, downloadedBytes, error, nextAttempt, totalBytes }) => {
+              const reason = error instanceof Error ? error.message : String(error);
+              options.onProgress?.({
+                bytes: downloadedBytes,
+                current: result.downloaded + result.skipped,
+                detail: `retry ${id}: ${reason}; attempt ${String(nextAttempt)} in ${String(delayMs)}ms`,
+                package: id,
+                phase: 'download',
+                queue: queue.length,
+                status: 'progress',
+                ...(totalBytes === undefined ? {} : { totalBytes }),
+              });
+            },
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             ...(options.tarballTimeoutMs ? { timeoutMs: options.tarballTimeoutMs } : {}),
           }

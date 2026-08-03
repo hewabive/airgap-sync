@@ -64,7 +64,7 @@ describe('pinned uv acquisition', () => {
         platform: 'linux',
         retryDelaysMs: [],
       })
-    ).rejects.toThrow('uv download ended early: received 3 of 24014155 bytes');
+    ).rejects.toThrow('download ended early: received 3 of 24014155 bytes');
   });
 
   it('resumes an incomplete asset on the next attempt', async () => {
@@ -129,7 +129,7 @@ describe('pinned uv acquisition', () => {
         retryDelaysMs: [1, 1],
       })
     ).rejects.toThrow(
-      /uv download failed after 3 attempts .*TypeError: terminated; caused by other side closed/u
+      /Download failed after 3 attempts .*TypeError: terminated; caused by other side closed/u
     );
     expect(attempts).toBe(3);
   });
@@ -209,7 +209,7 @@ describe('pinned uv acquisition', () => {
       })
     ).resolves.toContain('uv-test/uv');
     expect(ranges).toEqual([null, `bytes=${String(splitAt)}-`]);
-    expect(retryReasons).toEqual(['uv download received no data for 20ms']);
+    expect(retryReasons).toEqual(['received no data for 20ms']);
   });
 
   it('adopts a partial archive left by the previous downloader', async () => {

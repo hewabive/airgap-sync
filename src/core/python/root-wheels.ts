@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as fs from '../fs.js';
+import { downloadResumableHttpFile } from '../resumable-download.js';
 import type { PythonRootWheelInput, PythonRequirementInput } from './input-types.js';
 import type {
   PythonIndexClient,
@@ -48,31 +47,48 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest('hex');
 }
 
-async function copyOrDownload(url: string, targetPath: string): Promise<void> {
+async function copyOrDownload(
+  url: string,
+  targetPath: string,
+  expectedSha256: string,
+  retryDelaysMs?: number[]
+): Promise<void> {
   const parsed = new URL(url);
   await fs.ensureDir(path.dirname(targetPath));
-  const temporary = `${targetPath}.${String(process.pid)}.root-wheel.tmp`;
-  await fs.remove(temporary);
-  try {
-    if (parsed.protocol === 'file:') {
-      await fs.copyFile(fileURLToPath(parsed), temporary);
-    } else {
-      const response = await fetch(url, { signal: AbortSignal.timeout(300_000) });
-      if (response.status !== 200 || !response.body) {
-        throw new Error(`Root wheel download failed with status ${String(response.status)}`);
-      }
-      await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(temporary));
+  const partialPath = `${targetPath}.download.partial`;
+  const validateFile = async (filePath: string): Promise<void> => {
+    const actual = await sha256File(filePath);
+    if (actual !== expectedSha256) {
+      throw new Error(
+        `${path.basename(targetPath)} SHA-256 mismatch: expected ${expectedSha256}, received ${actual}`
+      );
     }
-    await fs.rename(temporary, targetPath);
-  } finally {
-    await fs.remove(temporary);
+  };
+  if (parsed.protocol === 'file:') {
+    await fs.copyFile(fileURLToPath(parsed), partialPath);
+    try {
+      await validateFile(partialPath);
+    } catch (error) {
+      await fs.remove(partialPath);
+      throw error;
+    }
+    await fs.remove(targetPath);
+    await fs.rename(partialPath, targetPath);
+    return;
   }
+  await downloadResumableHttpFile({
+    ...(retryDelaysMs ? { retryDelaysMs } : {}),
+    targetPath,
+    url,
+    validateFile,
+  });
 }
 
 async function ensureRootWheel(
   input: PythonRootWheelInput,
   bundleDir: string,
-  dryRun: boolean
+  dryRun: boolean,
+  retryDelaysMs?: number[]
 ): Promise<string> {
   const filename = rootFilename(input.url);
   const targetPath = path.join(bundleDir, 'python-packages', filename);
@@ -83,7 +99,7 @@ async function ensureRootWheel(
   } else if (dryRun) {
     throw new Error(`${filename} must already exist in the bundle for a dry-run`);
   }
-  await copyOrDownload(input.url, targetPath);
+  await copyOrDownload(input.url, targetPath, input.sha256.toLowerCase(), retryDelaysMs);
   const actual = await sha256File(targetPath);
   if (actual !== input.sha256.toLowerCase()) {
     await fs.remove(targetPath);
@@ -98,6 +114,7 @@ export async function preparePythonRootWheels(options: {
   bundleDir: string;
   dryRun?: boolean;
   inputs: PythonRootWheelInput[];
+  retryDelaysMs?: number[];
 }): Promise<PreparedPythonRootWheel[]> {
   const prepared: PreparedPythonRootWheel[] = [];
   for (const input of options.inputs) {
@@ -106,7 +123,12 @@ export async function preparePythonRootWheels(options: {
     }
     const filename = rootFilename(input.url);
     const wheel = parseWheelFilename(filename)!;
-    const filePath = await ensureRootWheel(input, options.bundleDir, options.dryRun === true);
+    const filePath = await ensureRootWheel(
+      input,
+      options.bundleDir,
+      options.dryRun === true,
+      options.retryDelaysMs
+    );
     const metadata = parseCoreMetadata(await readWheelMetadata(filePath));
     if (
       normalizePackageName(metadata.name) !== wheel.normalizedName ||

@@ -1,12 +1,13 @@
-import os from 'node:os';
 import path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as fs from './fs.js';
 import * as tar from 'tar';
 import type { PackageManifest, ResolvedRootPackage } from '../types.js';
 import { packageFileName } from './files.js';
-import { HttpStatusError, isRetryableFetchError, retry } from './retry.js';
+import {
+  downloadResumableHttpFile,
+  type ResumableDownloadProgressEvent,
+  type ResumableDownloadRetryEvent,
+} from './resumable-download.js';
 
 export interface DownloadedTarball {
   file: string;
@@ -18,6 +19,8 @@ export interface DownloadedTarball {
 
 export interface DownloadResolvedPackageOptions {
   existingPackageFiles?: Set<string>;
+  onProgress?: (event: ResumableDownloadProgressEvent) => void;
+  onRetry?: (event: ResumableDownloadRetryEvent) => void;
   retryDelaysMs?: number[];
   timeoutMs?: number;
 }
@@ -30,7 +33,6 @@ export async function downloadResolvedPackage(
   const file = packageFileName(pkg.name, pkg.version);
   const packageDir = path.join(outputDir, 'packages');
   const outputPath = path.join(packageDir, file);
-  const timeoutMs = options.timeoutMs ?? 180_000;
 
   const knownPackageFiles = options.existingPackageFiles;
   const alreadyExists = knownPackageFiles
@@ -48,44 +50,15 @@ export async function downloadResolvedPackage(
   }
 
   await fs.ensureDir(packageDir);
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-tarball-'));
-  const tempPath = path.join(tempDir, file);
-
-  try {
-    await retry(
-      async () => {
-        const tarballResponse = await fetch(pkg.dist.tarball, {
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-
-        if (tarballResponse.status !== 200) {
-          throw new HttpStatusError(
-            `Tarball download failed with status ${String(tarballResponse.status)}`,
-            tarballResponse.status
-          );
-        }
-
-        if (!tarballResponse.body) {
-          throw new Error(`Tarball download returned an empty response body: ${pkg.dist.tarball}`);
-        }
-
-        try {
-          await pipeline(Readable.fromWeb(tarballResponse.body), fs.createWriteStream(tempPath));
-          await fs.copyFile(tempPath, outputPath);
-          knownPackageFiles?.add(file);
-        } catch (error) {
-          await fs.remove(outputPath);
-          throw error;
-        }
-      },
-      {
-        ...(options.retryDelaysMs ? { delaysMs: options.retryDelaysMs } : {}),
-        isRetryable: isRetryableFetchError,
-      }
-    );
-  } finally {
-    await fs.remove(tempDir);
-  }
+  await downloadResumableHttpFile({
+    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+    ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+    ...(options.timeoutMs ? { stallTimeoutMs: options.timeoutMs } : {}),
+    targetPath: outputPath,
+    url: pkg.dist.tarball,
+  });
+  knownPackageFiles?.add(file);
 
   return {
     file: path.posix.join('packages', file),

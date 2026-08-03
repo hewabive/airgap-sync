@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as tar from 'tar';
 import * as yauzl from 'yauzl';
 import manifestData from '../../../support/python/uv-tool-manifest.json' with { type: 'json' };
 import * as fs from '../fs.js';
-import { HttpStatusError, isRetryableFetchError, retry, type RetryEvent } from '../retry.js';
+import {
+  downloadResumableHttpFile,
+  type ResumableDownloadRetryEvent,
+} from '../resumable-download.js';
 
 export interface UvToolAsset {
   file: string;
@@ -57,38 +58,13 @@ interface UvDownloadProgressEvent {
   url: string;
 }
 
-interface UvDownloadRetryEvent extends RetryEvent {
+interface UvDownloadRetryEvent extends Omit<ResumableDownloadRetryEvent, 'totalBytes'> {
   downloadedBytes: number;
   size: number;
   url: string;
 }
 
 const defaultUvDownloadProgressIntervalMs = 15_000;
-const defaultUvDownloadRequestTimeoutMs = 60_000;
-const defaultUvDownloadStallTimeoutMs = 60_000;
-
-class IncompleteUvDownloadError extends Error {
-  constructor(downloadedBytes: number, expectedBytes: number) {
-    super(
-      `uv download ended early: received ${String(downloadedBytes)} of ${String(expectedBytes)} bytes`
-    );
-    this.name = 'IncompleteUvDownloadError';
-  }
-}
-
-class UvDownloadRequestTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`uv download server did not respond within ${String(timeoutMs)}ms`);
-    this.name = 'UvDownloadRequestTimeoutError';
-  }
-}
-
-class UvDownloadStallError extends Error {
-  constructor(timeoutMs: number) {
-    super(`uv download received no data for ${String(timeoutMs)}ms`);
-    this.name = 'UvDownloadStallError';
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -183,202 +159,6 @@ async function fileSize(file: string): Promise<number> {
       return 0;
     }
     throw error;
-  }
-}
-
-function describeError(error: unknown): string {
-  const messages: string[] = [];
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-  while (current instanceof Error && !seen.has(current)) {
-    seen.add(current);
-    const prefix = current.name && current.name !== 'Error' ? `${current.name}: ` : '';
-    messages.push(`${prefix}${current.message}`);
-    current = 'cause' in current ? current.cause : undefined;
-  }
-  if (messages.length === 0) {
-    return String(error);
-  }
-  return messages.join('; caused by ');
-}
-
-function validateContentRange(response: Response, offset: number, expectedSize: number): void {
-  const contentRange = response.headers.get('content-range');
-  const parsed = contentRange ? /^bytes (\d+)-(\d+)\/(\d+|\*)$/u.exec(contentRange) : null;
-  if (
-    !parsed ||
-    Number(parsed[1]) !== offset ||
-    (parsed[3] !== '*' && Number(parsed[3]) !== expectedSize)
-  ) {
-    throw new Error(
-      `uv download returned an invalid Content-Range for offset ${String(offset)}: ${contentRange ?? 'missing'}`
-    );
-  }
-}
-
-interface DownloadUvAssetOptions {
-  archive: string;
-  asset: UvToolAsset;
-  fetch: typeof globalThis.fetch;
-  onProgress?: (event: UvDownloadProgressEvent) => void;
-  onRetry?: (event: UvDownloadRetryEvent) => void;
-  progressIntervalMs: number;
-  requestTimeoutMs: number;
-  retryDelaysMs?: number[];
-  stallTimeoutMs: number;
-}
-
-async function fetchUvAsset(
-  options: DownloadUvAssetOptions,
-  offset: number
-): Promise<{ controller: AbortController; response: Response }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort(new UvDownloadRequestTimeoutError(options.requestTimeoutMs));
-  }, options.requestTimeoutMs);
-  try {
-    const response = await options.fetch(options.asset.url, {
-      ...(offset > 0 ? { headers: { Range: `bytes=${String(offset)}-` } } : {}),
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    return { controller, response };
-  } catch (error) {
-    if (controller.signal.reason instanceof UvDownloadRequestTimeoutError) {
-      throw controller.signal.reason;
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function downloadUvAsset(options: DownloadUvAssetOptions): Promise<void> {
-  let attempts = 0;
-  let downloadedBytes = await fileSize(options.archive);
-  try {
-    await retry(
-      async () => {
-        attempts++;
-        let offset = await fileSize(options.archive);
-        if (offset > options.asset.size) {
-          await fs.remove(options.archive);
-          offset = 0;
-        }
-        if (offset === options.asset.size) {
-          downloadedBytes = offset;
-          return;
-        }
-
-        const { controller, response } = await fetchUvAsset(options, offset);
-        if (response.status !== 200 && response.status !== 206) {
-          throw new HttpStatusError(
-            `uv download failed with HTTP ${String(response.status)}: ${options.asset.url}`,
-            response.status
-          );
-        }
-        if (!response.body) {
-          throw new IncompleteUvDownloadError(offset, options.asset.size);
-        }
-
-        const append = offset > 0 && response.status === 206;
-        if (response.status === 206) {
-          try {
-            validateContentRange(response, append ? offset : 0, options.asset.size);
-          } catch (error) {
-            await fs.remove(options.archive);
-            downloadedBytes = 0;
-            throw error;
-          }
-        }
-        if (!append) {
-          offset = 0;
-        }
-
-        downloadedBytes = offset;
-        let stallTimer: NodeJS.Timeout | undefined;
-        let lastProgressAt = Date.now();
-        const armStallTimer = (): void => {
-          if (stallTimer) {
-            clearTimeout(stallTimer);
-          }
-          stallTimer = setTimeout(() => {
-            controller.abort(new UvDownloadStallError(options.stallTimeoutMs));
-          }, options.stallTimeoutMs);
-        };
-        const progress = new Transform({
-          transform(chunk: Buffer, _encoding, callback) {
-            downloadedBytes += chunk.length;
-            armStallTimer();
-            const now = Date.now();
-            if (now - lastProgressAt >= options.progressIntervalMs) {
-              lastProgressAt = now;
-              options.onProgress?.({
-                downloadedBytes,
-                size: options.asset.size,
-                url: options.asset.url,
-              });
-            }
-            callback(null, chunk);
-          },
-        });
-        armStallTimer();
-        try {
-          await pipeline(
-            Readable.fromWeb(response.body),
-            progress,
-            fs.createWriteStream(options.archive, { flags: append ? 'a' : 'w' }),
-            { signal: controller.signal }
-          );
-        } catch (error) {
-          if (controller.signal.reason instanceof UvDownloadStallError) {
-            throw controller.signal.reason;
-          }
-          throw error;
-        } finally {
-          if (stallTimer) {
-            clearTimeout(stallTimer);
-          }
-          downloadedBytes = await fileSize(options.archive);
-        }
-
-        options.onProgress?.({
-          downloadedBytes,
-          size: options.asset.size,
-          url: options.asset.url,
-        });
-
-        if (downloadedBytes < options.asset.size) {
-          throw new IncompleteUvDownloadError(downloadedBytes, options.asset.size);
-        }
-        if (downloadedBytes > options.asset.size) {
-          throw new Error(
-            `uv size mismatch: expected ${String(options.asset.size)}, received ${String(downloadedBytes)}`
-          );
-        }
-      },
-      {
-        ...(options.retryDelaysMs ? { delaysMs: options.retryDelaysMs } : {}),
-        isRetryable: (error) =>
-          error instanceof IncompleteUvDownloadError ||
-          error instanceof UvDownloadRequestTimeoutError ||
-          error instanceof UvDownloadStallError ||
-          isRetryableFetchError(error),
-        onRetry: (event) => {
-          options.onRetry?.({
-            ...event,
-            downloadedBytes,
-            size: options.asset.size,
-            url: options.asset.url,
-          });
-        },
-      }
-    );
-  } catch (error) {
-    throw new Error(
-      `uv download failed after ${String(attempts)} ${attempts === 1 ? 'attempt' : 'attempts'} from ${options.asset.url}: ${describeError(error)}`,
-      { cause: error }
-    );
   }
 }
 
@@ -497,28 +277,44 @@ export async function acquireUv(options: AcquireUvOptions): Promise<string> {
   const extracted = path.join(stagingRoot, 'extracted');
   await fs.ensureDir(stagingRoot);
   await seedPersistentPartialArchive(versionParent, key, asset, archive);
-  options.onDownloadStart?.({
-    downloadedBytes: await fileSize(archive),
-    size: asset.size,
-    url: asset.url,
-    version: uvToolManifest.version,
-  });
-  await downloadUvAsset({
-    archive,
-    asset,
-    fetch: options.fetch ?? globalThis.fetch,
-    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-    ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+  await downloadResumableHttpFile({
+    expectedSize: asset.size,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    onProgress: ({ downloadedBytes, url }) => {
+      options.onProgress?.({ downloadedBytes, size: asset.size, url });
+    },
+    onRetry: (event) => {
+      options.onRetry?.({
+        attempt: event.attempt,
+        delayMs: event.delayMs,
+        downloadedBytes: event.downloadedBytes,
+        error: event.error,
+        nextAttempt: event.nextAttempt,
+        size: asset.size,
+        url: event.url,
+      });
+    },
+    onStart: ({ downloadedBytes, url }) => {
+      options.onDownloadStart?.({
+        downloadedBytes,
+        size: asset.size,
+        url,
+        version: uvToolManifest.version,
+      });
+    },
     progressIntervalMs: options.progressIntervalMs ?? defaultUvDownloadProgressIntervalMs,
-    requestTimeoutMs: options.requestTimeoutMs ?? defaultUvDownloadRequestTimeoutMs,
+    ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
     ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-    stallTimeoutMs: options.stallTimeoutMs ?? defaultUvDownloadStallTimeoutMs,
+    ...(options.stallTimeoutMs ? { stallTimeoutMs: options.stallTimeoutMs } : {}),
+    targetPath: archive,
+    url: asset.url,
+    validateFile: async (filePath) => {
+      const digest = await sha256File(filePath);
+      if (digest !== asset.sha256) {
+        throw new Error(`uv SHA-256 mismatch: expected ${asset.sha256}, received ${digest}`);
+      }
+    },
   });
-  const digest = await sha256File(archive);
-  if (digest !== asset.sha256) {
-    await fs.remove(archive);
-    throw new Error(`uv SHA-256 mismatch: expected ${asset.sha256}, received ${digest}`);
-  }
 
   await fs.remove(extracted);
   await fs.ensureDir(extracted);

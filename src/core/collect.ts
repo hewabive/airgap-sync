@@ -498,6 +498,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     dryRun,
     generatedAt,
     inputs: options.initialPythonRuntimes ?? [],
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
   });
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
   const metadataCache = await readRegistryMetadataCache(outputDir);
@@ -668,14 +669,16 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
       ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       onProgress: (event: FetchProgressEvent) => {
-        const detail = [event.phase, event.package].filter(Boolean).join(' ');
+        const detail = event.detail ?? [event.phase, event.package].filter(Boolean).join(' ');
         options.onProgress?.({
+          ...(event.bytes === undefined ? {} : { bytes: event.bytes }),
           ...(event.current === undefined ? {} : { current: event.current }),
           ...(detail ? { detail } : {}),
           iteration,
           phase: 'npm-fetch',
           ...(event.queue === undefined ? {} : { queue: event.queue }),
           status: event.status,
+          ...(event.totalBytes === undefined ? {} : { totalBytes: event.totalBytes }),
         });
       },
       outputDir,
@@ -881,6 +884,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       bundleDir: outputDir,
       dryRun,
       inputs: options.initialPythonRootWheels ?? [],
+      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
     });
     const pythonRequirements = [
       ...pythonInputs.requirements,

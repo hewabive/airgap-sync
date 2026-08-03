@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import * as fs from '../fs.js';
 import { mapConcurrent } from '../concurrency.js';
-import { HttpStatusError, isRetryableFetchError, retry } from '../retry.js';
+import { downloadResumableHttpFile } from '../resumable-download.js';
 import type { PythonTargetEnvironmentConfig } from './environments.js';
 import type { UnsupportedPythonInput } from './input-types.js';
 import { selectStrongHash } from './integrity.js';
@@ -194,66 +192,24 @@ async function downloadArtifact(
     return existing;
   }
 
-  const packageDir = path.dirname(targetPath);
-  await fs.ensureDir(packageDir);
-  const tempDir = await fs.mkdtemp(path.join(packageDir, '.airgap-sync-python-'));
-  const tempPath = path.join(tempDir, group.file.filename);
-  try {
-    const result = await retry(
-      async (): Promise<DownloadResult> => {
-        await fs.remove(tempPath);
-        const response = await fetch(group.file.url, {
-          signal: AbortSignal.timeout(options.timeoutMs ?? 300_000),
-        });
-        if (response.status !== 200) {
-          throw new HttpStatusError(
-            `Python wheel download failed with status ${String(response.status)}`,
-            response.status
-          );
-        }
-        if (!response.body) {
-          throw new Error('Python wheel download returned an empty response body');
-        }
-        const selectedHash = createHash(expected.algorithm);
-        const sha256Hash = createHash('sha256');
-        let size = 0;
-        const hashingStream = new Transform({
-          transform(chunk: Buffer, _encoding, callback) {
-            selectedHash.update(chunk);
-            sha256Hash.update(chunk);
-            size += chunk.length;
-            callback(null, chunk);
-          },
-        });
-        await pipeline(
-          Readable.fromWeb(response.body),
-          hashingStream,
-          fs.createWriteStream(tempPath)
+  let actual: Awaited<ReturnType<typeof hashFile>> | undefined;
+  const result = await downloadResumableHttpFile({
+    ...(group.file.size === undefined ? {} : { expectedSize: group.file.size }),
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+    ...(options.timeoutMs ? { stallTimeoutMs: options.timeoutMs } : {}),
+    targetPath,
+    url: group.file.url,
+    validateFile: async (filePath) => {
+      actual = await hashFile(filePath, expected.algorithm);
+      if (actual.selected !== expected.digest) {
+        throw new Error(
+          `${expected.algorithm} mismatch: expected ${expected.digest}, received ${actual.selected}`
         );
-        const selectedDigest = selectedHash.digest('hex');
-        if (selectedDigest !== expected.digest) {
-          throw new Error(
-            `${expected.algorithm} mismatch: expected ${expected.digest}, received ${selectedDigest}`
-          );
-        }
-        if (group.file.size !== undefined && size !== group.file.size) {
-          throw new Error(
-            `size mismatch: expected ${String(group.file.size)}, received ${String(size)}`
-          );
-        }
-        await fs.remove(targetPath);
-        await fs.rename(tempPath, targetPath);
-        return { sha256: sha256Hash.digest('hex'), size, status: 'downloaded' };
-      },
-      {
-        ...(options.retryDelaysMs ? { delaysMs: options.retryDelaysMs } : {}),
-        isRetryable: isRetryableFetchError,
       }
-    );
-    return result;
-  } finally {
-    await fs.remove(tempDir);
-  }
+    },
+  });
+  actual ??= await hashFile(targetPath, expected.algorithm);
+  return { sha256: actual.sha256, size: result.size, status: 'downloaded' };
 }
 
 function validateLocalMetadata(group: ArtifactGroup, metadata: PythonCoreMetadata): void {

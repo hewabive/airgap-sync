@@ -134,12 +134,13 @@ succeeds only when every requested platform is complete. Unsupported coverage is
 reported with suggestions to narrow the target, select another application version, or
 supply a reviewed recipe/wheel.
 
-The pinned `uv` archive is streamed to disk. A slow transfer may continue for as long
-as it keeps making progress; an attempt is retried when the server does not respond or
-the body receives no data for one minute. Progress is reported every 15 seconds, and a
-partial archive is resumed across retries and command restarts when the server supports
-byte ranges. `plan --retry-delays-ms` and `download --retry-delays-ms` override the
-default retry schedule for this acquisition.
+Large HTTP artifacts use one resumable download model, including the pinned `uv`, npm
+tarballs, Python wheels, CPython runtimes, and application artifacts. A slow transfer
+may continue for as long as it keeps making progress; an attempt is retried when the
+server does not respond or the body receives no data for one minute. Partial files are
+resumed across retries and command restarts when the server supports byte ranges.
+`plan --retry-delays-ms` and `download --retry-delays-ms` override the default retry
+schedule.
 
 `probe` is optional consumer diagnostics. It compares one machine to an existing plan
 and collects only plan-referenced OS, architecture, libc/Python, and explicitly
@@ -289,7 +290,9 @@ such as `4` on slow removable media, interactive SSH connections, or unstable ne
 links.
 
 `--registry-timeout-ms` controls npm metadata request timeout. The default is 60000.
-`--tarball-timeout-ms` controls tarball download timeout. The default is 180000.
+`--tarball-timeout-ms` controls how long an npm tarball may receive no data before its
+connection is retried. There is no total-duration limit while bytes keep arriving; the
+default no-progress timeout is 60000.
 `--retry-delays-ms` can override transient network retry delays, for example
 `--retry-delays-ms 1000,5000,15000,60000`.
 
@@ -369,7 +372,7 @@ Supported options:
 --registry-timeout-ms <ms>
                           Timeout for npm registry metadata requests
 --tarball-timeout-ms <ms>
-                          Timeout for npm tarball downloads
+                          No-progress timeout for npm tarball downloads
 --retry-delays-ms <list>  Comma-separated retry delays for transient network errors
 --dry-run                 Resolve and report without downloading
 ```

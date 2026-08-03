@@ -77,7 +77,14 @@ describe('readPackageManifest', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
-    expect(firstCall?.[0]).toBe('https://registry.example/demo/-/demo-1.0.0.tgz');
+    const firstInput = firstCall?.[0];
+    const firstUrl =
+      typeof firstInput === 'string'
+        ? firstInput
+        : firstInput instanceof URL
+          ? firstInput.href
+          : firstInput?.url;
+    expect(firstUrl).toBe('https://registry.example/demo/-/demo-1.0.0.tgz');
     expect(firstCall?.[1]?.signal).toBeDefined();
   });
 
@@ -104,6 +111,52 @@ describe('readPackageManifest', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('resumes an npm tarball after the response stalls', async () => {
+    const content = Buffer.from('tarball bytes that continue after reconnecting');
+    const splitAt = 14;
+    const pkg: ResolvedRootPackage = {
+      dist: {
+        tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
+      },
+      name: 'demo',
+      raw: 'demo@1.0.0',
+      requiredBy: 'root',
+      resolvedVia: 'version',
+      specifier: '1.0.0',
+      type: 'version',
+      version: '1.0.0',
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(content.subarray(0, splitAt));
+            },
+          }),
+          { headers: { 'Content-Length': String(content.byteLength) } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(content.subarray(splitAt), {
+          headers: {
+            'Content-Range': `bytes ${String(splitAt)}-${String(content.byteLength - 1)}/${String(content.byteLength)}`,
+          },
+          status: 206,
+        })
+      );
+
+    const downloaded = await downloadResolvedPackage(pkg, tempDir, {
+      retryDelaysMs: [1],
+      timeoutMs: 20,
+    });
+
+    await expect(fs.readFile(downloaded.path)).resolves.toEqual(content);
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('range')).toBe(
+      `bytes=${String(splitAt)}-`
+    );
+  });
+
   it('does not retry missing tarballs', async () => {
     const pkg: ResolvedRootPackage = {
       dist: {
@@ -120,7 +173,7 @@ describe('readPackageManifest', () => {
     fetchMock.mockResolvedValue(new Response('missing', { status: 404 }));
 
     await expect(downloadResolvedPackage(pkg, tempDir)).rejects.toThrow(
-      'Tarball download failed with status 404'
+      'Download failed with HTTP 404'
     );
     expect(fetchMock).toHaveBeenCalledOnce();
   });

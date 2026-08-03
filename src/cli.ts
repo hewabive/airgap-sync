@@ -1370,13 +1370,19 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
     const applicationArtifactCompleted =
       event.phase === 'python-application-fetch' &&
       /^(?:downloaded|existing|failed|reused|would-download) /u.test(event.detail ?? '');
+    const applicationArtifactRetry =
+      event.phase === 'python-application-fetch' && event.detail?.startsWith('retry ') === true;
+    const npmTarballRetry =
+      event.phase === 'npm-fetch' && event.detail?.startsWith('retry ') === true;
     const shouldLog =
       event.phase === 'python-application-fetch'
         ? !lastLogged.has(key) ||
+          applicationArtifactRetry ||
           (applicationArtifactCompleted &&
             (event.current === 1 || event.current - last >= threshold)) ||
           event.current === event.total
-        : event.phase === 'git-fetch' ||
+        : npmTarballRetry ||
+          event.phase === 'git-fetch' ||
           event.current === 1 ||
           event.current - last >= threshold ||
           (event.total !== undefined && event.current === event.total);
@@ -3811,7 +3817,11 @@ program
     'Timeout for npm registry metadata requests',
     parsePositiveInteger
   )
-  .option('--tarball-timeout-ms <ms>', 'Timeout for npm tarball downloads', parsePositiveInteger)
+  .option(
+    '--tarball-timeout-ms <ms>',
+    'No-progress timeout for npm tarball downloads',
+    parsePositiveInteger
+  )
   .option(
     '--target <index>',
     'Only download the selected workspace target by one-based target list index; repeatable',
@@ -3970,6 +3980,7 @@ program
               onDownloadProgress({ ...event, phase: 'python-application-fetch' });
             },
             partial: targetSelection !== undefined,
+            ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             targets: pythonApplicationPlans,
           });
           if (options.dryRun !== true) {
@@ -4127,7 +4138,11 @@ program
     'Timeout for npm registry metadata requests',
     parsePositiveInteger
   )
-  .option('--tarball-timeout-ms <ms>', 'Timeout for npm tarball downloads', parsePositiveInteger)
+  .option(
+    '--tarball-timeout-ms <ms>',
+    'No-progress timeout for npm tarball downloads',
+    parsePositiveInteger
+  )
   .option(
     '--retry-delays-ms <list>',
     'Comma-separated retry delays for transient network errors',
