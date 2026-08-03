@@ -1267,11 +1267,7 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
   function shouldHeartbeat(event: DownloadProgressEvent): boolean {
     // SSH reads passphrases from the controlling terminal. A heartbeat written while
     // it is waiting for input obscures that prompt even though the prompt remains active.
-    return !(
-      event.phase === 'git-fetch' &&
-      process.stdin.isTTY &&
-      process.stderr.isTTY
-    );
+    return !(event.phase === 'git-fetch' && process.stdin.isTTY && process.stderr.isTTY);
   }
 
   function recordOutput(key: string): void {
