@@ -1269,8 +1269,8 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
     // it is waiting for input obscures that prompt even though the prompt remains active.
     return !(
       event.phase === 'git-fetch' &&
-      process.stdin.isTTY === true &&
-      process.stderr.isTTY === true
+      process.stdin.isTTY &&
+      process.stderr.isTTY
     );
   }
 
