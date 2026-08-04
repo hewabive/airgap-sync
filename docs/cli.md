@@ -225,8 +225,11 @@ application-specific.
 New and migrated schema-v2 workspaces enable `python.artifactTransfer.cpython` by
 default. Download therefore transfers the exact managed CPython archive for every
 planned platform/minor branch. Closed-side publication uploads those archives to Gitea
-Generic Packages in uv mirror layout. Set `python.artifactTransfer.cpython` to `false`
-only when runtime provisioning is deliberately owned by other infrastructure.
+Generic package `python-build-standalone`, using the upstream release build as the
+Generic version. This makes
+`<gitea>/api/packages/<generic-owner>/generic/python-build-standalone` a directly
+usable `uv python install --mirror` URL. Set `python.artifactTransfer.cpython` to
+`false` only when runtime provisioning is deliberately owned by other infrastructure.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
@@ -272,10 +275,10 @@ Set it on the wheel target when other targets should remain lock-only.
 
 `target add python-runtime` transfers a python-build-standalone archive into
 `python-runtime-mirror/<build>/<archive>` and writes a checksum manifest. Point
-Arriero's `pythonMirrorUrl` at that bundle directory and select mirror
-provisioning. The source URL must contain `/releases/download/` because uv's `--mirror`
-contract preserves the path after that segment. This remains a manual escape hatch;
-normal `python-app` targets transfer the required runtimes automatically.
+Arriero's site-wide managed Python mirror setting at that bundle directory. The source
+URL must contain `/releases/download/` because uv's `--mirror` contract preserves the
+path after that segment. This remains a manual escape hatch; normal `python-app`
+targets transfer and publish the required runtimes automatically.
 
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in

@@ -78,13 +78,29 @@ function safeBundleFile(bundleDir: string, relativeFile: string): string {
   return absolute;
 }
 
+function cpythonRelease(artifact: PythonApplicationBundleArtifact): string {
+  const marker = '/releases/download/';
+  const url = new URL(artifact.sourceUrl);
+  const markerIndex = url.pathname.indexOf(marker);
+  const suffix = markerIndex < 0 ? [] : url.pathname.slice(markerIndex + marker.length).split('/');
+  if (suffix.length !== 2) {
+    throw new Error(
+      `CPython artifact source does not have a python-build-standalone release path: ${artifact.id}`
+    );
+  }
+  const release = decodeURIComponent(suffix[0]!);
+  const filename = decodeURIComponent(suffix[1]!);
+  if (!release || !/^[A-Za-z0-9._+-]+$/u.test(release) || filename !== artifact.filename) {
+    throw new Error(
+      `CPython artifact source is not compatible with a uv Python mirror: ${artifact.id}`
+    );
+  }
+  return release;
+}
+
 function artifactPackage(artifact: PythonApplicationBundleArtifact): string {
   if (artifact.kind === 'cpython') {
-    const platform = artifact.references.flatMap((reference) => reference.platforms)[0];
-    if (!platform) {
-      throw new Error(`CPython artifact has no platform identity: ${artifact.id}`);
-    }
-    return `cpython-${platform}`;
+    return 'python-build-standalone';
   }
   if (artifact.kind === 'uv') {
     const platform = artifact.references.flatMap((reference) => reference.platforms)[0];
@@ -97,6 +113,10 @@ function artifactPackage(artifact: PythonApplicationBundleArtifact): string {
     return 'uv-license';
   }
   throw new Error(`Wheel artifact does not use Generic Packages: ${artifact.id}`);
+}
+
+function artifactVersion(artifact: PythonApplicationBundleArtifact): string {
+  return artifact.kind === 'cpython' ? cpythonRelease(artifact) : artifact.version;
 }
 
 function publicationSemanticContent(
@@ -117,7 +137,7 @@ function publicationSemanticContent(
         artifactId: artifact.id,
         kind: artifact.kind,
         package: artifactPackage(artifact),
-        version: artifact.version,
+        version: artifactVersion(artifact),
       }))
       .sort((left, right) => left.artifactId.localeCompare(right.artifactId)),
     giteaBaseUrl,
@@ -238,7 +258,7 @@ export async function materializePythonPublication(
       genericPackage: {
         owner: options.profile.genericOwner.name,
         package: artifactPackage(artifact),
-        version: artifact.version,
+        version: artifactVersion(artifact),
       },
     }))
     .sort((left, right) => left.artifactId.localeCompare(right.artifactId));

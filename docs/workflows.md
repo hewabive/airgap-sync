@@ -343,6 +343,15 @@ The offline publish step should:
 - publish application plans, locks, prerequisites, configuration, and optional
   runtime/tool transfer artifacts through Gitea Generic Packages.
 
+Managed CPython archives use the Generic package name `python-build-standalone` and
+the upstream release build as its version. Configure consumers with these two stable
+repository endpoints (substitute the configured owners when they differ):
+
+```text
+PyPI:          http://gitea.local/api/packages/airgap-packages/pypi/simple
+Python mirror: http://gitea.local/api/packages/airgap-packages/generic/python-build-standalone
+```
+
 Use the exact command in each application consumer contract. For a public owner it
 needs no credentials:
 

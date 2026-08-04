@@ -12,6 +12,8 @@ import type { PythonPublicationManifest } from '../../src/core/python/publicatio
 
 let bundleDir: string;
 let server: http.Server | undefined;
+const runtimeFilename =
+  'cpython-3.12.13+20260718-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
 
 async function listen(handler: http.RequestListener): Promise<string> {
   server = http.createServer(handler);
@@ -40,6 +42,10 @@ async function writeBundle(
   const toolSha = createHash('sha256').update(toolContent).digest('hex');
   const toolFile = `python/artifacts/optional/tools/uv/${toolSha}/uv.tar.gz`;
   await fs.writeFileAtomic(path.join(bundleDir, toolFile), toolContent);
+  const runtimeContent = Buffer.from('cpython fixture');
+  const runtimeSha = createHash('sha256').update(runtimeContent).digest('hex');
+  const runtimeFile = `python/artifacts/optional/runtimes/${runtimeSha}/${runtimeFilename}`;
+  await fs.writeFileAtomic(path.join(bundleDir, runtimeFile), runtimeContent);
   const publicationId = 'b'.repeat(64);
   const publicationDirectory = `python/publications/${publicationId}/applications/demo--desktop-x64`;
   const publicationDocuments = [
@@ -62,7 +68,7 @@ async function writeBundle(
     applications: [
       {
         application: { name: 'demo', version: '1.0.0' },
-        artifactIds: [`${toolSha}:uv.tar.gz`],
+        artifactIds: [`${runtimeSha}:${runtimeFilename}`, `${toolSha}:uv.tar.gz`],
         branchSizes: [],
         features: {},
         locks: [],
@@ -90,13 +96,29 @@ async function writeBundle(
         sourceUrl: 'https://example.test/uv.tar.gz',
         version: '0.11.16',
       },
+      {
+        file: runtimeFile,
+        filename: runtimeFilename,
+        id: `${runtimeSha}:${runtimeFilename}`,
+        kind: 'cpython',
+        references: [
+          {
+            platforms: ['linux-glibc-x86_64'],
+            targetId: 'demo--desktop-x64',
+          },
+        ],
+        sha256: runtimeSha,
+        size: runtimeContent.byteLength,
+        sourceUrl: `https://github.com/astral-sh/python-build-standalone/releases/download/20260718/${encodeURIComponent(runtimeFilename)}`,
+        version: '3.12.13',
+      },
     ],
     createdAt: '2026-07-27T00:00:00.000Z',
     schemaVersion: 2,
     summary: {
       applications: 1,
-      artifacts: 1,
-      totalBytes: toolContent.byteLength,
+      artifacts: 2,
+      totalBytes: toolContent.byteLength + runtimeContent.byteLength,
     },
   };
   await fs.writeJsonAtomic(path.join(bundleDir, 'python/application-index.json'), index, {
@@ -125,6 +147,15 @@ async function writeBundle(
           owner: 'python-apps',
           package: 'uv-linux-glibc-x86_64',
           version: '0.11.16',
+        },
+      },
+      {
+        artifactId: `${runtimeSha}:${runtimeFilename}`,
+        file: runtimeFile,
+        genericPackage: {
+          owner: 'python-apps',
+          package: 'python-build-standalone',
+          version: '20260718',
         },
       },
     ],
@@ -197,7 +228,7 @@ describe('publishPythonGenericArtifacts', () => {
     });
     const second = await publishPythonGenericArtifacts(options);
 
-    expect(first).toMatchObject({ errors: [], published: 7, skipped: 0 });
+    expect(first).toMatchObject({ errors: [], published: 8, skipped: 0 });
     expect(progress[0]).toEqual({ current: 0, status: 'start' });
     const uploadProgress = progress.find(
       (event) => event.bytes === 0 && event.detail?.startsWith('upload ')
@@ -205,12 +236,12 @@ describe('publishPythonGenericArtifacts', () => {
     expect(uploadProgress).toMatchObject({
       bytes: 0,
       status: 'progress',
-      total: 7,
+      total: 8,
     });
     expect(typeof uploadProgress?.current).toBe('number');
     expect(typeof uploadProgress?.totalBytes).toBe('number');
-    expect(progress.at(-1)).toEqual({ current: 7, status: 'done', total: 7 });
-    expect(second).toMatchObject({ errors: [], published: 0, skipped: 7 });
+    expect(progress.at(-1)).toEqual({ current: 8, status: 'done', total: 8 });
+    expect(second).toMatchObject({ errors: [], published: 0, skipped: 8 });
     expect([...published.keys()]).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
@@ -219,6 +250,7 @@ describe('publishPythonGenericArtifacts', () => {
         expect.stringContaining(
           '/api/packages/python-apps/generic/uv-linux-glibc-x86_64/0.11.16/uv.tar.gz'
         ),
+        `/api/packages/python-apps/generic/python-build-standalone/20260718/${encodeURIComponent(runtimeFilename)}`,
       ])
     );
   });
@@ -261,15 +293,15 @@ describe('publishPythonGenericArtifacts', () => {
     const interrupted = await publishPythonGenericArtifacts(options);
     const recovered = await publishPythonGenericArtifacts(options);
 
-    expect(interrupted.published).toBe(6);
+    expect(interrupted.published).toBe(7);
     expect(interrupted.errors).toHaveLength(1);
     expect(interrupted.errors[0]?.file).toContain('plan-diff.json');
     expect(recovered).toMatchObject({
       errors: [],
       published: 1,
-      skipped: 6,
+      skipped: 7,
     });
-    expect(published.size).toBe(7);
+    expect(published.size).toBe(8);
   });
 
   it('serializes initial uploads to the same Gitea package', async () => {
@@ -314,8 +346,8 @@ describe('publishPythonGenericArtifacts', () => {
     });
 
     expect(packageRace).toBe(false);
-    expect(report).toMatchObject({ errors: [], published: 7 });
-    expect(published.size).toBe(7);
+    expect(report).toMatchObject({ errors: [], published: 8 });
+    expect(published.size).toBe(8);
   });
 
   it('serializes identical blobs uploaded to different Gitea packages', async () => {
@@ -381,8 +413,8 @@ describe('publishPythonGenericArtifacts', () => {
     });
 
     expect(blobRace).toBe(false);
-    expect(report).toMatchObject({ errors: [], published: 13 });
-    expect(published.size).toBe(13);
+    expect(report).toMatchObject({ errors: [], published: 14 });
+    expect(published.size).toBe(14);
   });
 
   it('produces a dry-run plan without credentials', async () => {
@@ -394,7 +426,7 @@ describe('publishPythonGenericArtifacts', () => {
       publicationManifest,
     });
 
-    expect(report).toMatchObject({ errors: [], planned: 7, published: 0, skipped: 0 });
+    expect(report).toMatchObject({ errors: [], planned: 8, published: 0, skipped: 0 });
   });
 
   it('explains a Gitea package-registry 404', async () => {
