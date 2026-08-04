@@ -237,7 +237,9 @@ airgap-bundle/            Transfer bundle
 
 `airgap-sync.json` is long-lived workspace state. It stores configured targets and
 defaults for download, publish, and install verification. It is meant to move with the
-bundle between machines.
+bundle between machines. Git repository provisioning defaults to
+`defaults.publish.provisionGit: true`; set it to `false` when repositories are managed
+externally, or to `"ask"` to prompt on each interactive publish.
 
 `airgap-sync.secrets.json` is optional. If you save a Gitea token from the menu, it is
 stored there in plaintext on the removable media.

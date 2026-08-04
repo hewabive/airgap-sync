@@ -117,6 +117,7 @@ export interface WorkspaceDefaults {
   };
   publish: {
     configureGitGlobal: WorkspacePromptBoolean;
+    provisionGit: WorkspacePromptBoolean;
     publicRepositories: WorkspacePromptBoolean;
   };
   verifyInstall: {
@@ -292,6 +293,7 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
         },
         publish: {
           configureGitGlobal: false,
+          provisionGit: true,
           publicRepositories: true,
         },
         verifyInstall: {
@@ -325,6 +327,7 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
       },
       publish: {
         configureGitGlobal: false,
+        provisionGit: true,
         publicRepositories: true,
       },
       verifyInstall: {
@@ -731,6 +734,7 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
         publish.configureGitGlobal,
         defaults.publish.configureGitGlobal
       ),
+      provisionGit: normalizePromptBoolean(publish.provisionGit, defaults.publish.provisionGit),
       publicRepositories: normalizePromptBoolean(
         publish.publicRepositories,
         defaults.publish.publicRepositories

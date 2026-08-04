@@ -104,7 +104,9 @@ the prompt for that action. `defaults.download.latestPolicy` is either `bundled`
 `source`; `defaults.download.tagResolutionPolicy` and
 `defaults.download.rangeResolutionPolicy` are either `reuse-stable` or `refresh`.
 `defaults.download.prune` controls whether a successful download removes stale
-tarballs and Git mirrors from the local bundle.
+tarballs and Git mirrors from the local bundle. `defaults.publish.provisionGit`
+controls whether publish checks and creates missing Git repositories through the Gitea
+API; its default is `true`.
 Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.json`.
 
 ## coverage, plan, and probe
@@ -597,10 +599,10 @@ disable it globally.
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
 `--gitea`, `python.publication` as the PyPI/Generic owner profile, the
-`gitOwnerStrategy` settings described below, and `defaults.publish` for public
-repositories and global Git rewrites.
-Passing `<bundle>`, `--registry`, `--gitea`, `--public`, or
-`--configure-git-global` overrides those defaults.
+`gitOwnerStrategy` settings described below, and `defaults.publish` for Git repository
+provisioning, public repositories, and global Git rewrites.
+Passing `<bundle>`, `--registry`, `--gitea`, `--public`, `--skip-git-provision`, or
+`--configure-git-global` overrides the corresponding defaults.
 
 Supported options:
 
@@ -632,9 +634,11 @@ authentication, and Python wheel upload. Consumer pip configuration contains no 
 
 Use `--skip-git-provision` when the closed-network Git repositories are created outside
 `airgap-sync`, or when the target Git host is not Gitea-compatible. In that mode
-`publish` does not call the Gitea API; it only pushes Git mirrors to URLs derived from
-`--gitea`. If the Git host needs HTTP credentials, provide `--git-username` and
-`--git-password`.
+`publish` does not call the Gitea API for Git repositories; it only pushes Git mirrors
+to URLs derived from `--gitea`. Package-owner provisioning may still use the Gitea API.
+If the Git host needs HTTP credentials, provide `--git-username` and `--git-password`.
+The persistent workspace equivalent is
+`defaults.publish.provisionGit: false`; use `"ask"` to keep the interactive menu prompt.
 
 Git target paths preserve source owner/repository names by default. For example,
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`, so

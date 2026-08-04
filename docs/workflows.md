@@ -75,6 +75,8 @@ whether stable transitive semver range dependencies can reuse previous resolved
 versions. `defaults.download.prune` controls whether stale local npm, Python, and Git
 bundle objects are removed after a successful download. When the interactive menu
 initializes a workspace, it asks for these defaults during setup.
+`defaults.publish.provisionGit` defaults to `true`; set it to `false` to assume Git
+repositories already exist, or to `"ask"` to choose on every interactive publish.
 If the operator saves a Gitea token, it is stored separately in
 `airgap-sync.secrets.json`, which is ignored by Git but remains plaintext on the
 removable media.
@@ -367,6 +369,18 @@ airgap-sync publish ./airgap-bundle \
   --registry http://registry.local:4873 \
   --gitea http://git.local \
   --skip-git-provision
+```
+
+For workspace-based runs, the persistent equivalent is:
+
+```json
+{
+  "defaults": {
+    "publish": {
+      "provisionGit": false
+    }
+  }
+}
 ```
 
 For non-Gitea HTTP push authentication, pass explicit Git credentials:

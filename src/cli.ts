@@ -810,6 +810,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Range resolution policy: ${config.defaults.download.rangeResolutionPolicy}`,
     `Tag resolution policy: ${config.defaults.download.tagResolutionPolicy}`,
     `Prune stale bundle objects: ${promptBooleanToString(config.defaults.download.prune)}`,
+    `Provision Git repositories: ${promptBooleanToString(config.defaults.publish.provisionGit)}`,
     `Publish public repositories: ${promptBooleanToString(config.defaults.publish.publicRepositories)}`,
     `Configure global Git rewrites: ${promptBooleanToString(config.defaults.publish.configureGitGlobal)}`,
     `Verify install ignore scripts: ${promptBooleanToString(config.defaults.verifyInstall.ignoreScripts)}`,
@@ -1815,6 +1816,7 @@ async function resolvePublishWorkspaceDefaults(options: {
   bundle: string;
   configureGitGlobal?: WorkspacePromptBoolean;
   gitea: string;
+  provisionGit?: WorkspacePromptBoolean;
   publicRepositories?: WorkspacePromptBoolean;
   pythonOwner?: string;
   pythonPublicationProfile: PythonPublicationProfile;
@@ -1883,6 +1885,7 @@ async function resolvePublishWorkspaceDefaults(options: {
     gitOwnerStrategy,
     ...(gitPublishOwner ? { gitPublishOwner } : {}),
     ...(gitPublishOwnerKind ? { gitPublishOwnerKind } : {}),
+    ...(config ? { provisionGit: config.defaults.publish.provisionGit } : {}),
     ...(config ? { publicRepositories: config.defaults.publish.publicRepositories } : {}),
     ...(pythonOwner ? { pythonOwner } : {}),
     pythonPublicationProfile,
@@ -2399,6 +2402,11 @@ async function configurePublishDefaults(
   rl: ReadlineInterface,
   config: WorkspaceConfig
 ): Promise<WorkspaceConfig> {
+  const provisionGit = await askPromptBoolean(
+    rl,
+    'Create/check missing Git repositories through Gitea API by default',
+    config.defaults.publish.provisionGit
+  );
   const publicRepositories = await askPromptBoolean(
     rl,
     'Create public Gitea repositories by default',
@@ -2415,6 +2423,7 @@ async function configurePublishDefaults(
       ...config.defaults,
       publish: {
         configureGitGlobal,
+        provisionGit,
         publicRepositories,
       },
     },
@@ -3024,9 +3033,10 @@ async function runMenuAction(
       console.error(`[menu] publish updates: bundle ${bundle}`);
       const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
-      const provisionGit = await askYesNo(
+      const provisionGit = await resolvePromptBoolean(
         rl,
         'Create/check missing Git repositories through Gitea API?',
+        config.defaults.publish.provisionGit,
         true
       );
       const publicRepos = provisionGit
@@ -4686,6 +4696,7 @@ addNpmPublishOptions(
         options.public === true ? true : resolved.publicRepositories === true;
       const configureGitGlobal =
         options.configureGitGlobal === true || resolved.configureGitGlobal === true;
+      const skipGitProvision = options.skipGitProvision === true || resolved.provisionGit === false;
       const needsAuthenticatedGitOwner =
         resolved.gitOwnerStrategy === 'authenticated-user' ||
         (resolved.gitOwnerStrategy === 'fixed-owner' && resolved.gitPublishOwnerKind === 'user');
@@ -4716,7 +4727,7 @@ addNpmPublishOptions(
           })
         : options.dryRun === true
           ? undefined
-          : options.skipGitProvision === true || providedGitAuth
+          : skipGitProvision || providedGitAuth
             ? await resolveGiteaToken({
                 cliToken: options.giteaToken,
                 workspaceDir: resolved.workspaceDir,
@@ -4759,7 +4770,7 @@ addNpmPublishOptions(
         publishConcurrency: options.publishConcurrency,
         registryUrl: resolved.registry,
         skipExisting: options.skipExisting !== false,
-        skipGitProvision: options.skipGitProvision === true,
+        skipGitProvision,
       });
       await writePublishRunHistory({
         bundleDir: path.resolve(resolved.bundle),

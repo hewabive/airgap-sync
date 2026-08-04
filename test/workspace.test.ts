@@ -55,6 +55,7 @@ describe('workspace config', () => {
         },
         publish: {
           configureGitGlobal: false,
+          provisionGit: true,
           publicRepositories: true,
         },
         verifyInstall: {
@@ -209,6 +210,7 @@ describe('workspace config', () => {
         },
         publish: {
           configureGitGlobal: false,
+          provisionGit: true,
           publicRepositories: true,
         },
         verifyInstall: {
@@ -450,6 +452,7 @@ describe('workspace config', () => {
           },
           publish: {
             configureGitGlobal: true,
+            provisionGit: 'ask',
             publicRepositories: 'ask',
           },
           verifyInstall: {
@@ -475,6 +478,7 @@ describe('workspace config', () => {
       },
       publish: {
         configureGitGlobal: true,
+        provisionGit: 'ask',
         publicRepositories: 'ask',
       },
       verifyInstall: {

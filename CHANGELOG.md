@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Added the persistent `defaults.publish.provisionGit` workspace setting, defaulting to
+  `true`, with `false` and `"ask"` behavior matching the other interactive defaults.
 - Added schema-v2 `python-app` targets with application-first Windows/Linux coverage,
   automatic CPython-minor selection, pinned `uv` planning, wheels-only closures,
   inferred glibc boundaries, and collector-independent cross-platform resolution.
