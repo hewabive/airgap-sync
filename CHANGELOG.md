@@ -15,6 +15,9 @@
 - Added Gitea Generic Package publication for application plans, consumer contracts,
   locks, and optional hash-verified CPython/uv transfers; production installation
   remains owned by consumer infrastructure using standard pip/uv commands.
+- Serialized identical Generic Package blob uploads across application packages to
+  avoid Gitea PostgreSQL `UQE_package_blob_md5` races while retaining parallel uploads
+  for different content.
 - Added broad coverage commands, privacy-limited optional probe diagnostics, the
   application-first interactive menu/settings flow, guided unsupported-coverage
   errors, and Advanced/Legacy placement for raw Python seeding controls.

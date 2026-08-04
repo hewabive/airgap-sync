@@ -318,6 +318,73 @@ describe('publishPythonGenericArtifacts', () => {
     expect(published.size).toBe(7);
   });
 
+  it('serializes identical blobs uploaded to different Gitea packages', async () => {
+    const activeBlobs = new Set<string>();
+    const published = new Map<string, Buffer>();
+    let blobRace = false;
+    const baseUrl = await listen((request, response) => {
+      const url = request.url ?? '';
+      if (request.method === 'GET') {
+        const content = published.get(url);
+        response.writeHead(content ? 200 : 404).end(content);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        const content = Buffer.concat(chunks);
+        const md5 = createHash('md5').update(content).digest('hex');
+        if (activeBlobs.has(md5)) {
+          blobRace = true;
+          response
+            .writeHead(500)
+            .end('pq: duplicate key value violates unique constraint "UQE_package_blob_md5"');
+          return;
+        }
+        activeBlobs.add(md5);
+        setTimeout(() => {
+          published.set(url, content);
+          activeBlobs.delete(md5);
+          response.writeHead(201).end();
+        }, 10);
+      });
+    });
+    const publicationManifest = await writeBundle(baseUrl);
+    const index = await fs.readJson<PythonApplicationBundleIndex>(
+      path.join(bundleDir, 'python/application-index.json')
+    );
+    const application = index.applications[0]!;
+    index.applications.push({
+      ...application,
+      application: { ...application.application, name: 'demo-copy' },
+      targetId: 'demo-copy--desktop-x64',
+    });
+    await fs.writeJsonAtomic(path.join(bundleDir, 'python/application-index.json'), index, {
+      spaces: 2,
+    });
+    const publication = publicationManifest.applications[0]!;
+    publicationManifest.applications.push({
+      ...publication,
+      genericPackage: {
+        ...publication.genericPackage,
+        package: 'demo-copy-desktop-x64',
+      },
+      targetId: 'demo-copy--desktop-x64',
+    });
+
+    const report = await publishPythonGenericArtifacts({
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      concurrency: 4,
+      giteaBaseUrl: baseUrl,
+      publicationManifest,
+    });
+
+    expect(blobRace).toBe(false);
+    expect(report).toMatchObject({ errors: [], published: 13 });
+    expect(published.size).toBe(13);
+  });
+
   it('produces a dry-run plan without credentials', async () => {
     const publicationManifest = await writeBundle();
     const report = await publishPythonGenericArtifacts({

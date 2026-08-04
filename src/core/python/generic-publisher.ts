@@ -53,7 +53,7 @@ export interface PublishPythonGenericArtifactsOptions {
 }
 
 interface GenericFile {
-  expectedSha256?: string;
+  expectedSha256: string;
   file: string;
   filename: string;
   owner: string;
@@ -314,6 +314,30 @@ function groupFilesByPackage(files: GenericFile[]): IndexedGenericFile[][] {
   return [...groups.values()];
 }
 
+async function serializeByKey<T>(
+  tails: Map<string, Promise<void>>,
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = tails.get(key);
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  tails.set(key, current);
+  if (previous) {
+    await previous;
+  }
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (tails.get(key) === current) {
+      tails.delete(key);
+    }
+  }
+}
+
 export async function publishPythonGenericArtifacts(
   options: PublishPythonGenericArtifactsOptions
 ): Promise<PythonGenericPublishReport> {
@@ -407,6 +431,11 @@ export async function publishPythonGenericArtifacts(
     );
   }
   const fileGroups = groupFilesByPackage(files);
+  // Gitea deduplicates package blobs globally by their hashes. Concurrent uploads of
+  // identical content to different packages can both try to create the blob row and
+  // make PostgreSQL reject one with UQE_package_blob_md5. Keep unrelated uploads
+  // parallel, but let each content digest reach Gitea one request at a time.
+  const digestUploadTails = new Map<string, Promise<void>>();
   let groupCursor = 0;
   let completed = 0;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 4));
@@ -449,15 +478,17 @@ export async function publishPythonGenericArtifacts(
                 file: file.file,
                 owner: file.owner,
                 package: file.package,
-                status: await publishFile({
-                  ...(options.auth ? { auth: options.auth } : {}),
-                  baseUrl: normalizeBaseUrl(options.giteaBaseUrl),
-                  bundleDir,
-                  fetch: options.fetch ?? globalThis.fetch,
-                  file,
-                  ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-                  timeoutMs: options.timeoutMs ?? 300_000,
-                }),
+                status: await serializeByKey(digestUploadTails, file.expectedSha256, async () =>
+                  publishFile({
+                    ...(options.auth ? { auth: options.auth } : {}),
+                    baseUrl: normalizeBaseUrl(options.giteaBaseUrl),
+                    bundleDir,
+                    fetch: options.fetch ?? globalThis.fetch,
+                    file,
+                    ...(onFileProgress ? { onProgress: onFileProgress } : {}),
+                    timeoutMs: options.timeoutMs ?? 300_000,
+                  })
+                ),
                 version: file.version,
               };
             } catch (error) {
