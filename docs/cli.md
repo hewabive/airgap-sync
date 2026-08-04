@@ -231,6 +231,15 @@ Generic version. This makes
 usable `uv python install --mirror` URL. Set `python.artifactTransfer.cpython` to
 `false` only when runtime provisioning is deliberately owned by other infrastructure.
 
+`python.artifactTransfer.uvVersions` is the consumer-compatibility dimension, not the
+planner version. uv bundles its Python download catalog, so changing uv can change the
+release-build path requested from the same mirror. airgap-sync selects the reviewed
+runtime catalog for every configured consumer uv version, unions identical archives,
+and records which versions require each artifact. Planning fails rather than producing
+an incomplete mirror when a requested uv version has no reviewed catalog. The initial
+built-in catalog covers `0.11.16`; additional reviewed catalogs can extend the matrix
+without changing the Gitea mirror URL or the Arriero interface.
+
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
 extend the same bundle. Previously active Git sources that are not part of the selected

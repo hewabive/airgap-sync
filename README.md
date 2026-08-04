@@ -188,9 +188,12 @@ After `download` and closed-network `publish`, applications are available throug
 standard Gitea PyPI Simple API. CPython runtime transfer is enabled by default;
 airgap-sync publishes the verified archives so the stable Generic Package URL
 `<gitea>/api/packages/<owner>/generic/python-build-standalone` can be passed directly
-to `uv python install --mirror`. The generated locks and consumer contracts document
-and verify bundle coverage; consumers may still resolve a newly selected application
-version from the repository. System packages remain consumer prerequisites.
+to `uv python install --mirror`. Because uv embeds its Python download catalog, the
+workspace records covered consumer versions in `python.artifactTransfer.uvVersions`;
+an unreviewed version fails planning instead of yielding a mirror that looks complete
+but returns 404. The generated locks and consumer contracts document and verify bundle
+coverage; consumers may still resolve a newly selected application version from the
+repository. System packages remain consumer prerequisites.
 
 ## Git Mirrors
 

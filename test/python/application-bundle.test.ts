@@ -83,6 +83,7 @@ function createPlan(options: {
       version: '0.11.16',
     },
     runtimeContract: {
+      uvVersions: ['0.11.16'],
       platforms: [
         {
           implementation: 'CPython',

@@ -85,6 +85,10 @@ function activePlanFor(
           ],
         }
       : {}),
+    runtimeContract: {
+      platforms: [],
+      uvVersions: workspaceConfig.python?.artifactTransfer?.uvVersions ?? ['0.11.16'],
+    },
     schemaVersion: 2,
     wheels: [],
   });
@@ -167,6 +171,30 @@ describe('workspace Python application plan preflight', () => {
 
     expect(result.plannedTargetIndexes).toEqual([1]);
     expect(result.targets[0]?.activePlan.plan.intent.application.extras).toEqual(['server']);
+  });
+
+  it('replans when consumer uv coverage changed', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    let stored = activePlanFor(config, target);
+    config.python!.artifactTransfer!.uvVersions = ['0.11.16', '0.12.1'];
+
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      planTargets: (indexes) => {
+        expect(indexes).toEqual([1]);
+        stored = activePlanFor(config, target);
+        return Promise.resolve();
+      },
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+
+    expect(result.plannedTargetIndexes).toEqual([1]);
+    expect(result.targets[0]?.activePlan.plan.runtimeContract?.uvVersions).toEqual([
+      '0.11.16',
+      '0.12.1',
+    ]);
   });
 
   it('keeps a current plan when publication coordinates changed', async () => {

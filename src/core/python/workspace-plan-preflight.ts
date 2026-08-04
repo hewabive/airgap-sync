@@ -50,6 +50,7 @@ interface ExpectedWorkspacePythonApplicationPlan {
   resolved: ReturnType<typeof resolveWorkspacePythonApplication>;
   targetId: string;
   targetIndex: number;
+  uvVersions: string[];
 }
 
 function planIsCurrent(
@@ -66,7 +67,9 @@ function planIsCurrent(
       platformCoveragePolicyDigest(expected.resolved.coveragePolicy) &&
     activePlan.plan.recipe?.digest === expected.recipeDigest &&
     includesCpython === expected.includeCpython &&
-    includesUv === expected.includeUv
+    includesUv === expected.includeUv &&
+    semanticDigest(activePlan.plan.runtimeContract?.uvVersions ?? []) ===
+      semanticDigest(expected.uvVersions)
   );
 }
 
@@ -92,6 +95,9 @@ async function expectedPlans(
         resolved.coveragePolicy.id
       ),
       targetIndex,
+      uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
+        options.config.python!.planner.version,
+      ],
     });
   }
   return expected;

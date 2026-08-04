@@ -76,6 +76,7 @@ describe('workspace config', () => {
         artifactTransfer: {
           cpython: true,
           uv: false,
+          uvVersions: ['0.11.16'],
         },
         planner: {
           engine: 'uv',
@@ -686,6 +687,7 @@ describe('workspace config', () => {
           artifactTransfer: {
             cpython: true,
             uv: true,
+            uvVersions: [' 0.11.16 ', '0.12.1', '0.11.16'],
           },
           planner: {
             engine: 'uv',
@@ -721,6 +723,7 @@ describe('workspace config', () => {
         artifactTransfer: {
           cpython: true,
           uv: true,
+          uvVersions: ['0.11.16', '0.12.1'],
         },
         planner: {
           engine: 'uv',

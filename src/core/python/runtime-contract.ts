@@ -7,9 +7,9 @@ import {
 } from './environment-plan.js';
 import type { PythonApplicationRecipe } from './application-recipe.js';
 import {
-  managedPythonRuntimeCatalog,
+  selectManagedPythonRuntimeCatalogs,
   selectManagedPythonRuntimeAsset,
-  type ManagedPythonRuntimeCatalog,
+  type ManagedPythonRuntimeCatalogSelection,
 } from './runtime-catalog.js';
 import { uvToolManifest } from './uv-tool.js';
 import type { BuiltInPlatformFamilyId } from './platform-family.js';
@@ -18,7 +18,8 @@ export interface AddPythonRuntimeContractOptions {
   includeCpython?: boolean;
   includeUv?: boolean;
   recipe?: PythonApplicationRecipe;
-  runtimeCatalog?: ManagedPythonRuntimeCatalog;
+  runtimeCatalogSelections?: ManagedPythonRuntimeCatalogSelection[];
+  uvVersions?: string[];
 }
 
 export interface PythonPrerequisiteReport {
@@ -32,9 +33,11 @@ export interface PythonPrerequisiteReport {
 
 function runtimeContract(
   plan: PythonEnvironmentPlan,
-  recipe: PythonApplicationRecipe | undefined
+  recipe: PythonApplicationRecipe | undefined,
+  uvVersions: string[]
 ): PythonRuntimeContract {
   return {
+    uvVersions,
     platforms: plan.platforms.map((platform) => ({
       implementation: 'CPython',
       platformFamilyId: platform.platformFamilyId,
@@ -51,30 +54,39 @@ function runtimeContract(
 
 function cpythonArtifacts(
   plan: PythonEnvironmentPlan,
-  catalog: ManagedPythonRuntimeCatalog
+  selections: ManagedPythonRuntimeCatalogSelection[]
 ): PythonPlanTransferArtifact[] {
-  return plan.platforms.map((platform) => {
-    const asset = selectManagedPythonRuntimeAsset(
-      platform.pythonMinor,
-      platform.platformFamilyId as BuiltInPlatformFamilyId,
-      catalog
-    );
-    if (!asset) {
-      throw new Error(
-        `No managed CPython ${platform.pythonMinor} artifact for ${platform.platformFamilyId}`
+  const artifacts = new Map<string, PythonPlanTransferArtifact>();
+  for (const platform of plan.platforms) {
+    for (const selection of selections) {
+      const asset = selectManagedPythonRuntimeAsset(
+        platform.pythonMinor,
+        platform.platformFamilyId as BuiltInPlatformFamilyId,
+        selection.catalog
       );
+      if (!asset) {
+        throw new Error(
+          `No managed CPython ${platform.pythonMinor} artifact for ${platform.platformFamilyId} compatible with uv ${selection.uvVersions.join(', ')}`
+        );
+      }
+      const key = `${asset.sha256}\0${asset.filename}`;
+      const current = artifacts.get(key);
+      artifacts.set(key, {
+        filename: asset.filename,
+        kind: 'cpython',
+        license: selection.catalog.license,
+        platforms: [...new Set([...(current?.platforms ?? []), platform.platformFamilyId])].sort(),
+        requiredByUvVersions: [
+          ...new Set([...(current?.requiredByUvVersions ?? []), ...selection.uvVersions]),
+        ].sort(),
+        sha256: asset.sha256,
+        size: asset.size,
+        sourceUrl: asset.url,
+        version: asset.pythonVersion,
+      });
     }
-    return {
-      filename: asset.filename,
-      kind: 'cpython',
-      license: catalog.license,
-      platforms: [platform.platformFamilyId],
-      sha256: asset.sha256,
-      size: asset.size,
-      sourceUrl: asset.url,
-      version: asset.pythonVersion,
-    };
-  });
+  }
+  return [...artifacts.values()];
 }
 
 function uvAssetKey(platformFamilyId: string): string {
@@ -88,7 +100,16 @@ function uvAssetKey(platformFamilyId: string): string {
   }
 }
 
-function uvArtifacts(plan: PythonEnvironmentPlan): PythonPlanTransferArtifact[] {
+function uvArtifacts(
+  plan: PythonEnvironmentPlan,
+  uvVersions: string[]
+): PythonPlanTransferArtifact[] {
+  const unsupported = uvVersions.filter((version) => version !== uvToolManifest.version);
+  if (unsupported.length > 0) {
+    throw new Error(
+      `No reviewed uv tool artifact catalog for consumer uv ${unsupported.join(', ')}`
+    );
+  }
   const platforms = plan.platforms.map((platform) => platform.platformFamilyId);
   const binaries = platforms.map((platformFamilyId) => {
     const asset = uvToolManifest.assets[uvAssetKey(platformFamilyId)]!;
@@ -125,11 +146,26 @@ export function addPythonRuntimeContract(
   plan: PythonEnvironmentPlan,
   options: AddPythonRuntimeContractOptions = {}
 ): PythonEnvironmentPlan {
+  const uvVersions = [...new Set(options.uvVersions ?? [uvToolManifest.version])].sort();
+  if (uvVersions.length === 0) {
+    throw new Error('Python runtime contract requires at least one consumer uv version');
+  }
+  const runtimeCatalogSelections = options.includeCpython
+    ? (options.runtimeCatalogSelections ?? selectManagedPythonRuntimeCatalogs(uvVersions))
+    : [];
+  const catalogUvVersions = [
+    ...new Set(runtimeCatalogSelections.flatMap((selection) => selection.uvVersions)),
+  ].sort();
+  if (
+    options.includeCpython &&
+    (catalogUvVersions.length !== uvVersions.length ||
+      catalogUvVersions.some((version, index) => version !== uvVersions[index]))
+  ) {
+    throw new Error('Managed Python runtime catalog selection does not cover every consumer uv');
+  }
   const runtimeArtifacts: PythonPlanTransferArtifact[] = [
-    ...(options.includeCpython
-      ? cpythonArtifacts(plan, options.runtimeCatalog ?? managedPythonRuntimeCatalog)
-      : []),
-    ...(options.includeUv ? uvArtifacts(plan) : []),
+    ...(options.includeCpython ? cpythonArtifacts(plan, runtimeCatalogSelections) : []),
+    ...(options.includeUv ? uvArtifacts(plan, uvVersions) : []),
   ].sort((left, right) => left.filename.localeCompare(right.filename));
   const input: PythonEnvironmentPlanInput = {
     application: plan.application,
@@ -142,7 +178,7 @@ export function addPythonRuntimeContract(
     ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
     ...(runtimeArtifacts.length > 0 ? { runtimeArtifacts } : {}),
-    runtimeContract: runtimeContract(plan, options.recipe),
+    runtimeContract: runtimeContract(plan, options.recipe, uvVersions),
     schemaVersion: plan.schemaVersion,
     ...(options.recipe?.healthChecks?.length
       ? {

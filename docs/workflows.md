@@ -94,6 +94,11 @@ New workspaces use application-first schema v2:
   "gitOwnerStrategy": "preserve",
   "python": {
     "sourceIndex": "https://pypi.org/simple/",
+    "artifactTransfer": {
+      "cpython": true,
+      "uv": false,
+      "uvVersions": ["0.11.16"]
+    },
     "publication": {
       "owner": {
         "strategy": "fixed-owner",

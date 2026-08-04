@@ -47,6 +47,7 @@ export interface PythonPlanTransferArtifact {
     url: string;
   };
   platforms: string[];
+  requiredByUvVersions?: string[];
   sha256: string;
   size?: number;
   sourceUrl: string;
@@ -54,6 +55,7 @@ export interface PythonPlanTransferArtifact {
 }
 
 export interface PythonRuntimeContract {
+  uvVersions: string[];
   platforms: {
     implementation: 'CPython';
     platformFamilyId: string;

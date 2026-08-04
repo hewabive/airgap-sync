@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "provider": "astral-sh/python-build-standalone",
+  "compatibleUvVersions": ["0.11.16"],
   "release": "20260718",
   "releaseUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260718",
   "lastReviewedAt": "2026-07-27",

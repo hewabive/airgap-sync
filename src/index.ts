@@ -91,6 +91,7 @@ export {
   managedPythonRuntimeCatalog,
   normalizeManagedPythonRuntimeCatalog,
   selectManagedPythonRuntimeAsset,
+  selectManagedPythonRuntimeCatalogs,
 } from './core/python/runtime-catalog.js';
 export {
   transferPythonPlanArtifacts,
@@ -378,6 +379,7 @@ export type {
 export type {
   ManagedPythonRuntimeAsset,
   ManagedPythonRuntimeCatalog,
+  ManagedPythonRuntimeCatalogSelection,
 } from './core/python/runtime-catalog.js';
 export type {
   PythonPlanArtifactManifest,

@@ -11,6 +11,7 @@ import {
   managedPythonRuntimeCatalog,
   normalizeManagedPythonRuntimeCatalog,
   selectManagedPythonRuntimeAsset,
+  selectManagedPythonRuntimeCatalogs,
 } from '../../src/core/python/runtime-catalog.js';
 import { normalizePlatformCoveragePolicy } from '../../src/core/python/coverage-policy.js';
 
@@ -106,6 +107,14 @@ describe('Python runtime contract', () => {
       pythonVersion: '3.11.15',
       sha256: 'a48c2dbe832319f61aa8557c9900caec70f7fed0cbee391a4c9ff9f98b50222d',
     });
+    expect(managedPythonRuntimeCatalog.compatibleUvVersions).toContain('0.11.16');
+    expect(selectManagedPythonRuntimeCatalogs(['0.11.16'])).toEqual([
+      {
+        catalog: managedPythonRuntimeCatalog,
+        uvVersions: ['0.11.16'],
+      },
+    ]);
+    expect(() => selectManagedPythonRuntimeCatalogs(['0.12.1'])).toThrow('consumer uv 0.12.1');
   });
 
   it('declares external provisioning and machine prerequisites', () => {
@@ -164,6 +173,7 @@ describe('Python runtime contract', () => {
         expect.objectContaining({
           kind: 'cpython',
           platforms: ['linux-glibc-x86_64'],
+          requiredByUvVersions: ['0.11.16'],
           version: '3.11.15',
         }),
         expect.objectContaining({
@@ -178,6 +188,7 @@ describe('Python runtime contract', () => {
       ])
     );
     expect(enriched.runtimeArtifacts?.every((artifact) => !('publication' in artifact))).toBe(true);
+    expect(enriched.runtimeContract?.uvVersions).toEqual(['0.11.16']);
   });
 
   it('enables transfer without knowing the future Generic Package owner', () => {
@@ -186,5 +197,37 @@ describe('Python runtime contract', () => {
         includeCpython: true,
       }).runtimeArtifacts
     ).toHaveLength(2);
+  });
+
+  it('unions runtime archives across several consumer uv catalogs', () => {
+    const secondCatalog = normalizeManagedPythonRuntimeCatalog({
+      ...managedPythonRuntimeCatalog,
+      assets: managedPythonRuntimeCatalog.assets.map((asset, index) => ({
+        ...asset,
+        filename: asset.filename.replaceAll('20260718', '20260728'),
+        sha256: (index + 1).toString(16).padStart(64, '0'),
+        url: asset.url.replaceAll('20260718', '20260728'),
+      })),
+      compatibleUvVersions: ['0.12.1'],
+      release: '20260728',
+      releaseUrl: 'https://github.com/astral-sh/python-build-standalone/releases/tag/20260728',
+    });
+    const enriched = addPythonRuntimeContract(plan(), {
+      includeCpython: true,
+      runtimeCatalogSelections: [
+        { catalog: managedPythonRuntimeCatalog, uvVersions: ['0.11.16'] },
+        { catalog: secondCatalog, uvVersions: ['0.12.1'] },
+      ],
+      uvVersions: ['0.11.16', '0.12.1'],
+    });
+
+    expect(enriched.runtimeArtifacts).toHaveLength(4);
+    expect(enriched.runtimeArtifacts?.filter((artifact) => artifact.kind === 'cpython')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ requiredByUvVersions: ['0.11.16'] }),
+        expect.objectContaining({ requiredByUvVersions: ['0.12.1'] }),
+      ])
+    );
+    expect(enriched.runtimeContract?.uvVersions).toEqual(['0.11.16', '0.12.1']);
   });
 });

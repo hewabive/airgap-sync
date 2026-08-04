@@ -136,6 +136,7 @@ export interface WorkspacePythonConfig {
   artifactTransfer?: {
     cpython: boolean;
     uv: boolean;
+    uvVersions: string[];
   };
   legacySeed?: WorkspacePythonLegacySeedConfig;
   planner: {
@@ -307,6 +308,7 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
         artifactTransfer: {
           cpython: true,
           uv: false,
+          uvVersions: [workspacePythonPlannerVersion],
         },
         planner: {
           engine: 'uv',
@@ -815,6 +817,21 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
     artifactTransfer = {
       cpython: value.artifactTransfer.cpython === true,
       uv: value.artifactTransfer.uv === true,
+      uvVersions:
+        value.artifactTransfer.uvVersions === undefined
+          ? [workspacePythonPlannerVersion]
+          : Array.isArray(value.artifactTransfer.uvVersions) &&
+              value.artifactTransfer.uvVersions.length > 0 &&
+              value.artifactTransfer.uvVersions.every(
+                (version): version is string =>
+                  typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version.trim())
+              )
+            ? [...new Set(value.artifactTransfer.uvVersions.map((version) => version.trim()))]
+            : (() => {
+                throw new Error(
+                  'python.artifactTransfer.uvVersions must contain one or more X.Y.Z versions'
+                );
+              })(),
     };
   }
   const planner = isRecord(value.planner) ? value.planner : {};
@@ -1260,6 +1277,7 @@ function addWorkspacePythonRuntimeTransfer(config: WorkspaceConfig): WorkspaceCo
       artifactTransfer: {
         cpython: true,
         uv: false,
+        uvVersions: [workspacePythonPlannerVersion],
       },
     },
   });

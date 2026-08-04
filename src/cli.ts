@@ -786,6 +786,9 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
           `Python publication owner: ${publicationOwner(publication.owner)}`,
           `Python PyPI owner: ${publicationOwner(publication.pypiOwner ?? publication.owner)}`,
           `Python Generic owner: ${publicationOwner(publication.genericOwner ?? publication.owner)}`,
+          `Consumer uv coverage: ${(
+            config.python?.artifactTransfer?.uvVersions ?? [workspacePythonPlannerVersion]
+          ).join(', ')}`,
           `Default application coverage: ${
             defaultCoverage
               ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
@@ -1066,6 +1069,9 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
         includeCpython: options.config.python?.artifactTransfer?.cpython === true,
         includeUv: options.config.python?.artifactTransfer?.uv === true,
         ...(recipe ? { recipe } : {}),
+        uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
+          options.config.python!.planner.version,
+        ],
       });
       const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
       const stored = await writeActivePythonApplicationPlan({
@@ -2315,12 +2321,27 @@ async function configurePythonApplicationPublication(
   if (splitOwners && (!pypiOwner || !genericOwner)) {
     throw new Error('Both Python publication organizations are required');
   }
+  const uvVersions = (
+    await ask(
+      rl,
+      'Consumer uv versions (comma-separated)',
+      (config.python?.artifactTransfer?.uvVersions ?? [workspacePythonPlannerVersion]).join(', ')
+    )
+  )
+    .split(',')
+    .map((version) => version.trim())
+    .filter(Boolean);
+  if (uvVersions.length === 0 || uvVersions.some((version) => !/^\d+\.\d+\.\d+$/u.test(version))) {
+    throw new Error('Consumer uv versions must contain one or more X.Y.Z versions');
+  }
   const nextConfig: WorkspaceConfig = {
     ...config,
     python: {
-      ...(config.python?.artifactTransfer
-        ? { artifactTransfer: config.python.artifactTransfer }
-        : {}),
+      artifactTransfer: {
+        cpython: config.python?.artifactTransfer?.cpython ?? true,
+        uv: config.python?.artifactTransfer?.uv ?? false,
+        uvVersions: [...new Set(uvVersions)],
+      },
       ...(config.python?.legacySeed ? { legacySeed: config.python.legacySeed } : {}),
       planner: config.python?.planner ?? {
         engine: 'uv',

@@ -12,6 +12,7 @@ export interface ManagedPythonRuntimeAsset {
 
 export interface ManagedPythonRuntimeCatalog {
   assets: ManagedPythonRuntimeAsset[];
+  compatibleUvVersions: string[];
   lastReviewedAt: string;
   license: {
     spdx: string;
@@ -37,6 +38,12 @@ export function normalizeManagedPythonRuntimeCatalog(value: unknown): ManagedPyt
     !value.release ||
     typeof value.releaseUrl !== 'string' ||
     typeof value.lastReviewedAt !== 'string' ||
+    !Array.isArray(value.compatibleUvVersions) ||
+    value.compatibleUvVersions.length === 0 ||
+    !value.compatibleUvVersions.every(
+      (version): version is string =>
+        typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version)
+    ) ||
     !isRecord(value.license) ||
     typeof value.license.spdx !== 'string' ||
     typeof value.license.url !== 'string' ||
@@ -85,6 +92,7 @@ export function normalizeManagedPythonRuntimeCatalog(value: unknown): ManagedPyt
   }
   return {
     assets,
+    compatibleUvVersions: [...new Set(value.compatibleUvVersions)],
     lastReviewedAt: value.lastReviewedAt,
     license: {
       spdx: value.license.spdx,
@@ -98,6 +106,31 @@ export function normalizeManagedPythonRuntimeCatalog(value: unknown): ManagedPyt
 }
 
 export const managedPythonRuntimeCatalog = normalizeManagedPythonRuntimeCatalog(catalogData);
+
+export interface ManagedPythonRuntimeCatalogSelection {
+  catalog: ManagedPythonRuntimeCatalog;
+  uvVersions: string[];
+}
+
+export function selectManagedPythonRuntimeCatalogs(
+  uvVersions: string[],
+  catalogs: ManagedPythonRuntimeCatalog[] = [managedPythonRuntimeCatalog]
+): ManagedPythonRuntimeCatalogSelection[] {
+  const selections = new Map<ManagedPythonRuntimeCatalog, string[]>();
+  for (const uvVersion of [...new Set(uvVersions)]) {
+    const catalog = catalogs.find((candidate) =>
+      candidate.compatibleUvVersions.includes(uvVersion)
+    );
+    if (!catalog) {
+      throw new Error(`No reviewed managed Python runtime catalog for consumer uv ${uvVersion}`);
+    }
+    selections.set(catalog, [...(selections.get(catalog) ?? []), uvVersion]);
+  }
+  return [...selections].map(([catalog, versions]) => ({
+    catalog,
+    uvVersions: versions.sort(),
+  }));
+}
 
 export function selectManagedPythonRuntimeAsset(
   pythonMinor: string,
