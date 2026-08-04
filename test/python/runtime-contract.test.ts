@@ -223,14 +223,21 @@ describe('Python runtime contract', () => {
   it('unions runtime archives across several consumer uv catalogs', () => {
     const enriched = addPythonRuntimeContract(plan(), {
       includeCpython: true,
+      includeUv: true,
       uvVersions: ['0.11.16', '0.12.1'],
     });
 
-    expect(enriched.runtimeArtifacts).toHaveLength(4);
+    expect(enriched.runtimeArtifacts).toHaveLength(12);
     expect(enriched.runtimeArtifacts?.filter((artifact) => artifact.kind === 'cpython')).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ requiredByUvVersions: ['0.11.16'] }),
         expect.objectContaining({ requiredByUvVersions: ['0.12.1'] }),
+      ])
+    );
+    expect(enriched.runtimeArtifacts?.filter((artifact) => artifact.kind === 'uv')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ version: '0.11.16' }),
+        expect.objectContaining({ version: '0.12.1' }),
       ])
     );
     expect(enriched.runtimeContract?.uvVersions).toEqual(['0.11.16', '0.12.1']);

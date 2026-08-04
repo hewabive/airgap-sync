@@ -5,7 +5,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from '../../src/core/fs.js';
-import { acquireUv, uvCollectorAssetKey, uvToolManifest } from '../../src/core/python/uv-tool.js';
+import {
+  acquireUv,
+  uvCollectorAssetKey,
+  uvConsumerToolManifests,
+  uvToolManifest,
+  uvToolManifestForConsumer,
+} from '../../src/core/python/uv-tool.js';
 
 let tempDir: string;
 const linuxX64Asset = uvToolManifest.assets['linux-x64']!;
@@ -43,6 +49,20 @@ describe('pinned uv acquisition', () => {
     expect(uvCollectorAssetKey('linux', 'x64')).toBe('linux-x64');
     expect(() => uvCollectorAssetKey('freebsd', 'x64')).toThrow(
       'not available for collector platform'
+    );
+  });
+
+  it('keeps consumer tool coverage separate from the planner pin', () => {
+    expect(uvConsumerToolManifests.map((manifest) => manifest.version)).toEqual([
+      '0.11.16',
+      '0.12.1',
+    ]);
+    expect(uvToolManifestForConsumer('0.12.1').assets['linux-x64']).toMatchObject({
+      sha256: '90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb',
+      size: 21760555,
+    });
+    expect(() => uvToolManifestForConsumer('0.12.2')).toThrow(
+      'No reviewed uv tool artifact catalog'
     );
   });
 

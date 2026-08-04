@@ -239,6 +239,9 @@ and records which versions require each artifact. Planning fails rather than pro
 an incomplete mirror when a requested uv version has no reviewed catalog. Built-in
 catalogs currently cover `0.11.16` and `0.12.1`; additional reviewed catalogs can
 extend the matrix without changing the Gitea mirror URL or the Arriero interface.
+When `python.artifactTransfer.uv` is enabled, the matching checked and licensed `uv`
+binary for every configured consumer version is transferred as well; this does not
+change the planner executable.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and

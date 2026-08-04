@@ -4,6 +4,7 @@ import process from 'node:process';
 import * as tar from 'tar';
 import * as yauzl from 'yauzl';
 import manifestData from '../../../support/python/uv-tool-manifest.json' with { type: 'json' };
+import manifestUv0121Data from '../../../support/python/uv-tool-manifest-0.12.1.json' with { type: 'json' };
 import * as fs from '../fs.js';
 import {
   downloadResumableHttpFile,
@@ -131,6 +132,21 @@ function normalizeUvToolManifest(value: unknown): UvToolManifest {
 }
 
 export const uvToolManifest = normalizeUvToolManifest(manifestData);
+export const uvConsumerToolManifests = [
+  uvToolManifest,
+  normalizeUvToolManifest(manifestUv0121Data),
+];
+
+export function uvToolManifestForConsumer(version: string): UvToolManifest {
+  const matches = uvConsumerToolManifests.filter((manifest) => manifest.version === version);
+  if (matches.length === 0) {
+    throw new Error(`No reviewed uv tool artifact catalog for consumer uv ${version}`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Several uv tool artifact catalogs claim consumer uv ${version}`);
+  }
+  return matches[0]!;
+}
 
 export function uvCollectorAssetKey(
   platform: NodeJS.Platform = process.platform,

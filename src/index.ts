@@ -106,7 +106,13 @@ export {
   UvResolutionError,
   uvPlatformTarget,
 } from './core/python/uv-adapter.js';
-export { acquireUv, uvCollectorAssetKey, uvToolManifest } from './core/python/uv-tool.js';
+export {
+  acquireUv,
+  uvCollectorAssetKey,
+  uvConsumerToolManifests,
+  uvToolManifest,
+  uvToolManifestForConsumer,
+} from './core/python/uv-tool.js';
 export {
   builtInDistributionHintCatalog,
   normalizeDistributionHintCatalog,

@@ -1,7 +1,8 @@
 # Python Support Artifacts
 
 `uv-tool-manifest.json` pins the standalone resolver executable used by the
-application-first Python planner.
+application-first Python planner. Versioned `uv-tool-manifest-*.json` files add
+consumer binaries that can be transferred without changing the planner pin.
 
 `runtime-catalog*.json` pins optional CPython archives for reviewed consumer `uv`
 versions and the initial Windows and glibc-Linux x86-64 platform families. The catalog

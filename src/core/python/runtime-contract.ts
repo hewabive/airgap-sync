@@ -11,7 +11,7 @@ import {
   selectManagedPythonRuntimeAsset,
   type ManagedPythonRuntimeCatalogSelection,
 } from './runtime-catalog.js';
-import { uvToolManifest } from './uv-tool.js';
+import { uvToolManifest, uvToolManifestForConsumer } from './uv-tool.js';
 import type { BuiltInPlatformFamilyId } from './platform-family.js';
 
 export interface AddPythonRuntimeContractOptions {
@@ -104,42 +104,42 @@ function uvArtifacts(
   plan: PythonEnvironmentPlan,
   uvVersions: string[]
 ): PythonPlanTransferArtifact[] {
-  const unsupported = uvVersions.filter((version) => version !== uvToolManifest.version);
-  if (unsupported.length > 0) {
-    throw new Error(
-      `No reviewed uv tool artifact catalog for consumer uv ${unsupported.join(', ')}`
-    );
-  }
   const platforms = plan.platforms.map((platform) => platform.platformFamilyId);
-  const binaries = platforms.map((platformFamilyId) => {
-    const asset = uvToolManifest.assets[uvAssetKey(platformFamilyId)]!;
-    return {
-      filename: asset.file,
-      kind: 'uv' as const,
+  return uvVersions.flatMap((version) => {
+    const manifest = uvToolManifestForConsumer(version);
+    const binaries = platforms.map((platformFamilyId) => {
+      const asset = manifest.assets[uvAssetKey(platformFamilyId)];
+      if (!asset) {
+        throw new Error(`No managed uv ${version} artifact for ${platformFamilyId}`);
+      }
+      return {
+        filename: asset.file,
+        kind: 'uv' as const,
+        license: {
+          spdx: manifest.license,
+          url: manifest.licenseFiles[0]!.url,
+        },
+        platforms: [platformFamilyId],
+        sha256: asset.sha256,
+        size: asset.size,
+        sourceUrl: asset.url,
+        version: manifest.version,
+      };
+    });
+    const licenses = manifest.licenseFiles.map((licenseFile) => ({
+      filename: `uv-${manifest.version}-${licenseFile.name}`,
+      kind: 'license' as const,
       license: {
-        spdx: uvToolManifest.license,
-        url: uvToolManifest.licenseFiles[0]!.url,
+        spdx: manifest.license,
+        url: licenseFile.url,
       },
-      platforms: [platformFamilyId],
-      sha256: asset.sha256,
-      size: asset.size,
-      sourceUrl: asset.url,
-      version: uvToolManifest.version,
-    };
+      platforms: [...platforms],
+      sha256: licenseFile.sha256,
+      sourceUrl: licenseFile.url,
+      version: manifest.version,
+    }));
+    return [...binaries, ...licenses];
   });
-  const licenses = uvToolManifest.licenseFiles.map((licenseFile) => ({
-    filename: `uv-${uvToolManifest.version}-${licenseFile.name}`,
-    kind: 'license' as const,
-    license: {
-      spdx: uvToolManifest.license,
-      url: licenseFile.url,
-    },
-    platforms: [...platforms],
-    sha256: licenseFile.sha256,
-    sourceUrl: licenseFile.url,
-    version: uvToolManifest.version,
-  }));
-  return [...binaries, ...licenses];
 }
 
 export function addPythonRuntimeContract(
