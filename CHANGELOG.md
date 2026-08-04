@@ -2,6 +2,11 @@
 
 ## 0.1.0
 
+- Added repeatable `python-app --python-version` selection and matrix planning so one
+  application version can ship independent hash-complete locks for several CPython
+  minors.
+- Enabled verified CPython artifact transfer by default and added an automatic
+  workspace migration that invalidates runtime-stale active plans.
 - Added the persistent `defaults.publish.provisionGit` workspace setting, defaulting to
   `true`, with `false` and `"ask"` behavior matching the other interactive defaults.
 - Added schema-v2 `python-app` targets with application-first Windows/Linux coverage,

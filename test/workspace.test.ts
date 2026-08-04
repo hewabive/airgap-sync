@@ -73,6 +73,10 @@ describe('workspace config', () => {
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
       python: {
+        artifactTransfer: {
+          cpython: true,
+          uv: false,
+        },
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -181,6 +185,30 @@ describe('workspace config', () => {
         type: 'python-app',
       },
     ]);
+  });
+
+  it('normalizes an explicit Python minor matrix for an application', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      application: {
+        extras: [],
+        features: {},
+      },
+      coverage: 'desktop-x64',
+      python: {
+        policy: 'selected',
+        versions: ['3.12', '3.13', '3.12'],
+      },
+      spec: 'vllm',
+      type: 'python-app',
+    });
+
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).toMatchObject({
+      python: {
+        policy: 'selected',
+        versions: ['3.12', '3.13'],
+      },
+    });
   });
 
   it('normalizes optional closed-network endpoints', async () => {
@@ -856,9 +884,14 @@ describe('workspace config', () => {
       '0001-workspace-schema-v2',
       '0002-python-application-publication',
       '0003-python-publication-profile',
+      '0004-python-runtime-transfer',
     ]);
     expect(first.config).toMatchObject({
       python: {
+        artifactTransfer: {
+          cpython: true,
+          uv: false,
+        },
         legacySeed: {
           resolutionMode: 'locked-only',
         },

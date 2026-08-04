@@ -230,6 +230,7 @@ export {
   workspaceConfigPath,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
+  workspaceConfigPythonRuntimeTransferBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceConfigV1BackupPath,
   workspaceLegacyPythonSettings,

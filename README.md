@@ -149,6 +149,19 @@ npm exec -- airgap-sync target add python-app ktransformers \
 npm exec -- airgap-sync download
 ```
 
+Automatic selection chooses one compatible Python minor. To prepare the same
+application for several consumer runtimes, repeat `--python-version`:
+
+```bash
+npm exec -- airgap-sync target add python-app vllm \
+  --coverage desktop-x64 \
+  --python-version 3.12 \
+  --python-version 3.13
+```
+
+All requested minors must resolve to the same application version with a complete
+wheel-only closure. Each platform/minor branch receives its own hash-complete lock.
+
 `download` automatically creates a missing plan or replaces one made stale by target,
 coverage, or recipe changes. A current plan is reused. Planning uses a pinned,
 hash-verified `uv` executable but remains independent of the collector platform. Every
@@ -172,8 +185,9 @@ before downloading, using a fixed `--cutoff`, or explicitly refreshing an otherw
 current plan.
 
 After `download` and closed-network `publish`, the bundle's consumer contract provides
-the exact standard pip/uv command. The compatible CPython runtime and system
-prerequisites are provisioned outside `airgap-sync`.
+the exact standard pip/uv command. CPython runtime transfer is enabled by default;
+airgap-sync publishes the verified archives in uv mirror layout. System packages
+remain consumer prerequisites.
 
 ## Git Mirrors
 

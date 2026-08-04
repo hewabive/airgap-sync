@@ -37,6 +37,10 @@ airgap-sync target add python-app ktransformers \
 airgap-sync target add python-app orjson \
   --platform windows-x86_64 \
   --platform linux-glibc-x86_64
+airgap-sync target add python-app vllm \
+  --coverage desktop-x64 \
+  --python-version 3.12 \
+  --python-version 3.13
 
 # Advanced/legacy package seeding:
 airgap-sync target add pypi 'requests==2.32.4' \
@@ -62,7 +66,10 @@ requirements; no separate npm target is needed.
 
 `python-app` is the normal Python target. `--coverage` references a named workspace
 policy; repeatable `--platform` creates target-local coverage instead. Python defaults
-to automatic selection. `--python` is an advanced version constraint, `--extra`
+to automatic selection of one compatible minor. Repeat `--python-version` to require
+one or more exact minor branches in the same plan; every branch must use the same
+application version and have a complete wheel closure. `--python` remains an advanced
+single-runtime version constraint and cannot be combined with `--python-version`. `--extra`
 selects package extras, `--feature name=value` records explicit application variants,
 and `--recipe` selects reviewed workspace-local compatibility policy. Known maintained
 applications may receive an installed recipe automatically.
@@ -206,13 +213,20 @@ those mirrors, and repeats until no new npm or Git inputs are found. It also wri
 paths for later verification.
 
 For every selected `python-app` target, `download` creates a missing active plan or
-replans one made stale by target, coverage-policy, or workspace-local recipe changes.
+replans one made stale by target, coverage-policy, workspace-local recipe, or runtime
+artifact-transfer changes.
 An existing current plan is reused, so download does not silently refresh application
 versions. Use `plan --update` to force that refresh. `download --dry-run` never writes a
 plan and asks for a normal download or an explicit `plan` when planning is required.
 Wheels are stored once by content hash even when multiple applications reference them.
 Platform locks, consumer configuration, runtime prerequisites, and plan diffs remain
 application-specific.
+
+New and migrated schema-v2 workspaces enable `python.artifactTransfer.cpython` by
+default. Download therefore transfers the exact managed CPython archive for every
+planned platform/minor branch. Closed-side publication uploads those archives to Gitea
+Generic Packages in uv mirror layout. Set `python.artifactTransfer.cpython` to `false`
+only when runtime provisioning is deliberately owned by other infrastructure.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
@@ -258,9 +272,10 @@ Set it on the wheel target when other targets should remain lock-only.
 
 `target add python-runtime` transfers a python-build-standalone archive into
 `python-runtime-mirror/<build>/<archive>` and writes a checksum manifest. Point
-llama-manager's `pythonMirrorUrl` at that bundle directory and select mirror
+Arriero's `pythonMirrorUrl` at that bundle directory and select mirror
 provisioning. The source URL must contain `/releases/download/` because uv's `--mirror`
-contract preserves the path after that segment.
+contract preserves the path after that segment. This remains a manual escape hatch;
+normal `python-app` targets transfer the required runtimes automatically.
 
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in

@@ -66,6 +66,25 @@ function activePlanFor(
       policyVersion: 1,
       version: '0.11.16',
     },
+    ...(workspaceConfig.python?.artifactTransfer?.cpython
+      ? {
+          runtimeArtifacts: [
+            {
+              filename:
+                'cpython-3.13.14+20260718-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz',
+              kind: 'cpython' as const,
+              license: {
+                spdx: 'Python-2.0',
+                url: 'https://docs.python.org/3/license.html',
+              },
+              platforms: ['linux-glibc-x86_64'],
+              sha256: 'a'.repeat(64),
+              sourceUrl: 'https://example.test/cpython.tar.gz',
+              version: '3.13.14',
+            },
+          ],
+        }
+      : {}),
     schemaVersion: 2,
     wheels: [],
   });

@@ -44,6 +44,8 @@ export interface EnsureWorkspacePythonApplicationPlansResult {
 }
 
 interface ExpectedWorkspacePythonApplicationPlan {
+  includeCpython: boolean;
+  includeUv: boolean;
   recipeDigest?: string;
   resolved: ReturnType<typeof resolveWorkspacePythonApplication>;
   targetId: string;
@@ -54,11 +56,17 @@ function planIsCurrent(
   activePlan: ActivePythonApplicationPlan,
   expected: ExpectedWorkspacePythonApplicationPlan
 ): boolean {
+  const includesCpython =
+    activePlan.plan.runtimeArtifacts?.some((artifact) => artifact.kind === 'cpython') === true;
+  const includesUv =
+    activePlan.plan.runtimeArtifacts?.some((artifact) => artifact.kind === 'uv') === true;
   return (
     semanticDigest(activePlan.plan.intent) === semanticDigest(expected.resolved.intent) &&
     activePlan.plan.coverage.digest ===
       platformCoveragePolicyDigest(expected.resolved.coveragePolicy) &&
-    activePlan.plan.recipe?.digest === expected.recipeDigest
+    activePlan.plan.recipe?.digest === expected.recipeDigest &&
+    includesCpython === expected.includeCpython &&
+    includesUv === expected.includeUv
   );
 }
 
@@ -75,6 +83,8 @@ async function expectedPlans(
     const resolved = resolveWorkspacePythonApplication(options.config, target);
     const recipe = await options.readRecipe(target);
     expected.push({
+      includeCpython: options.config.python?.artifactTransfer?.cpython === true,
+      includeUv: options.config.python?.artifactTransfer?.uv === true,
       ...(recipe ? { recipeDigest: semanticDigest(recipe) } : {}),
       resolved,
       targetId: pythonApplicationTargetId(

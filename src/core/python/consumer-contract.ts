@@ -156,7 +156,9 @@ export function createPythonConsumerBundleDocuments(
     installationOwner: 'consumer-infrastructure',
     platforms: plan.platforms.map((platform) => {
       const lock = locks.find(
-        (candidate) => candidate.platformFamilyId === platform.platformFamilyId
+        (candidate) =>
+          candidate.platformFamilyId === platform.platformFamilyId &&
+          candidate.pythonMinor === platform.pythonMinor
       )!;
       return {
         healthChecks,

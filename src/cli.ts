@@ -255,6 +255,7 @@ interface TargetPythonApplicationOptions {
   feature?: string[];
   platform?: string[];
   python?: string;
+  pythonVersion?: string[];
   recipe?: string;
   version?: string;
 }
@@ -736,7 +737,15 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
     target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
       ? target.pythonResolutionMode
       : undefined;
-  return `${value}${pythonResolutionMode ? ` [python resolution: ${pythonResolutionMode}]` : ''}`;
+  const pythonApplicationRuntime =
+    target.type === 'python-app'
+      ? target.python.policy === 'selected'
+        ? target.python.versions.join(', ')
+        : target.python.policy === 'constrained'
+          ? target.python.version
+          : 'auto'
+      : undefined;
+  return `${value}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}${pythonResolutionMode ? ` [python resolution: ${pythonResolutionMode}]` : ''}`;
 }
 
 function formatPythonTargetEnvironment(environment: PythonTargetEnvironmentConfig): string {
@@ -2579,9 +2588,24 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
           `Platform coverage policy (${coveragePolicyIds.join('/')})`,
           defaultCoverage
         );
+        const pythonVersions = (
+          await ask(rl, 'Python minor versions (comma-separated, blank = select automatically)')
+        )
+          .split(',')
+          .map((version) => version.trim())
+          .filter(Boolean);
         if (spec) {
           await runSelfCommand(
-            ['target', 'add', 'python-app', spec, workspaceDir, '--coverage', coverage],
+            [
+              'target',
+              'add',
+              'python-app',
+              spec,
+              workspaceDir,
+              '--coverage',
+              coverage,
+              ...pythonVersions.flatMap((version) => ['--python-version', version]),
+            ],
             workspaceDir
           );
         }
@@ -3472,6 +3496,12 @@ targetAddCommand
   )
   .option('--recipe <path>', 'Maintained application recipe inside the workspace')
   .option('--python <specifier>', 'Advanced Python version constraint')
+  .option(
+    '--python-version <minor>',
+    'Exact Python minor to support; repeat for multiple versions',
+    collectStrings,
+    []
+  )
   .action(async (spec: string, workspace: string, options: TargetPythonApplicationOptions) => {
     try {
       const config = await readWorkspaceConfig(workspace);
@@ -3480,6 +3510,9 @@ targetAddCommand
       }
       if (options.coverage && (options.platform?.length ?? 0) > 0) {
         throw new Error('Use either --coverage or --platform, not both');
+      }
+      if (options.python && (options.pythonVersion?.length ?? 0) > 0) {
+        throw new Error('Use either --python or --python-version, not both');
       }
       const coverage =
         (options.platform?.length ?? 0) > 0
@@ -3509,9 +3542,12 @@ targetAddCommand
           ...(options.version ? { version: options.version } : {}),
         },
         coverage,
-        python: options.python
-          ? { policy: 'constrained', version: options.python }
-          : { policy: 'auto' },
+        python:
+          (options.pythonVersion?.length ?? 0) > 0
+            ? { policy: 'selected', versions: options.pythonVersion! }
+            : options.python
+              ? { policy: 'constrained', version: options.python }
+              : { policy: 'auto' },
         spec,
         type: 'python-app',
       };
@@ -3519,7 +3555,11 @@ targetAddCommand
       console.log(
         `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nCoverage: ${
           typeof coverage === 'string' ? coverage : coverage.platforms.join(', ')
-        }\nPython runtime: ${options.python ?? 'selected automatically during planning'}${
+        }\nPython runtime: ${
+          (options.pythonVersion?.length ?? 0) > 0
+            ? options.pythonVersion!.join(', ')
+            : (options.python ?? 'selected automatically during planning')
+        }${
           recipe ? `\nRecipe: ${recipe}` : ''
         }\nTotal targets: ${String(result.config.targets.length)}`
       );

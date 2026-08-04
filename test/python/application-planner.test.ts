@@ -51,6 +51,9 @@ const projects = new Map<string, PythonProjectIndex>([
         file('native_dep-4.0.0-cp311-cp311-win_amd64.whl', 'a', 100),
         file('native_dep-4.0.0-cp311-cp311-manylinux_2_28_x86_64.whl', 'b', 110),
         file('native_dep-4.0.0-cp311-cp311-manylinux_2_35_x86_64.whl', 'c', 120),
+        file('native_dep-4.0.0-cp312-cp312-win_amd64.whl', 'f', 100),
+        file('native_dep-4.0.0-cp312-cp312-manylinux_2_28_x86_64.whl', '8', 110),
+        file('native_dep-4.0.0-cp312-cp312-manylinux_2_35_x86_64.whl', '9', 120),
       ],
       name: 'native-dep',
     },
@@ -296,5 +299,41 @@ describe('Python application planner', () => {
         (request) => request.cutoff === cutoff
       )
     ).toBe(true);
+  });
+
+  it('plans every explicitly selected Python minor for one application version', async () => {
+    const selectedIntent: PythonApplicationIntent = {
+      ...intent,
+      python: {
+        policy: 'selected',
+        versions: ['3.11', '3.12'],
+      },
+    };
+    const result = await planPythonApplication({
+      cacheDir: '/cache',
+      coveragePolicy: normalizePlatformCoveragePolicy({
+        id: 'desktop-x64',
+        platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+      }),
+      createdAt: '2026-07-27T00:00:00.000Z',
+      index: new FixtureIndex(),
+      intent: selectedIntent,
+      plannerPolicy,
+      resolver: new FixtureResolver(),
+      uvPath: '/tools/uv',
+      workDir: '/work',
+    });
+
+    expect(result.plan.application.version).toBe('1.0.0');
+    expect(
+      result.plan.platforms.map((platform) => [platform.platformFamilyId, platform.pythonMinor])
+    ).toEqual(
+      expect.arrayContaining([
+        ['windows-x86_64', '3.11'],
+        ['linux-glibc-x86_64', '3.11'],
+        ['windows-x86_64', '3.12'],
+        ['linux-glibc-x86_64', '3.12'],
+      ])
+    );
   });
 });

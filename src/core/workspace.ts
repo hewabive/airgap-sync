@@ -43,6 +43,7 @@ export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
 export const workspaceConfigPythonPublicationBackupFileName = `${workspaceConfigFileName}.before-0002-python-publication.backup`;
 export const workspaceConfigPythonPublicationProfileBackupFileName = `${workspaceConfigFileName}.before-0003-python-publication-profile.backup`;
+export const workspaceConfigPythonRuntimeTransferBackupFileName = `${workspaceConfigFileName}.before-0004-python-runtime-transfer.backup`;
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
@@ -303,6 +304,10 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
       gitOwnerStrategy: 'preserve',
       output: defaultWorkspaceOutputDir,
       python: {
+        artifactTransfer: {
+          cpython: true,
+          uv: false,
+        },
         planner: {
           engine: 'uv',
           version: workspacePythonPlannerVersion,
@@ -378,11 +383,32 @@ function normalizePythonRuntimePolicy(value: unknown): PythonRuntimePolicy {
   if (value === undefined) {
     return { policy: 'auto' };
   }
-  if (!isRecord(value) || (value.policy !== 'auto' && value.policy !== 'constrained')) {
-    throw new Error('python-app target python policy must be auto or constrained');
+  if (
+    !isRecord(value) ||
+    (value.policy !== 'auto' && value.policy !== 'constrained' && value.policy !== 'selected')
+  ) {
+    throw new Error('python-app target python policy must be auto, constrained, or selected');
   }
   if (value.policy === 'auto') {
     return { policy: 'auto' };
+  }
+  if (value.policy === 'selected') {
+    if (
+      !Array.isArray(value.versions) ||
+      value.versions.length === 0 ||
+      !value.versions.every(
+        (version): version is string =>
+          typeof version === 'string' && /^3\.\d+$/u.test(version.trim())
+      )
+    ) {
+      throw new Error(
+        'selected python-app target requires one or more Python minor versions, e.g. 3.12'
+      );
+    }
+    return {
+      policy: 'selected',
+      versions: [...new Set(value.versions.map((version) => version.trim()))],
+    };
   }
   if (
     typeof value.version !== 'string' ||
@@ -1215,6 +1241,30 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   });
 }
 
+function addWorkspacePythonRuntimeTransfer(config: WorkspaceConfig): WorkspaceConfig {
+  const normalized = normalizeWorkspaceConfig(config);
+  if (normalized.schemaVersion !== 2 || normalized.python?.artifactTransfer) {
+    return normalized;
+  }
+  return normalizeWorkspaceConfig({
+    ...normalized,
+    python: {
+      ...(normalized.python ?? {
+        planner: {
+          engine: 'uv',
+          version: workspacePythonPlannerVersion,
+        },
+        publication: defaultPythonPublicationProfile(),
+        sourceIndex: defaultWorkspacePythonSourceIndex,
+      }),
+      artifactTransfer: {
+        cpython: true,
+        uv: false,
+      },
+    },
+  });
+}
+
 const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
   {
     apply: previewWorkspaceConfigMigration,
@@ -1236,6 +1286,13 @@ const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
     backupFileName: workspaceConfigPythonPublicationProfileBackupFileName,
     id: '0003-python-publication-profile',
     isApplied: (config) => config.schemaVersion !== 2 || Boolean(config.python?.publication),
+  },
+  {
+    apply: addWorkspacePythonRuntimeTransfer,
+    backupFileName: workspaceConfigPythonRuntimeTransferBackupFileName,
+    id: '0004-python-runtime-transfer',
+    isApplied: (config) =>
+      config.schemaVersion !== 2 || config.python?.artifactTransfer !== undefined,
   },
 ];
 
