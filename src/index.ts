@@ -89,6 +89,7 @@ export {
 } from './core/python/runtime-contract.js';
 export {
   managedPythonRuntimeCatalog,
+  managedPythonRuntimeCatalogs,
   normalizeManagedPythonRuntimeCatalog,
   selectManagedPythonRuntimeAsset,
   selectManagedPythonRuntimeCatalogs,

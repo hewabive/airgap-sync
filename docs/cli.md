@@ -236,9 +236,9 @@ planner version. uv bundles its Python download catalog, so changing uv can chan
 release-build path requested from the same mirror. airgap-sync selects the reviewed
 runtime catalog for every configured consumer uv version, unions identical archives,
 and records which versions require each artifact. Planning fails rather than producing
-an incomplete mirror when a requested uv version has no reviewed catalog. The initial
-built-in catalog covers `0.11.16`; additional reviewed catalogs can extend the matrix
-without changing the Gitea mirror URL or the Arriero interface.
+an incomplete mirror when a requested uv version has no reviewed catalog. Built-in
+catalogs currently cover `0.11.16` and `0.12.1`; additional reviewed catalogs can
+extend the matrix without changing the Gitea mirror URL or the Arriero interface.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and

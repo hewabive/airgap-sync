@@ -1,4 +1,5 @@
 import catalogData from '../../../support/python/runtime-catalog.json' with { type: 'json' };
+import catalogUv0121Data from '../../../support/python/runtime-catalog-uv-0.12.1.json' with { type: 'json' };
 import type { BuiltInPlatformFamilyId } from './platform-family.js';
 
 export interface ManagedPythonRuntimeAsset {
@@ -106,6 +107,11 @@ export function normalizeManagedPythonRuntimeCatalog(value: unknown): ManagedPyt
 }
 
 export const managedPythonRuntimeCatalog = normalizeManagedPythonRuntimeCatalog(catalogData);
+const managedPythonRuntimeCatalogUv0121 = normalizeManagedPythonRuntimeCatalog(catalogUv0121Data);
+export const managedPythonRuntimeCatalogs = [
+  managedPythonRuntimeCatalog,
+  managedPythonRuntimeCatalogUv0121,
+];
 
 export interface ManagedPythonRuntimeCatalogSelection {
   catalog: ManagedPythonRuntimeCatalog;
@@ -114,16 +120,20 @@ export interface ManagedPythonRuntimeCatalogSelection {
 
 export function selectManagedPythonRuntimeCatalogs(
   uvVersions: string[],
-  catalogs: ManagedPythonRuntimeCatalog[] = [managedPythonRuntimeCatalog]
+  catalogs: ManagedPythonRuntimeCatalog[] = managedPythonRuntimeCatalogs
 ): ManagedPythonRuntimeCatalogSelection[] {
   const selections = new Map<ManagedPythonRuntimeCatalog, string[]>();
   for (const uvVersion of [...new Set(uvVersions)]) {
-    const catalog = catalogs.find((candidate) =>
+    const matches = catalogs.filter((candidate) =>
       candidate.compatibleUvVersions.includes(uvVersion)
     );
-    if (!catalog) {
+    if (matches.length === 0) {
       throw new Error(`No reviewed managed Python runtime catalog for consumer uv ${uvVersion}`);
     }
+    if (matches.length > 1) {
+      throw new Error(`Several managed Python runtime catalogs claim consumer uv ${uvVersion}`);
+    }
+    const catalog = matches[0]!;
     selections.set(catalog, [...(selections.get(catalog) ?? []), uvVersion]);
   }
   return [...selections].map(([catalog, versions]) => ({

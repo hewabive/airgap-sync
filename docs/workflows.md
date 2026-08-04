@@ -141,6 +141,10 @@ New workspaces use application-first schema v2:
 }
 ```
 
+The default consumer matrix follows the pinned planner. A broader mirror can list every
+consumer deployed in the target network, for example `"uvVersions": ["0.11.16",
+"0.12.1"]`; the planner itself remains pinned to `0.11.16`.
+
 `download` automatically plans a newly added Python application and replans after its
 coverage, feature, version constraint, or workspace-local recipe changes. Planning
 chooses an application version and compatible Python minor, resolves every requested

@@ -3,10 +3,12 @@
 `uv-tool-manifest.json` pins the standalone resolver executable used by the
 application-first Python planner.
 
-`runtime-catalog.json` pins optional CPython archives for the initial Windows and
-glibc-Linux x86-64 platform families. These archives are transfer artifacts only:
-`airgap-sync` records their hashes and generic-package coordinates but does not install
-or manage Python on consumer machines.
+`runtime-catalog*.json` pins optional CPython archives for reviewed consumer `uv`
+versions and the initial Windows and glibc-Linux x86-64 platform families. The catalog
+for `uv 0.11.16` uses python-build-standalone `20260718`; the catalog for `uv 0.12.1`
+uses `20260728`. These archives are transfer artifacts only: `airgap-sync` records
+their hashes and generic-package coordinates but does not install or manage Python on
+consumer machines.
 
 The manifest distinguishes the collector tool platform from target platform families.
 Every asset is downloaded only from its pinned HTTPS URL and accepted only after its
