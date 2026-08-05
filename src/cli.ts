@@ -1971,6 +1971,33 @@ async function configureConnectionSettings(
   return nextConfig;
 }
 
+async function configureInitialGiteaToken(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<void> {
+  if (process.env.GITEA_TOKEN) {
+    console.log('Using Gitea token from GITEA_TOKEN; no token will be saved.');
+    return;
+  }
+
+  if (await readSavedGiteaToken(workspaceDir)) {
+    console.log(`Using the Gitea token already saved in ${workspaceSecretsFileName}.`);
+    return;
+  }
+
+  const token = await ask(
+    rl,
+    'Gitea token to save (visible input; leave empty to configure later)'
+  );
+  if (!token) {
+    console.log('Skipped Gitea token setup.');
+    return;
+  }
+
+  await saveWorkspaceGiteaToken(workspaceDir, token);
+  console.log(`Saved Gitea token in ${workspaceSecretsFileName}.`);
+}
+
 async function configureBundleDirectory(
   workspaceDir: string,
   rl: ReadlineInterface,
@@ -2493,6 +2520,7 @@ async function configureInitialWorkspace(
   console.log('Configure workspace defaults.');
   const withBundle = await configureBundleDirectory(workspaceDir, rl, config);
   const withConnections = await configureConnectionSettings(workspaceDir, rl, withBundle);
+  await configureInitialGiteaToken(workspaceDir, rl);
   console.log('Configure Python application coverage.');
   const withPythonSettings =
     withConnections.schemaVersion === 2

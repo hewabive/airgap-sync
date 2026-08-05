@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Added an optional Gitea token prompt to interactive first-time workspace setup so
+  publish credentials can be saved without visiting the settings menu.
 - Made consumer uv versions an explicit runtime-coverage dimension, with reviewed
   catalog selection and stale-plan detection when the requested uv matrix changes.
 - Added repeatable `python-app --python-version` selection and matrix planning so one

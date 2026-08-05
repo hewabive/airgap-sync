@@ -80,7 +80,8 @@ npm exec -- airgap-sync
 ```
 
 Running `airgap-sync` without a subcommand opens the interactive menu. Use
-`airgap-sync -h` for command help.
+`airgap-sync -h` for command help. During first-time setup, the initializer also asks
+for an optional Gitea token and saves it for later publishing.
 
 Existing schema-v1 workspaces are validated and migrated automatically when opened.
 The exact original configuration is retained as `airgap-sync.json.v1.backup`; no
@@ -261,8 +262,11 @@ bundle between machines. Git repository provisioning defaults to
 `defaults.publish.provisionGit: true`; set it to `false` when repositories are managed
 externally, or to `"ask"` to prompt on each interactive publish.
 
-`airgap-sync.secrets.json` is optional. If you save a Gitea token from the menu, it is
-stored there in plaintext on the removable media.
+`airgap-sync.secrets.json` is optional. A Gitea token entered during interactive
+first-time setup, or saved later from the menu, is stored there in plaintext on the
+removable media. Leave the initial token prompt empty to configure it later. When
+`GITEA_TOKEN` is already set, the initializer uses the environment value without
+copying it into the secrets file.
 
 One Gitea token is reused for Git, PyPI, and Generic Packages. The default Python
 publication profile uses a managed public `airgap-packages` organization; publish
