@@ -46,8 +46,8 @@ specific workspace, not process startup before command arguments are known.
 
 ## Consequences
 
-- Existing workspaces become usable with the application-first menu on their next
-  open, without an operator migration step.
+- Existing workspaces become usable with the repository-oriented application menu on
+  their next open, without an operator migration step.
 - Reopening an already migrated workspace is a no-op.
 - Restoring schema v1 for an older `airgap-sync` binary is a deliberate manual rollback
   from the backup.

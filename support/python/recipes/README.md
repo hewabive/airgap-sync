@@ -1,32 +1,40 @@
-# Maintained Python application recipes
+# Maintained Python Application Recipes
 
-Recipes capture reviewed application compatibility decisions without inspecting the
-collector or consumer machine. They are inputs to planning, not installers.
+Recipes capture reviewed exceptions or application-specific choices that cannot be
+derived reliably from normal package metadata. They are planning inputs, not installers,
+lockfiles, or replacements for the general Gitea PyPI repository contract.
 
-## KTransformers
+A recipe may:
 
-The maintained `ktransformers-0.6.1.post1.json` recipe selects the last reviewed
-KTransformers release that has a root wheel and a wheels-only Linux dependency
-closure. Its `kt-kernel` dependency publishes Linux x86-64 wheels and no native
-Windows wheel, so a Windows + Linux request is rejected as incomplete. Narrow the
-target to `linux-glibc-x86_64` before replanning; do not publish a partial broad plan.
+- select an application version or optional extra known to match a requested feature;
+- document a platform branch that upstream does not publish as wheels;
+- constrain an otherwise ambiguous application-specific choice;
+- provide a small, non-destructive health check for explicit verification.
 
-New schema-v2 workspaces receive a local copy under `.airgap-sync/recipes`. Adding a
-KTransformers target automatically records that recipe. Add an explicit acceleration
-intent when required:
+A recipe should not encode a package-manager version, duplicate the dependency graph,
+or make consumers use generated airgap-sync files. Applications whose wheel metadata is
+sufficient should work without a recipe.
+
+New schema-v2 workspaces receive local copies under `.airgap-sync/recipes`. Current
+planning records the normalized recipe digest so a local edit or an expired review
+invalidates earlier evidence.
+
+## KTransformers fixture
+
+`ktransformers-0.6.1.post1.json` is the maintained complex example, not a special
+architecture path. It records the reviewed release and its current native-platform
+boundary: `kt-kernel` publishes Linux x86-64 wheels but no native Windows wheel. A
+Windows + Linux request therefore cannot claim complete wheels-only coverage for that
+release. A Linux-only target can make acceleration intent explicit:
 
 ```sh
 airgap-sync target add python-app ktransformers . \
-  --coverage desktop-x64 \
+  --platform linux-glibc-x86_64 \
   --feature accelerator=cuda
 airgap-sync plan .
 ```
 
-For a Linux-only target, use `--platform linux-glibc-x86_64`. The planner chooses a
-compatible Python minor, infers the glibc floor from the complete wheel closure, and
-generates standard pip/uv consumer contracts. CUDA selection is explicit application
-intent; no GPU is probed during planning.
-
-Model configuration and weights are application data. Transfer them through a
-separate, integrity-controlled data workflow; they are not PyPI dependencies and are
-not included in an airgap-sync Python application bundle.
+CUDA is application intent; collection does not probe a GPU. CUDA drivers, system
+libraries, model configuration, and model weights are outside the Python package
+bundle. The same generic completeness rules apply to KTransformers as to every other
+application.

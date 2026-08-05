@@ -75,17 +75,24 @@ dist/cli.cjs
 Unit tests should cover resolver decisions without hitting the real npm registry.
 Network tests should be explicit integration tests and should not run by default.
 
-The live pinned-uv Python checks are explicit:
+The current live collector checks are explicit:
 
 ```bash
 npm run e2e:python-planner
 npm run e2e:ktransformers
 ```
 
-The KTransformers check first proves that broad Windows/Linux coverage fails with the
-reviewed native-Windows boundary, then plans the full Linux closure and verifies its
-runtime/consumer contracts. It does not install KTransformers or transfer model
-weights.
+The KTransformers check exercises a difficult native-wheel boundary: broad
+Windows/Linux coverage fails, while the reviewed Linux branch can be collected. It is
+a useful fixture, not the definition of Python support. Today this test checks planning
+and transitional generated records; it does not yet prove that an ordinary client can
+install KTransformers from the final Gitea index or transfer model weights.
+
+The Python end-to-end acceptance suite should publish into a clean Gitea owner and, for
+every supported compatibility cell, install representative applications with both
+ordinary pip resolution and ordinary uv resolution. The test environment must expose
+only the Gitea PyPI index. A lock-driven `--no-deps` install may remain as an additional
+integrity test, but cannot replace repository-resolution tests.
 
 To measure sequential read and SHA-256 performance on the actual removable medium:
 
@@ -101,10 +108,14 @@ Suggested test groups:
 - manifest and nested package.json input;
 - dependency graph traversal and cycle prevention;
 - bundle manifest generation;
-- npm publish command construction.
+- npm publish command construction;
 - Python coverage/recipe/planner decisions against captured fixtures;
+- CPython 3.10–3.13 × Windows/Linux x86-64 compatibility-cell expansion;
+- minimum wheel-cover selection, including universal and `abi3` sharing;
+- fixed-point resolution against the exact candidate set published to Gitea;
+- plain pip and uv installs against a clean, isolated Gitea PyPI owner;
 - interrupted Python download/publication recovery and idempotent retries;
-- fixed-cutoff plan reproducibility and reference-safe application artifact pruning.
+- destination-state conflicts and reference-safe application artifact pruning.
 
 ## Safety Rules
 

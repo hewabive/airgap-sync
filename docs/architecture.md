@@ -26,9 +26,12 @@ contain Git dependencies such as `github:owner/repo#sha` or `git+https://...#sha
 - Mirroring the entire public npm registry.
 - Rewriting or updating project lockfiles.
 - Acting as a live proxy registry.
-- Installing or managing production Python runtimes and environments.
+- Installing or managing production Python runtimes, system packages, drivers, or
+  environments.
 - Inferring target coverage from the collector or maintaining detailed host inventory.
 - Transferring model weights as if they were Python package dependencies.
+- Supporting non-PyPI consumer ecosystems such as conda, apt, or container images in
+  the normal Python package path.
 - Mutating Verdaccio storage files directly.
 - Replacing Git with npm registry packages by repacking third-party tarballs by default.
 
@@ -43,8 +46,9 @@ workspace targets / package specs / package.json / package list
   -> inspect package manifests from tarballs
   -> fetch Git dependencies as bundle-local mirrors
   -> recurse dependencies
-  -> resolve each Python application for every requested platform family with pinned uv
-  -> collect the complete wheels-only closure and consumer contracts
+  -> resolve each Python application for every requested compatibility cell
+  -> minimize the wheels-only union that covers the declared envelope
+  -> validate normal package resolution against the planned sparse Python index
   -> write airgap bundle
 
 airgap bundle
@@ -53,7 +57,7 @@ airgap bundle
   -> create Gitea owners/repositories when using the Gitea provider
   -> push Git mirrors
   -> publish Python wheels to Gitea PyPI
-  -> publish plans and locks to Gitea Generic Packages
+  -> publish optional Python evidence and reports to Gitea Generic Packages
 ```
 
 ## Target Airgap Flow
@@ -66,8 +70,9 @@ online removable media
   -> resolve Git dependency closure
   -> download npm tarballs
   -> mirror Git repositories
-  -> plan Python applications independently of collector OS/architecture
-  -> download content-addressed wheel closures
+  -> plan Python repository coverage independently of collector OS/architecture
+  -> validate the planned Gitea index to a dependency fixed point
+  -> download the content-addressed minimum wheel union
   -> scan manifests from newly mirrored Git dependencies
   -> repeat npm/Git collection until no new inputs are found
   -> write transfer bundle
@@ -78,12 +83,13 @@ closed network
   -> map Git sources to closed-network Git targets
   -> create missing Gitea owners/repositories when enabled
   -> push Git mirrors into the closed-network Git host
-  -> publish Python wheels and application contracts
+  -> publish Python wheels and standard metadata to Gitea PyPI
   -> verify install against closed-network services
 
 consumer infrastructure
-  -> provision the compatible CPython minor and system prerequisites
-  -> use generated standard pip/uv command against Gitea
+  -> provide a compatible CPython and system prerequisites
+  -> configure only the Gitea PyPI index
+  -> install normally with pip, uv, Poetry, PDM, or another compatible client
 ```
 
 The Git side should use standard Git primitives where possible:
@@ -188,42 +194,52 @@ metadata from the source registry without downloading tarballs.
 
 ## Python Application Policy
 
-The normal Python input is a `python-app` target: application intent plus bounded
-platform coverage. Initial coverage families are Windows x86-64 and glibc Linux
-x86-64. A family is package compatibility, not a distribution name or host record, so
-a Linux collector can plan Windows artifacts and future architectures can be added
-without executing on them.
+The normal Python input is a `python-app` target: application intent plus a bounded
+compatibility envelope. The initial maximum envelope is CPython 3.10–3.13 on Windows
+x86-64 and glibc Linux x86-64. A platform family describes artifact compatibility, not
+a distribution name or host record, so collection stays independent from the online
+machine.
 
-Planning uses a reviewed `uv` version with explicit Python/platform targets,
-wheels-only policy, isolated configuration, and an index-upload cutoff. A candidate is
-ready only when every requested platform branch resolves. The selected package
-versions are then expanded to all compatible wheel variants for the chosen Python and
-platform families. Linux glibc support is inferred from the actual closure;
-distribution names are optional explanation hints.
+Gitea PyPI is the consumer interface. A consumer configures its Simple API URL and
+installs normally with a standards-compatible client. It must not need an
+`airgap-sync` plan, lock, resolver version, or Generic Package in order to discover and
+install Python dependencies.
 
-One workspace application target may contain exact-version and latest-compatible
-selectors. Each selector is planned independently against the same coverage and Python
-policy, and the set is activated only when every selector succeeds. Resolved versions
-become independent immutable plan variants; identical resolved versions and shared
-content-addressed artifacts are deduplicated.
+Planning has two distinct responsibilities:
 
-Workspace-local recipes capture reviewed upstream application guidance, explicit
-features, known unsupported combinations, prerequisites, and health checks. Their
-normalized digest is part of the immutable plan. Recipes never inspect CPU/GPU
-inventory; accelerator intent is a target feature such as `accelerator=cuda`.
+1. use a reviewed resolver and source-index metadata to discover candidate package
+   versions for every environment cell;
+2. prove that ordinary clients can resolve an installable graph from the exact sparse
+   index that will be visible in Gitea.
 
-One resolved application-version plan contains:
+The second graph is authoritative. Planning repeats against the planned closed index
+until package versions, dependencies, and compatible wheels reach a fixed point. A
+shared destination can contain candidates from previous publications, so destination
+state must either be included in validation or isolated by a defined publication
+namespace.
 
-- one independent package environment with platform-specific locks;
-- a preferred common CPython minor when coverage permits;
-- shared content-addressed wheels and exact SHA-256;
-- external runtime/system prerequisites;
-- Gitea PyPI and Generic Package coordinates;
-- standard closed-index pip/uv consumer commands.
+Collection is wheels-only. Rather than retaining every compatible build, the planner
+selects the smallest content-addressed wheel union that covers all declared cells.
+Universal and `abi3` wheels are shared where possible. Missing wheels are explicit
+coverage failures; source builds are never an implicit fallback.
 
-`airgap-sync` publishes these objects but does not install the production application.
-`verify install` may reproduce the generated command in a temporary environment on a
-compatible verifier.
+Workspace-local recipes may capture reviewed index choices, required extras, explicit
+artifact-changing features, and known incompatibilities. They remain optional policy
+adapters rather than per-application installers. CPU, CUDA, and ROCm are relevant only
+when they change Python artifact selection; drivers and other system prerequisites are
+outside the bundle.
+
+Locks and resolver evidence may be retained for audit or an explicitly frozen install,
+but are not the normal consumer contract. A pinned collector `uv` is likewise an
+internal implementation detail rather than a consumer compatibility dimension.
+
+Optional transfer of CPython runtimes or package-manager binaries is a separate concern
+and will not be implied by adding an application target. `airgap-sync` does not install
+or manage production environments.
+
+The normative contract, supported envelope, transition state, and acceptance criteria
+are defined in [Python Support](python.md) and
+[ADR 0010](decisions/0010-gitea-pypi-as-python-consumer-interface.md).
 
 ## Collection Fixed Point
 
@@ -241,6 +257,11 @@ scan project package.json files
   -> scan package.json files from newly mirrored Git repositories
   -> repeat until no new npm requirements and no new Git repositories appear
 ```
+
+Python repository coverage has a separate fixed point: resolve the selected application
+against the exact planned Gitea artifact set for every compatibility cell, add any
+missing package/wheel closure, and repeat until ordinary resolution no longer changes
+the required set.
 
 If a new Git repository is cloned or updated in a way that exposes new manifests, the
 npm resolver must run again before the bundle is considered complete.

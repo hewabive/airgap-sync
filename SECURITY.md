@@ -15,9 +15,11 @@ closed-network services.
 
 Python application health checks run only during explicit install verification and
 inside its temporary environment, but a workspace recipe remains trusted executable
-policy. Review custom recipes before use. Generated Python consumer locks use exact
-versions/hashes and wheels-only policy; this provides integrity and reproducibility,
-not protection from malicious upstream package code.
+policy. Review custom recipes before use. Python collection is wheels-only and verifies
+artifact identity and hashes; this protects transfer integrity, not against malicious
+upstream package code. Generated locks are optional evidence. The security/completeness
+claim depends on ordinary clients resolving only from the validated Gitea PyPI index,
+not on consumers following an `airgap-sync` lock.
 
 The tool is designed to avoid storing credentials in workspace config files. Pass
 Gitea tokens through `GITEA_TOKEN` where possible; command-line token arguments
@@ -27,7 +29,7 @@ can be visible through shell history and process listings.
 Gitea repositories that are intended to be managed as mirrors of the source
 repositories.
 
-See the [Python application security review](./docs/python-application-security-review.md)
+See the [Python repository security review](./docs/python-application-security-review.md)
 for detailed trust boundaries, failure recovery, and residual risks.
 
 ## Supported Versions

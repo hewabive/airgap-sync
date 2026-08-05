@@ -4,8 +4,9 @@ The CLI keeps download and publish phases separate so the online and offline pha
 auditable.
 
 The preferred user workflow is workspace-based: initialize a directory on removable
-media, add Git/npm/Python application targets once, plan Python applications, then run
-`download` online and `publish` offline.
+media, add Git/npm/Python application targets once, run `download` online, and run
+`publish` offline. Python consumers install normally from the resulting Gitea PyPI
+index. See [Python Support](python.md) for the target contract and current transition.
 
 ## init
 
@@ -30,23 +31,23 @@ The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
 airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
 
-# Normal Python application workflow: Python is selected during download planning.
-airgap-sync target add python-app ktransformers \
-  --coverage desktop-x64 \
-  --feature accelerator=cuda
+# Normal Python application workflow.
 airgap-sync target add python-app orjson \
   --platform windows-x86_64 \
-  --platform linux-glibc-x86_64
-airgap-sync target add python-app vllm \
-  --coverage desktop-x64 \
+  --platform linux-glibc-x86_64 \
+  --python-version 3.10 \
+  --python-version 3.11 \
   --python-version 3.12 \
   --python-version 3.13
+airgap-sync target add python-app APP \
+  --coverage desktop-x64 \
+  --extra FEATURE
 
 # Advanced/legacy package seeding:
 airgap-sync target add pypi 'requests==2.32.4' \
   --python-resolution-mode approximate
 airgap-sync target add python-wheel \
-  'https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl' \
+  'https://downloads.example.test/app-1.0.0-cp313-abi3-manylinux_2_34_x86_64.whl' \
   --sha256 <64-hex-digest> \
   --python-resolution-mode approximate
 airgap-sync target add python-runtime 3.12.13 \
@@ -67,10 +68,11 @@ package specs. Git projects that pin pnpm through `packageManager` or
 requirements; no separate npm target is needed.
 
 `python-app` is the normal Python target. `--coverage` references a named workspace
-policy; repeatable `--platform` creates target-local coverage instead. Python defaults
-to automatic selection of one compatible minor. Repeat `--python-version` to require
-one or more exact minor branches in the same plan; every branch must use the same
-application version and have a complete wheel closure. Repeat `--include-version` with
+policy; repeatable `--platform` creates target-local coverage instead. The initial
+maximum supported envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
+Repeat `--python-version` to request exact minor branches; the target design covers the
+declared range and publishes a resolvable sparse index rather than requiring consumers
+to use its planning lock. Repeat `--include-version` with
 an exact PEP 440 version or `latest` to include alternative application releases in one
 target. Every exact release must satisfy the requested Python/platform matrix; `latest`
 falls back only among stable releases until it finds a complete closure. Exact and
@@ -84,8 +86,8 @@ receive an installed recipe automatically.
 
 Only one `python-app` target may own a package/coverage combination. Use
 `target set-python-app-versions` or the corresponding Targets menu action to replace
-the version selectors of an existing target; this invalidates its active plan set and
-causes the next plan/download to validate every selector together.
+the version selectors of an existing target; this invalidates its current planning
+evidence and causes the next plan/download to validate every selector together.
 
 Raw PyPI targets use PEP 508 requirement syntax and require an exact legacy target
 environment. Git, PyPI, and exact root-wheel targets may set
@@ -136,7 +138,7 @@ Gitea tokens are stored only when explicitly requested, in `airgap-sync.secrets.
 airgap-sync coverage list
 airgap-sync coverage explain desktop-x64
 airgap-sync plan
-airgap-sync plan --update ktransformers
+airgap-sync plan --update orjson
 airgap-sync plan --cutoff 2026-07-27T00:00:00.000Z --json
 airgap-sync plan --retry-delays-ms 1000,5000,15000,60000
 airgap-sync probe --compare .airgap-sync/python-plans/<target>/environment-plan.json
@@ -147,15 +149,14 @@ families are Windows x86-64 and glibc Linux x86-64. Linux distribution names are
 presentation hints; compatibility is derived from wheel tags and an inferred glibc
 floor.
 
-The normal `download` workflow invokes planning automatically when a plan is missing or
-became stale after target, coverage, or recipe changes. The separate `plan` command is
-an advanced entry point for resolving in advance, forcing an update, or supplying a
-fixed `--cutoff`. Planning acquires the pinned collector-native `uv`, resolves every
-requested target platform with wheels-only policy, selects a compatible CPython minor,
-and stores an immutable active plan under `.airgap-sync/python-plans/`. Planning
-succeeds only when every requested platform is complete. Unsupported coverage is
-reported with suggestions to narrow the target, select another application version, or
-supply a reviewed recipe/wheel.
+The normal `download` workflow invokes planning automatically when evidence is missing
+or stale after target, coverage, or recipe changes. The separate `plan` command is an
+advanced entry point for resolving in advance, forcing an update, or supplying a fixed
+`--cutoff`. Current builds acquire a pinned collector-native `uv`, resolve each target
+platform with wheels-only policy, and store evidence under
+`.airgap-sync/python-plans/`. The resolver pin belongs to collection and says nothing
+about consumer `uv` versions. Planning must evolve to validate ordinary resolution
+against the exact sparse index intended for Gitea.
 
 Large HTTP artifacts use one resumable download model, including the pinned `uv`, npm
 tarballs, Python wheels, CPython runtimes, and application artifacts. A slow transfer
@@ -226,36 +227,18 @@ those mirrors, and repeats until no new npm or Git inputs are found. It also wri
 `workspace-snapshot.json` with the configured targets and their bundle-local mirror
 paths for later verification.
 
-For every selected `python-app` target, `download` creates a missing active plan or
-replans one made stale by target, coverage-policy, workspace-local recipe, or runtime
-artifact-transfer changes.
-An existing current plan is reused, so download does not silently refresh application
-versions. Use `plan --update` to force that refresh. `download --dry-run` never writes a
-plan and asks for a normal download or an explicit `plan` when planning is required.
-Wheels are stored once by content hash even when multiple applications reference them.
-Platform locks, consumer configuration, runtime prerequisites, and plan diffs remain
-application-specific.
+For every selected `python-app` target, `download` creates missing planning evidence or
+replans evidence made stale by target, coverage-policy, or workspace-local policy
+changes. Wheels are stored once by content hash even when multiple applications or
+environment cells reference them. Current builds also emit plans, locks, and optional
+runtime artifacts; these are transitional details rather than the normal consumer
+interface.
 
-New and migrated schema-v2 workspaces enable `python.artifactTransfer.cpython` by
-default. Download therefore transfers the exact managed CPython archive for every
-planned platform/minor branch. Closed-side publication uploads those archives to Gitea
-Generic package `python-build-standalone`, using the upstream release build as the
-Generic version. This makes
-`<gitea>/api/packages/<generic-owner>/generic/python-build-standalone` a directly
-usable `uv python install --mirror` URL. Set `python.artifactTransfer.cpython` to
-`false` only when runtime provisioning is deliberately owned by other infrastructure.
-
-`python.artifactTransfer.uvVersions` is the consumer-compatibility dimension, not the
-planner version. uv bundles its Python download catalog, so changing uv can change the
-release-build path requested from the same mirror. airgap-sync selects the reviewed
-runtime catalog for every configured consumer uv version, unions identical archives,
-and records which versions require each artifact. Planning fails rather than producing
-an incomplete mirror when a requested uv version has no reviewed catalog. Built-in
-catalogs currently cover `0.11.16` and `0.12.1`; additional reviewed catalogs can
-extend the matrix without changing the Gitea mirror URL or the Arriero interface.
-When `python.artifactTransfer.uv` is enabled, the matching checked and licensed `uv`
-binary for every configured consumer version is transferred as well; this does not
-change the planner executable.
+Existing schema-v2 workspaces may contain `python.artifactTransfer.cpython`,
+`python.artifactTransfer.uv`, and `python.artifactTransfer.uvVersions`. They are retained
+for configuration compatibility while runtime transfer is separated from application
+repository coverage. Consumer `uv` versions do not create separate dependency closures
+and should not be added merely to support ordinary installation from Gitea PyPI.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
@@ -274,7 +257,7 @@ successfully.
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
 
-Python resolution is strict and lock-first by default. `uv.lock` and `pylock.toml` are
+Legacy Python seeding is strict and lock-first by default. `uv.lock` and `pylock.toml` are
 consumed exactly; a `requirements*.txt` beside a lock from the same project is treated
 as covered and is not resolved a second time. An uncovered requirements file or direct
 PyPI target is reported as an error before its dependency closure is guessed.
@@ -291,7 +274,7 @@ is an accepted tradeoff. The resulting fetch report remains marked
 `approximate: true`.
 
 `target add python-wheel` handles an exact root wheel that is not listed by the source
-index, such as a vLLM CPU release asset. SHA-256 is mandatory. During download the wheel
+index. SHA-256 is mandatory. During download the wheel
 is streamed into the bundle, hashed, and its embedded `METADATA` is validated against
 the filename. That exact root is overlaid on the configured Python index; its
 `Requires-Dist` edges are then resolved and the realized package/file/hash closure is
@@ -299,12 +282,13 @@ written to `python-seed-manifest.json`. Because dependency selection still uses 
 no-backtracking resolver, this target requires the same explicit approximate opt-in.
 Set it on the wheel target when other targets should remain lock-only.
 
-`target add python-runtime` transfers a python-build-standalone archive into
+`target add python-runtime` is a legacy escape hatch that transfers a
+python-build-standalone archive into
 `python-runtime-mirror/<build>/<archive>` and writes a checksum manifest. Point
 Arriero's site-wide managed Python mirror setting at that bundle directory. The source
 URL must contain `/releases/download/` because uv's `--mirror` contract preserves the
-path after that segment. This remains a manual escape hatch; normal `python-app`
-targets transfer and publish the required runtimes automatically.
+path after that segment. Runtime transfer is being separated from normal `python-app`
+repository coverage; do not interpret this target as a package dependency.
 
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in
@@ -492,13 +476,14 @@ before the offline import has run, are reported but do not fail the command.
 mirror into a temporary directory, detects the package manager from the lockfile, sets
 the npm registry, and uses a temporary Git config with source-host rewrites to the
 provided Gitea URL. It writes `verify-install-report.json`.
-For a schema-v2 Python application, verification chooses the matching local platform
-branch and compatible CPython minor, creates a temporary venv, fetches the published
-hash-complete lock from Gitea, installs from the closed PyPI index with wheels-only,
-no-dependency, and require-hashes controls, then runs `pip check` and reviewed recipe
-health checks. If no compatible interpreter is available, it records a clear skip.
-This is temporary verification; production Python provisioning and installation
-remain external to `airgap-sync`.
+For a schema-v2 Python application, the current verifier chooses the matching local
+platform branch and compatible CPython minor, creates a temporary venv, fetches the
+published lock from Gitea, installs with wheels-only, `--no-deps`, and
+`--require-hashes`, then runs `pip check` and reviewed recipe health checks. If no
+compatible interpreter is available, it records a clear skip. This lock-based path is
+transitional. The acceptance path defined in [Python Support](python.md) is an ordinary
+dependency-resolving `pip install APP` and an equivalent `uv` install against the
+final Gitea PyPI index for every supported environment cell.
 
 When the detected package manager is pnpm, `verify install` sets `trustLockfile: true`
 for that verification process. This avoids false failures from pnpm v11's default
@@ -624,11 +609,13 @@ Publishes the whole bundle in the closed network: publish npm packages to an
 npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, create
 missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
 import reports. If `python-seed-manifest.json` exists, it also streams bundled wheels
-to Gitea's PyPI endpoint without requiring Python, pip, or twine. Schema-v2 application
-plans additionally publish environment plans, per-platform locks, prerequisite
-reports, consumer configuration, and optional runtime/tool transfer artifacts to
-Gitea Generic Packages. Existing immutable generic objects are skipped only after
-their downloaded content matches the local SHA-256.
+to Gitea's PyPI endpoint without requiring Python, pip, or twine. Gitea PyPI is the
+Python consumer interface. Current schema-v2 bundles may additionally publish plans,
+locks, prerequisite reports, configuration templates, and optional runtime/tool
+artifacts to Gitea Generic Packages. Those objects are transitional evidence or
+separate optional transfers; consumers must not need them to install from PyPI.
+Existing immutable generic objects are skipped only after their downloaded content
+matches the local SHA-256.
 
 The same Gitea token authenticates Git, PyPI, and Generic Package operations. Publish
 resolves `python.publication`, creates missing organization owners, and only then
@@ -642,7 +629,7 @@ disable it globally.
 
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
 `output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
-`--gitea`, `python.publication` as the PyPI/Generic owner profile, the
+`--gitea`, `python.publication` as the Python publication profile, the
 `gitOwnerStrategy` settings described below, and `defaults.publish` for Git repository
 provisioning, public repositories, and global Git rewrites.
 Passing `<bundle>`, `--registry`, `--gitea`, `--public`, `--skip-git-provision`, or

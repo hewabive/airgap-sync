@@ -4,6 +4,11 @@ The workspace compatibility rule is **migrate persisted formats, preserve suppor
 behavior**. When `airgap-sync` opens an existing workspace, it upgrades the
 configuration before normal operations use it.
 
+These migrations describe compatibility with existing files, not the current Python
+consumer contract. In particular, preserving runtime-transfer fields does not make a
+managed CPython or a consumer `uv` version part of application repository coverage.
+See [Python Support](python.md).
+
 ## Invariants
 
 - Migrations run in a fixed order and have stable ids.
@@ -37,9 +42,11 @@ strings so that `0003` has an explicit input.
 cannot be classified safely as users or organizations, so migration stops with an
 actionable request to configure `python.publication.owner` and its explicit kind.
 
-`0004` enables verified CPython transfer while leaving optional uv binary transfer
-disabled. Existing active application plans are re-created on the next normal download
-so their runtime contract and publication documents cannot remain stale.
+`0004` historically enabled verified CPython transfer while leaving optional uv binary
+transfer disabled. The fields remain supported for migration compatibility, but
+runtime/tool transfer is now considered a separate concern and the long-term target
+shape is undecided. Existing active application planning evidence is re-created on the
+next normal download so current publication documents cannot remain stale.
 
 ## Operator behavior
 

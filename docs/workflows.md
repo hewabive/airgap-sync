@@ -11,7 +11,9 @@ for debugging individual phases.
   refreshed on the online machine.
 - The transfer bundle directory is on removable media or can be copied to it.
 - The closed network has an npm-compatible registry and Gitea. Verdaccio and Gitea are
-  the tested path; Gitea owns the anonymous consumer-facing Python index.
+  the tested path; Gitea exposes the consumer-facing Python index.
+- Python consumers are inside the declared CPython/platform compatibility envelope and
+  use a standard client that reads the Gitea PyPI Simple API.
 - The npm registry is populated only through `npm publish` and `npm dist-tag`.
 - The registry, and any reverse proxy in front of it, allows large package uploads. Large
   native packages can fail with HTTP `E413` unless Verdaccio `max_body_size` and proxy
@@ -43,7 +45,9 @@ airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
-airgap-sync target add python-app orjson --coverage desktop-x64
+airgap-sync target add python-app orjson --coverage desktop-x64 \
+  --python-version 3.10 --python-version 3.11 \
+  --python-version 3.12 --python-version 3.13
 airgap-sync target list
 ```
 
@@ -56,10 +60,10 @@ Operators who prefer prompts can run:
 airgap-sync
 ```
 
-The menu covers target management, endpoint configuration, Python application
+The menu covers target management, endpoint configuration, Python compatibility
 coverage/publication, online download, offline publish, verification, and bundle info.
-During initialization it asks whether Python applications should cover Windows, Linux,
-or both. Exact environments and raw PyPI targets remain under Advanced/Legacy.
+The initial Python ceiling is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
+Exact legacy environments and raw PyPI targets remain under Advanced/Legacy.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
@@ -86,75 +90,19 @@ before the menu or command continues. The original file is retained as
 `airgap-sync.json.v1.backup`, and reopening the workspace is a no-op. Use
 `airgap-sync migrate --dry-run` only when a non-writing preview is useful.
 
-New workspaces use application-first schema v2:
+New workspaces use schema v2 and store Python application intent separately from named
+coverage policies. During the current migration, `airgap-sync.json` may still contain
+`python.planner`, `python.artifactTransfer`, and `uvVersions`. Those fields describe the
+existing implementation and optional runtime artifacts; they are not consumer
+requirements. The target contract no longer asks operators to enumerate consumer
+package-manager versions.
 
-```json
-{
-  "schemaVersion": 2,
-  "gitOwnerStrategy": "preserve",
-  "python": {
-    "sourceIndex": "https://pypi.org/simple/",
-    "artifactTransfer": {
-      "cpython": true,
-      "uv": false,
-      "uvVersions": ["0.11.16"]
-    },
-    "publication": {
-      "owner": {
-        "strategy": "fixed-owner",
-        "kind": "organization",
-        "name": "airgap-packages"
-      },
-      "visibility": "public"
-    },
-    "planner": {
-      "engine": "uv",
-      "version": "0.11.16"
-    }
-  },
-  "coveragePolicies": [
-    {
-      "id": "desktop-x64",
-      "platforms": ["linux-glibc-x86_64"],
-      "version": 1,
-      "wheelStrategy": "all-compatible"
-    }
-  ],
-  "targets": [
-    {
-      "type": "git",
-      "url": "https://github.com/acme/app.git"
-    },
-    {
-      "type": "python-app",
-      "spec": "vllm",
-      "coverage": "desktop-x64",
-      "application": {
-        "extras": [],
-        "features": {},
-        "versionSelection": {
-          "selectors": [{ "type": "exact", "version": "0.25.1" }, { "type": "latest-compatible" }]
-        }
-      },
-      "python": {
-        "policy": "auto"
-      }
-    }
-  ]
-}
-```
-
-The default consumer matrix follows the pinned planner. A broader mirror can list every
-consumer deployed in the target network, for example `"uvVersions": ["0.11.16",
-"0.12.1"]`; the planner itself remains pinned to `0.11.16`.
-
-`download` automatically plans a newly added Python application and replans after its
-coverage, feature, version selection, or workspace-local recipe changes. Exact and
-`latest-compatible` selectors may be combined; every selector must resolve against the
-complete requested Python/platform wheel matrix before any new plan is activated.
-Each resolved application version gets independent locks while shared artifacts are
-stored once. A current plan set is reused. The separate `plan` command is available for
-advance review, a fixed cutoff, or an explicit refresh.
+`download` plans every selected application across the requested platform/Python
+envelope. The long-term ready condition is stronger than producing a lock: ordinary
+clients must be able to resolve the application from the exact sparse artifact set that
+will be published to Gitea. Shared wheels are stored once. The separate `plan` command
+remains useful for review, size estimates, and explicit refresh while the implementation
+is migrated.
 
 Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
 `python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.
@@ -183,9 +131,10 @@ enabled in defaults, so dependencies for other configured targets are not remove
 The download step fetches configured Git targets as bare mirrors under
 `airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
 configured npm targets as root package specs, and writes the transfer bundle under
-`airgap-bundle/` by default. It also materializes each active Python application plan,
-downloads the deduplicated wheel union, and emits exact platform locks and consumer
-contracts. A missing or stale plan fails before application collection.
+`airgap-bundle/` by default. For Python applications it calculates bounded repository
+coverage, downloads the deduplicated wheel union, and retains planning evidence and
+reports. Current builds also emit exact locks as transitional artifacts; consumers are
+not expected to depend on them in the target workflow.
 
 Pinned pnpm is part of that closure. A `packageManager: pnpm@<version>` declaration
 adds exact `pnpm` and `@pnpm/exe` roots. `devEngines.packageManager` ranges are resolved
@@ -233,7 +182,7 @@ The download step writes npm metadata and Git source metadata:
 - Git source records for offline publish
 - `python-seed-manifest.json`, `python-fetch-report.json`, and verified wheels under
   `python-packages/` when legacy Python target environments are configured
-- `python/application-index.json`, per-application plans/locks, and shared
+- `python/application-index.json`, per-application evidence, optional locks, and shared
   content-addressed artifacts for schema-v2 applications. These files contain no
   closed-network Gitea URL or package owner.
 
@@ -313,7 +262,7 @@ Copy the whole `./airgap-bundle` directory to the closed network, including:
 - Git source metadata
 - Git mirror fetch reports
 - `python-packages/`, `python-seed-manifest.json`, and Python reports when present
-- `python/` application plans, consumer contracts, locks, and shared artifacts
+- `python/` application evidence, reports, optional locks, and shared artifacts
 
 Do not copy only tarballs. The JSON files are the audit trail and are required by later
 commands.
@@ -344,44 +293,37 @@ The offline publish step should:
 - restore npm dist-tags;
 - map source Git repositories to the closed-network Git host;
 - preserve upstream owner/repository paths when possible;
-- resolve Git, PyPI, and Generic Package owners from the workspace profile;
+- resolve Git, PyPI, and optional Generic Package owners from the workspace profile;
 - create missing Gitea organizations before any dependent upload (users are never
   created automatically);
 - push local bare mirrors into Gitea using the provided Gitea token;
-- generate destination-specific install configuration under
-  `python/publications/<publicationId>/`;
 - query Gitea's compact PyPI Simple Index and skip exact version, filename, and SHA-256
   matches before uploading missing wheels through the PyPI API; a 409 triggers a
-  metadata refresh and is accepted only when the existing file has the same SHA-256.
-- publish application plans, locks, prerequisites, configuration, and optional
-  runtime/tool transfer artifacts through Gitea Generic Packages.
+  metadata refresh and is accepted only when the existing file has the same SHA-256;
+- preserve standard dependency metadata needed by ordinary PyPI clients;
+- optionally publish plans, audit evidence, reports, or explicitly requested runtime
+  artifacts through Gitea Generic Packages.
 
-Managed CPython archives use the Generic package name `python-build-standalone` and
-the upstream release build as its version. Configure consumers with these two stable
-repository endpoints (substitute the configured owners when they differ):
-
-```text
-PyPI:          http://gitea.local/api/packages/airgap-packages/pypi/simple
-Python mirror: http://gitea.local/api/packages/airgap-packages/generic/python-build-standalone
-```
-
-Use the exact command in each application consumer contract. For a public owner it
-needs no credentials:
+The PyPI endpoint is the normal consumer interface:
 
 ```bash
-python3.11 -m pip install \
+python -m pip install \
   --index-url http://gitea.local/api/packages/airgap-packages/pypi/simple \
-  --only-binary=:all: --no-deps --require-hashes \
-  -r lock/linux-glibc-x86_64--py311.requirements.lock
+  APP
+
+uv pip install \
+  --default-index http://gitea.local/api/packages/airgap-packages/pypi/simple \
+  APP
 ```
 
 Use this index as the primary `index-url`, not as an extra index, to avoid dependency
 confusion and accidental access to the public internet.
 
-The Git, PyPI, and Generic Package calls use the same Gitea token. By default both
-Python registries use the managed public `airgap-packages` organization. Set
-`python.publication.pypiOwner` or `python.publication.genericOwner` only when a
-separate namespace is operationally useful.
+The Git, PyPI, and optional Generic Package calls use the same Gitea token. By default
+the PyPI repository and transitional Generic artifacts use the managed public
+`airgap-packages` organization. Set `python.publication.pypiOwner` or
+`python.publication.genericOwner` only when a separate namespace is operationally
+useful.
 
 If Git repositories are created by another process, or the target Git host is not
 Gitea-compatible, skip repository provisioning:
@@ -437,17 +379,26 @@ they are harder to maintain on every consumer machine.
 
 ## Install Check
 
-Run the normal package-manager install against Verdaccio:
+Run normal package-manager installs against the closed registries:
 
 ```bash
 npm ci --registry http://verdaccio.local:4873
 pnpm install --frozen-lockfile --registry http://verdaccio.local:4873
+
+python -m pip install \
+  --index-url http://gitea.local/api/packages/airgap-packages/pypi/simple \
+  APP
+
+uv pip install \
+  --default-index http://gitea.local/api/packages/airgap-packages/pypi/simple \
+  APP
 ```
 
-Python consumer infrastructure separately provisions the plan's compatible CPython
-minor and system prerequisites, then runs the generated pip/uv command. `airgap-sync`
-does not create or manage that production environment. `verify install` can reproduce
-the flow in a temporary venv on a compatible machine and otherwise records a skip.
+Python consumer infrastructure provides a CPython inside the published compatibility
+envelope and any system prerequisites. `airgap-sync` does not create or manage that
+production environment. Current `verify install` still exercises the transitional
+generated-lock path; it must be extended to verify ordinary `pip` and `uv` resolution
+against the final Gitea index.
 
 pnpm v11 applies `minimumReleaseAge: 1440` by default and verifies loaded lockfiles
 unless `trustLockfile` is enabled. Because `airgap-sync` fills Verdaccio through
@@ -570,10 +521,17 @@ mirrors, or writing global Git config.
 - `verify install` runs real installs with isolated package-manager caches and Git
   rewrites, but it does not yet enforce a network-deny sandbox. Use
   `--ignore-scripts` when lifecycle scripts should not execute during verification.
+- Python verification currently installs a generated lock rather than proving ordinary
+  `pip install APP` and `uv pip install APP` against the final sparse Gitea index.
+- Python collection still uses `all-compatible` wheel expansion instead of minimizing
+  the artifact set that covers CPython 3.10–3.13 on Windows/Linux x86-64.
+- Consumer `uvVersions` and default CPython transfer are transitional and still need to
+  be separated from normal application targets.
 - Real-environment testing is still needed for large monorepositories, private source
   registries, private Git hosts, and authentication variants.
-- KTransformers import/CLI smoke testing requires suitable Linux hardware and remains
-  outside generic CI. Model weights use a separate application-data transfer workflow.
+- Complex native applications, multiple source indexes, and explicit artifact variants
+  need broader end-to-end fixtures. Model weights use a separate application-data
+  transfer workflow.
 
 Measure an actual large Python bundle directly on its removable-media mount:
 
