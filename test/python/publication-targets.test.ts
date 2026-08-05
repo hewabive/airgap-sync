@@ -18,7 +18,7 @@ describe('Python publication targets', () => {
         {
           kind: 'organization',
           name: 'airgap-packages',
-          purposes: ['pypi', 'generic'],
+          purposes: ['pypi'],
           visibility: 'public',
         },
       ],
@@ -26,6 +26,7 @@ describe('Python publication targets', () => {
         kind: 'organization',
         name: 'airgap-packages',
       },
+      publishEvidence: false,
       visibility: 'public',
     });
   });
@@ -42,6 +43,7 @@ describe('Python publication targets', () => {
         name: 'python-packages',
         strategy: 'fixed-owner',
       },
+      publishEvidence: true,
       visibility: 'public',
     });
 
@@ -84,7 +86,7 @@ describe('Python publication targets', () => {
         {
           kind: 'user',
           name: 'maxim',
-          purposes: ['pypi', 'generic'],
+          purposes: ['pypi'],
           visibility: 'private',
         },
       ],
@@ -92,6 +94,7 @@ describe('Python publication targets', () => {
         kind: 'user',
         name: 'maxim',
       },
+      publishEvidence: false,
     });
   });
 

@@ -106,7 +106,7 @@ describe('Python application domain', () => {
       },
       platforms: ['linux-glibc-x86_64', 'windows-x86_64'],
       version: 1,
-      wheelStrategy: 'all-compatible',
+      wheelStrategy: 'minimum-cover',
     });
     expect(platformCoveragePolicyDigest(first)).toBe(platformCoveragePolicyDigest(renamed));
   });

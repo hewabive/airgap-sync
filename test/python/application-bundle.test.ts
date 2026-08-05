@@ -223,24 +223,27 @@ describe('Python application bundle', () => {
     await fs.remove(tempDir);
   });
 
-  it('requires one new download for a schema-v1 application bundle', async () => {
-    const bundleDir = path.join(tempDir, 'bundle');
-    await fs.writeJson(
-      path.join(bundleDir, 'python/application-index.json'),
-      {
-        applications: [],
-        artifacts: [],
-        createdAt: '2026-07-27T00:00:00.000Z',
-        schemaVersion: 1,
-        summary: { applications: 0, artifacts: 0, totalBytes: 0 },
-      },
-      { spaces: 2 }
-    );
+  it.each([1, 2])(
+    'requires one new download for a schema-v%s application bundle',
+    async (schemaVersion) => {
+      const bundleDir = path.join(tempDir, 'bundle');
+      await fs.writeJson(
+        path.join(bundleDir, 'python/application-index.json'),
+        {
+          applications: [],
+          artifacts: [],
+          createdAt: '2026-07-27T00:00:00.000Z',
+          schemaVersion,
+          summary: { applications: 0, artifacts: 0, totalBytes: 0 },
+        },
+        { spaces: 2 }
+      );
 
-    await expect(readPythonApplicationBundleIndex(bundleDir)).rejects.toThrow(
-      'schemaVersion 1 is obsolete; run airgap-sync download again'
-    );
-  });
+      await expect(readPythonApplicationBundleIndex(bundleDir)).rejects.toThrow(
+        'schemaVersion 1/2 is obsolete; run airgap-sync download again'
+      );
+    }
+  );
 
   it('deduplicates shared wheels while retaining independent plans and locks', async () => {
     const content = wheelBuffer('1.0.0');
@@ -321,6 +324,7 @@ describe('Python application bundle', () => {
       },
     });
     expect(index?.artifacts[0]?.references).toHaveLength(2);
+    expect(index?.artifacts[0]?.references[0]?.cells).toEqual(['linux-glibc-x86_64--py311']);
     expect(index?.applications.map((application) => application.locks[0]?.file)).toEqual([
       expect.stringContaining('first-app--linux-x64/lock/'),
       expect.stringContaining('second-app--linux-x64/lock/'),
@@ -635,6 +639,42 @@ describe('Python application bundle', () => {
     expect(repeated).toMatchObject({ downloaded: 0, errors: [], existing: 1 });
     expect((await verifyPythonApplicationBundle(bundleDir)).errors).toContain(
       `Python application artifact SHA-256 mismatch: ${index!.artifacts[0]!.file}`
+    );
+  });
+
+  it('rejects an open dependency edge in a planned compatibility cell', async () => {
+    const content = wheelBuffer('1.0.0');
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    const source = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    await fs.writeFile(source, content);
+    const original = createPlan({
+      application: 'first-app',
+      filename: path.basename(source),
+      sha256,
+      size: content.byteLength,
+      sourceUrl: pathToFileURL(source).toString(),
+    });
+    const { planId, ...input } = original;
+    expect(planId).toMatch(/^[a-f0-9]{64}$/u);
+    const plan = createPythonEnvironmentPlan({
+      ...input,
+      platforms: original.platforms.map((platform) => ({
+        ...platform,
+        packages: platform.packages.map((pkg) => ({
+          ...pkg,
+          dependencies: ['missing-leaf'],
+        })),
+      })),
+    });
+    const bundleDir = path.join(tempDir, 'open-edge-bundle');
+
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [{ activePlan: activePlan(plan), targetId: activePlan(plan).manifest.targetId }],
+    });
+
+    expect((await verifyPythonApplicationBundle(bundleDir)).errors).toContain(
+      'Python application first-app--linux-x64 has an open dependency edge in linux-glibc-x86_64--py311: shared==1.0.0 -> missing-leaf'
     );
   });
 

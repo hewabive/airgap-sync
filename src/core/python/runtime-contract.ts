@@ -34,10 +34,10 @@ export interface PythonPrerequisiteReport {
 function runtimeContract(
   plan: PythonEnvironmentPlan,
   recipe: PythonApplicationRecipe | undefined,
-  uvVersions: string[]
+  uvVersions: string[] | undefined
 ): PythonRuntimeContract {
   return {
-    uvVersions,
+    ...(uvVersions?.length ? { uvVersions } : {}),
     platforms: plan.platforms.map((platform) => ({
       implementation: 'CPython',
       platformFamilyId: platform.platformFamilyId,
@@ -146,9 +146,12 @@ export function addPythonRuntimeContract(
   plan: PythonEnvironmentPlan,
   options: AddPythonRuntimeContractOptions = {}
 ): PythonEnvironmentPlan {
-  const uvVersions = [...new Set(options.uvVersions ?? [uvToolManifest.version])].sort();
-  if (uvVersions.length === 0) {
-    throw new Error('Python runtime contract requires at least one consumer uv version');
+  const transfersRuntime = options.includeCpython === true || options.includeUv === true;
+  const uvVersions = [
+    ...new Set(options.uvVersions ?? (transfersRuntime ? [uvToolManifest.version] : [])),
+  ].sort();
+  if (transfersRuntime && uvVersions.length === 0) {
+    throw new Error('Legacy Python runtime transfer requires at least one uv version');
   }
   const runtimeCatalogSelections = options.includeCpython
     ? (options.runtimeCatalogSelections ?? selectManagedPythonRuntimeCatalogs(uvVersions))
@@ -178,7 +181,11 @@ export function addPythonRuntimeContract(
     ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
     ...(runtimeArtifacts.length > 0 ? { runtimeArtifacts } : {}),
-    runtimeContract: runtimeContract(plan, options.recipe, uvVersions),
+    runtimeContract: runtimeContract(
+      plan,
+      options.recipe,
+      transfersRuntime ? uvVersions : undefined
+    ),
     schemaVersion: plan.schemaVersion,
     ...(options.recipe?.healthChecks?.length
       ? {

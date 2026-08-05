@@ -38,11 +38,10 @@ been tested with Verdaccio and Gitea:
 - recursive package discovery from nested `package.json` files and supported lockfiles;
 - npm dependency resolution, tarball download, checksum validation, retries, and pruning;
 - platform-aware Python application collection for Windows and glibc Linux x86-64,
-  with wheel validation, inferred glibc boundaries, content-addressed storage, and
-  Gitea PyPI publishing;
-- transitional Python plans and locks while ordinary dependency-resolving installs
-  from an index populated only with the collected bundle are made the primary
-  completeness check;
+  with explicit CPython 3.10–3.13 cells, minimum wheel coverage, inferred glibc
+  boundaries, content-addressed storage, and Gitea PyPI publishing;
+- static dependency-closure checks plus ordinary dependency-resolving `pip` and `uv`
+  verification from a temporary index populated only with the collected bundle;
 - Git dependency discovery and mirroring;
 - npm publish with temporary tags, dist-tag restoration, and bundled `latest` handling;
 - Gitea repository creation or publishing to already-created Git repositories;
@@ -50,9 +49,9 @@ been tested with Verdaccio and Gitea:
   Git/Python application targets;
 - append-only download and publish run reports under `airgap-bundle/runs/`.
 
-Remaining Python work focuses on complete per-target dependency trees, minimum wheel
-coverage, ordinary `pip`/`uv` installs without an airgap-sync lock, and separating
-optional runtime transfer from package repository population.
+Remaining Python work focuses on broader real-application and Gitea integration
+coverage, additional artifact sources, and a separate explicit target model for
+optional runtime/tool transfer.
 
 ## Requirements
 
@@ -181,7 +180,7 @@ ABI, libc, extras, and artifact-changing features bound what must be transferred
 Unsupported environments are reported rather than silently omitted. System packages,
 drivers, services, and model weights remain outside the Python dependency bundle.
 
-Collection is wheels-only. The target design brings every selected dependency tree down
+Collection is wheels-only. The implementation brings every selected dependency tree down
 to its leaves, minimizes the union of wheels needed to cover the envelope, and verifies
 ordinary resolution against an index populated only from the bundle. Universal and
 `abi3` wheels are shared across compatible environments; content-identical files are
@@ -192,11 +191,11 @@ reproducible resolver result. Multiple workspaces and other publishers may add p
 to the same Gitea owner. Removing a one-time target later prunes only locally
 unreferenced bundle files; packages already published to Gitea remain available.
 
-The current implementation already provides platform-aware planning, wheel/hash
-validation, deduplicated storage, and Gitea PyPI publication. Its generated locks,
-`all-compatible` wheel expansion, consumer `uvVersions`, and default managed-CPython
-transfer are transitional and are not the long-term consumer contract. See
-[Python Support](./docs/python.md) for the normative design and migration boundary.
+The implementation plans one dependency tree per declared compatibility cell, retains
+the minimum practical wheel union covering those trees, and publishes the result to
+Gitea PyPI. The collector's pinned `uv` is internal; normal targets do not ask for a
+consumer `uv` version or transfer CPython. Generated plans and locks are audit evidence,
+not the consumer contract. See [Python Support](./docs/python.md).
 
 ## Git Mirrors
 
@@ -254,7 +253,7 @@ The configured workspace lives next to the transfer bundle on removable media:
 ```text
 airgap-sync.json          Target list, endpoints, bundle path, and menu defaults
 airgap-sync.secrets.json  Optional saved secrets, ignored by Git
-.airgap-sync/             Transitional Python plans and workspace-local policy
+.airgap-sync/             Python planning evidence and workspace-local policy
 airgap-bundle/            Transfer bundle
 ```
 
@@ -281,7 +280,7 @@ The bundle contains the current transferable state plus audit reports:
 airgap-bundle/packages/                 npm tarballs
 airgap-bundle/python-packages/          Python wheels
 airgap-bundle/python/application-index.json
-airgap-bundle/python/applications/      Transitional plans, evidence, and optional locks
+airgap-bundle/python/applications/      Plans, resolver evidence, and optional locks
 airgap-bundle/python/artifacts/         Shared content-addressed Python artifacts
 airgap-bundle/python/publications/      Closed-side publication manifests and reports
 airgap-bundle/git-mirrors/              bare Git mirrors
@@ -300,13 +299,13 @@ See [Bundle Format](./docs/bundle-format.md) for the full layout.
 `airgap-sync verify ./airgap-bundle` checks bundle consistency: manifests, referenced
 tarballs and wheels, package identity and hashes, reports, and Git metadata.
 
-`airgap-sync verify install ./airgap-bundle` runs real package-manager installs against
-closed-network services. The current Python verifier still installs a generated exact
-lock when a matching interpreter is available. This is transitional: the primary
-Python acceptance path will populate a temporary index only from the bundle and install
-the application normally with representative `pip` and `uv` clients. It does not yet
-enforce a network-deny sandbox. Production Python provisioning remains outside
-`airgap-sync`.
+`airgap-sync verify install ./airgap-bundle` runs real package-manager installs. For
+Python applications it exposes only bundled wheels through a temporary local Simple
+API, then performs unlocked `pip install APP==VERSION` and `uv pip install` checks with
+fresh environments and caches. It verifies the locally matching compatibility cell;
+the static verifier checks closure and wheel compatibility for every planned cell. It
+does not enforce an operating-system network sandbox, so package lifecycle code is not
+contained. Production Python provisioning remains outside `airgap-sync`.
 
 pnpm v11 treats packages published into local Verdaccio as newly published packages.
 For closed-network consumers that install trusted project lockfiles, configure pnpm to

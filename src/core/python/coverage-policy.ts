@@ -1,7 +1,7 @@
 import { semanticDigest } from '../canonical-json.js';
 import { isBuiltInPlatformFamilyId, type BuiltInPlatformFamilyId } from './platform-family.js';
 
-export type PythonWheelCollectionStrategy = 'all-compatible';
+export type PythonWheelCollectionStrategy = 'minimum-cover';
 
 export interface LinuxCoverageConstraint {
   oldestSupportedGlibc?: string;
@@ -68,8 +68,12 @@ function normalizeCoverageFields(value: Record<string, unknown>): InlinePlatform
   if (new Set(platforms).size !== platforms.length) {
     throw new Error('coverage policy platforms must not contain duplicates');
   }
-  if (value.wheelStrategy !== undefined && value.wheelStrategy !== 'all-compatible') {
-    throw new Error('coverage policy wheelStrategy must be all-compatible');
+  if (
+    value.wheelStrategy !== undefined &&
+    value.wheelStrategy !== 'minimum-cover' &&
+    value.wheelStrategy !== 'all-compatible'
+  ) {
+    throw new Error('coverage policy wheelStrategy must be minimum-cover');
   }
   if (value.version !== undefined && value.version !== 1) {
     throw new Error('coverage policy version must be 1');
@@ -91,7 +95,9 @@ function normalizeCoverageFields(value: Record<string, unknown>): InlinePlatform
     ...(oldestSupportedGlibc ? { linux: { oldestSupportedGlibc } } : {}),
     platforms,
     version: 1,
-    wheelStrategy: 'all-compatible',
+    // `all-compatible` was written by pre-minimum-cover workspaces. Reading it as the
+    // current strategy keeps those workspaces usable without preserving obsolete behavior.
+    wheelStrategy: 'minimum-cover',
   };
 }
 

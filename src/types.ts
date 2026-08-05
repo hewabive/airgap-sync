@@ -542,7 +542,7 @@ export interface VerifyReport {
   };
 }
 
-export type VerifyInstallPackageManager = 'npm' | 'pip' | 'pnpm' | 'yarn';
+export type VerifyInstallPackageManager = 'npm' | 'pip' | 'pnpm' | 'uv' | 'yarn';
 export type VerifyInstallProjectStatus = 'passed' | 'failed' | 'skipped';
 
 export interface VerifyInstallProjectResult {

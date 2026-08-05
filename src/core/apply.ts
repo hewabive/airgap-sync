@@ -371,8 +371,8 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
 
   let publicationManifest: PythonPublicationManifest | undefined;
   let pythonApplications: PythonGenericPublishReport;
-  if (pythonApplicationIndex) {
-    const owner = pythonProfile!.genericOwner.name;
+  if (pythonApplicationIndex && pythonProfile?.publishEvidence) {
+    const owner = pythonProfile.genericOwner.name;
     if (packageOwnerErrors.has(owner)) {
       pythonApplications = blockedPythonGenericPublishReport({
         dryRun,
@@ -394,7 +394,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
       publicationManifest = await materializePythonPublication(options.giteaBaseUrl, {
         bundleDir,
         index: pythonApplicationIndex,
-        profile: pythonProfile!,
+        profile: pythonProfile,
         write: !dryRun,
       });
       pythonApplications = await publishPythonGenericArtifacts({

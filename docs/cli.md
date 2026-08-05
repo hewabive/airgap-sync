@@ -6,7 +6,7 @@ auditable.
 The preferred user workflow is workspace-based: initialize a directory on removable
 media, add Git/npm/Python application targets once, run `download` online, and run
 `publish` offline. Python consumers install normally from the resulting Gitea PyPI
-index. See [Python Support](python.md) for the target contract and current transition.
+index. See [Python Support](python.md) for the target contract and compatibility boundary.
 
 ## init
 
@@ -70,9 +70,10 @@ requirements; no separate npm target is needed.
 `python-app` is the normal Python target. `--coverage` references a named workspace
 policy; repeatable `--platform` creates target-local coverage instead. The initial
 maximum supported envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
-Repeat `--python-version` to request exact minor branches; the target design covers the
-declared range by collecting a complete recursive dependency tree for every
-compatibility cell rather than requiring consumers to use its planning lock. Repeat
+Repeat `--python-version` to request exact minor branches; omitting both Python options
+selects 3.10, 3.11, 3.12, and 3.13. The implementation covers the declared range by
+collecting a complete recursive dependency tree for every compatibility cell rather
+than requiring consumers to use its planning lock. Repeat
 `--include-version` with
 an exact PEP 440 version or `latest` to include alternative application releases in one
 target. Every exact release must satisfy the requested Python/platform matrix; `latest`
@@ -231,9 +232,9 @@ paths for later verification.
 For every selected `python-app` target, `download` creates missing planning evidence or
 replans evidence made stale by target, coverage-policy, or workspace-local policy
 changes. Wheels are stored once by content hash even when multiple applications or
-environment cells reference them. Current builds also emit plans, locks, and optional
-runtime artifacts; these are transitional details rather than the normal consumer
-interface.
+environment cells reference them. Plans and locks are retained as collector evidence;
+they are not the normal consumer interface. Legacy configurations can still describe
+optional runtime artifacts, but normal application targets do not transfer them.
 
 Existing schema-v2 workspaces may contain `python.artifactTransfer.cpython`,
 `python.artifactTransfer.uv`, and `python.artifactTransfer.uvVersions`. They are retained
@@ -477,16 +478,14 @@ before the offline import has run, are reported but do not fail the command.
 mirror into a temporary directory, detects the package manager from the lockfile, sets
 the npm registry, and uses a temporary Git config with source-host rewrites to the
 provided Gitea URL. It writes `verify-install-report.json`.
-For a schema-v2 Python application, the current verifier chooses the matching local
-platform branch and compatible CPython minor, creates a temporary venv, fetches the
-published lock from Gitea, installs with wheels-only, `--no-deps`, and
-`--require-hashes`, then runs `pip check` and reviewed recipe health checks. If no
-compatible interpreter is available, it records a clear skip. This lock-based path is
-transitional. The acceptance path defined in [Python Support](python.md) is an ordinary
-dependency-resolving `pip install APP` and an equivalent `uv` install against the
-bundle-only test index for every supported environment cell. Publishing that complete
-tree into a shared Gitea owner does not require inventorying or reconciling unrelated
-packages already there.
+For each Python application, the verifier chooses a matching local platform/Python
+cell, creates separate temporary venvs, and exposes only bundled wheels through a
+temporary local PyPI Simple API. It runs ordinary wheels-only `pip install
+APP==VERSION` and `uv pip install` resolution, then `pip check` and reviewed health
+checks. Missing interpreters or a missing uv executable produce clear skips. Static
+verification checks every planned cell even when it cannot be executed on the current
+host. Publishing the complete tree into a shared Gitea owner does not require
+inventorying or reconciling unrelated packages already there.
 
 When the detected package manager is pnpm, `verify install` sets `trustLockfile: true`
 for that verification process. This avoids false failures from pnpm v11's default
@@ -613,10 +612,11 @@ npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, 
 missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
 import reports. If `python-seed-manifest.json` exists, it also streams bundled wheels
 to Gitea's PyPI endpoint without requiring Python, pip, or twine. Gitea PyPI is the
-Python consumer interface. Current schema-v2 bundles may additionally publish plans,
-locks, prerequisite reports, configuration templates, and optional runtime/tool
-artifacts to Gitea Generic Packages. Those objects are transitional evidence or
-separate optional transfers; consumers must not need them to install from PyPI.
+Python consumer interface. When `python.publication.publishEvidence` is explicitly
+enabled, current bundles may additionally publish plans, locks, prerequisite reports,
+configuration templates, and optional runtime/tool artifacts to Gitea Generic
+Packages. Those objects are evidence or separate optional transfers; consumers must
+not need them to install from PyPI.
 Existing immutable generic objects are skipped only after their downloaded content
 matches the local SHA-256.
 

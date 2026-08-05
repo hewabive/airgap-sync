@@ -14,6 +14,10 @@ import type {
 } from '../types.js';
 import type { WorkspaceSnapshot, WorkspaceTargetSnapshot } from './workspace.js';
 import { readPythonSeedManifest, type PythonSeedManifest } from './python/bundle.js';
+import {
+  startPythonBundleIndexServer,
+  type PythonBundleIndexServer,
+} from './python/bundle-index-server.js';
 import type { PythonTargetEnvironmentConfig } from './python/environments.js';
 import {
   readPythonApplicationBundleIndex,
@@ -47,7 +51,6 @@ export interface VerifyInstallOptions {
   gitRunner?: GitCommandRunner;
   ignoreScripts?: boolean;
   keepTemp?: boolean;
-  pythonOwner?: string;
   registryUrl: string;
   runner?: InstallCommandRunner;
   timeoutMs?: number;
@@ -193,7 +196,7 @@ function installEnv(options: {
   const pnpmStore = path.join(options.cacheRoot, 'pnpm-store');
   const yarnCache = path.join(options.cacheRoot, 'yarn');
 
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     GIT_CONFIG_GLOBAL: options.gitConfigPath,
     npm_config_cache: npmCache,
@@ -206,8 +209,25 @@ function installEnv(options: {
     NPM_CONFIG_REGISTRY: options.registryUrl,
     NPM_CONFIG_STORE_DIR: pnpmStore,
     NPM_CONFIG_TRUST_LOCKFILE: 'true',
+    PIP_CACHE_DIR: path.join(options.cacheRoot, 'pip'),
+    PIP_CONFIG_FILE: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    PIP_EXTRA_INDEX_URL: '',
+    PIP_NO_CACHE_DIR: '1',
+    UV_CACHE_DIR: path.join(options.cacheRoot, 'uv'),
+    UV_NO_CACHE: '1',
+    UV_NO_CONFIG: '1',
+    UV_NO_SYSTEM_CONFIG: '1',
     YARN_CACHE_FOLDER: yarnCache,
   };
+  delete env.PIP_FIND_LINKS;
+  delete env.PIP_INDEX_URL;
+  delete env.PIP_NO_INDEX;
+  delete env.UV_DEFAULT_INDEX;
+  delete env.UV_EXTRA_INDEX_URL;
+  delete env.UV_FIND_LINKS;
+  delete env.UV_INDEX;
+  delete env.UV_INDEX_URL;
+  return env;
 }
 
 function localPythonPlatformMatches(environment: PythonTargetEnvironmentConfig): boolean {
@@ -413,6 +433,7 @@ async function verifyPythonApplicationInstall(options: {
   bundleDir: string;
   env: NodeJS.ProcessEnv;
   indexUrl: string;
+  packageManager: 'pip' | 'uv';
   runner: InstallCommandRunner;
   tempRoot: string;
   timeoutMs: number;
@@ -421,13 +442,13 @@ async function verifyPythonApplicationInstall(options: {
     path.join(options.bundleDir, options.application.planPath)
   );
   const platformFamilyId = localPythonPlatformFamilyId();
-  const branch = plan.platforms.find(
+  const subject = `python-app:${options.application.targetId}:${options.packageManager}`;
+  const platformBranches = plan.platforms.filter(
     (candidate) => candidate.platformFamilyId === platformFamilyId
   );
-  const subject = `python-app:${options.application.targetId}`;
-  if (!branch) {
+  if (platformBranches.length === 0) {
     return {
-      packageManager: 'pip',
+      packageManager: options.packageManager,
       projectPath: subject,
       reason: `This verifier does not match a planned platform branch (${platformFamilyId ?? `${process.platform}/${process.arch}`})`,
       status: 'skipped',
@@ -435,50 +456,73 @@ async function verifyPythonApplicationInstall(options: {
     };
   }
   const glibcVersion = localGlibcVersion();
-  if (
-    branch.supportBoundary?.glibc &&
-    (!glibcVersion || compareVersions(glibcVersion, branch.supportBoundary.glibc) < 0)
-  ) {
-    return {
-      packageManager: 'pip',
-      projectPath: subject,
-      reason: `Verifier glibc ${glibcVersion ?? 'unknown'} does not satisfy >= ${branch.supportBoundary.glibc}`,
-      status: 'skipped',
-      targetUrl: options.indexUrl,
-    };
-  }
-  const interpreter = await findMatchingInterpreter({
-    branch,
-    env: options.env,
-    runner: options.runner,
-    tempRoot: options.tempRoot,
-    timeoutMs: options.timeoutMs,
-  });
-  if (!interpreter) {
-    return {
-      packageManager: 'pip',
-      projectPath: subject,
-      reason: `No externally provisioned Python ${branch.pythonMinor} interpreter is available`,
-      status: 'skipped',
-      targetUrl: options.indexUrl,
-    };
-  }
-  const lock = options.application.locks.find(
+  const compatibleBranches = platformBranches.filter(
     (candidate) =>
-      candidate.format === 'requirements' &&
-      candidate.platformFamilyId === branch.platformFamilyId &&
-      candidate.pythonMinor === branch.pythonMinor
+      !candidate.supportBoundary?.glibc ||
+      (glibcVersion !== undefined &&
+        compareVersions(glibcVersion, candidate.supportBoundary.glibc) >= 0)
   );
-  if (!lock) {
+  if (compatibleBranches.length === 0) {
     return {
-      packageManager: 'pip',
+      packageManager: options.packageManager,
       projectPath: subject,
-      reason: 'The bundle has no matching requirements lock',
-      status: 'failed',
+      reason: `Verifier glibc ${glibcVersion ?? 'unknown'} does not satisfy any planned branch`,
+      status: 'skipped',
       targetUrl: options.indexUrl,
     };
   }
-  const venvPath = path.join(options.tempRoot, 'python-applications', options.application.targetId);
+  let selected: { branch: PythonPlatformPlan; interpreter: PythonInterpreterCommand } | undefined;
+  for (const branch of compatibleBranches) {
+    const interpreter = await findMatchingInterpreter({
+      branch,
+      env: options.env,
+      runner: options.runner,
+      tempRoot: options.tempRoot,
+      timeoutMs: options.timeoutMs,
+    });
+    if (interpreter) {
+      selected = { branch, interpreter };
+      break;
+    }
+  }
+  if (!selected) {
+    return {
+      packageManager: options.packageManager,
+      projectPath: subject,
+      reason: `No externally provisioned Python interpreter matches ${compatibleBranches.map((branch) => branch.pythonMinor).join(', ')}`,
+      status: 'skipped',
+      targetUrl: options.indexUrl,
+    };
+  }
+  const { interpreter } = selected;
+  if (options.packageManager === 'uv') {
+    const available = await options.runner({
+      args: ['--version'],
+      command: 'uv',
+      cwd: options.tempRoot,
+      env: options.env,
+      timeoutMs: options.timeoutMs,
+    });
+    if (available.exitCode !== 0) {
+      return {
+        command: ['uv', '--version'],
+        exitCode: available.exitCode,
+        packageManager: 'uv',
+        projectPath: subject,
+        reason: 'uv is not available on the verification host',
+        status: 'skipped',
+        stderr: truncateOutput(available.stderr),
+        stdout: truncateOutput(available.stdout),
+        targetUrl: options.indexUrl,
+      };
+    }
+  }
+  const requirement = `${plan.application.name}==${plan.application.version}`;
+  const venvPath = path.join(
+    options.tempRoot,
+    'python-applications',
+    `${options.application.targetId}-${options.packageManager}`
+  );
   await fs.ensureDir(path.dirname(venvPath));
   const createArgs = [...interpreter.prefixArgs, '-m', 'venv', venvPath];
   const create = await options.runner({
@@ -493,7 +537,7 @@ async function verifyPythonApplicationInstall(options: {
     return {
       command: [interpreter.command, ...createArgs],
       exitCode: create.exitCode,
-      packageManager: 'pip',
+      packageManager: options.packageManager,
       projectPath: subject,
       ...(/ensurepip|python\S*-venv|no module named ['"]?venv/iu.test(output)
         ? { reason: 'Matching Python is present but venv/ensurepip support is unavailable' }
@@ -510,31 +554,41 @@ async function verifyPythonApplicationInstall(options: {
     process.platform === 'win32'
       ? path.join(venvPath, 'Scripts', 'python.exe')
       : path.join(venvPath, 'bin', 'python');
-  const lockPath = path.join(options.bundleDir, lock.file);
-  const installArgs = [
-    '-m',
-    'pip',
-    'install',
-    '--index-url',
-    options.indexUrl,
-    '--only-binary=:all:',
-    '--no-deps',
-    '--require-hashes',
-    '-r',
-    lockPath,
-  ];
+  const installCommand = options.packageManager === 'pip' ? python : 'uv';
+  const installArgs =
+    options.packageManager === 'pip'
+      ? [
+          '-m',
+          'pip',
+          'install',
+          '--disable-pip-version-check',
+          '--index-url',
+          options.indexUrl,
+          '--only-binary=:all:',
+          requirement,
+        ]
+      : [
+          'pip',
+          'install',
+          '--python',
+          python,
+          '--default-index',
+          options.indexUrl,
+          '--only-binary=:all:',
+          requirement,
+        ];
   const install = await options.runner({
     args: installArgs,
-    command: python,
+    command: installCommand,
     cwd: options.tempRoot,
     env: options.env,
     timeoutMs: options.timeoutMs,
   });
   if (install.exitCode !== 0) {
     return {
-      command: [python, ...installArgs],
+      command: [installCommand, ...installArgs],
       exitCode: install.exitCode,
-      packageManager: 'pip',
+      packageManager: options.packageManager,
       projectPath: subject,
       status: 'failed',
       stderr: truncateOutput(install.stderr),
@@ -567,7 +621,7 @@ async function verifyPythonApplicationInstall(options: {
       return {
         command: [check.command, ...check.args],
         exitCode: result.exitCode,
-        packageManager: 'pip',
+        packageManager: options.packageManager,
         projectPath: subject,
         status: 'failed',
         stderr: truncateOutput(result.stderr),
@@ -578,9 +632,9 @@ async function verifyPythonApplicationInstall(options: {
     }
   }
   return {
-    command: [python, ...installArgs],
+    command: [installCommand, ...installArgs],
     exitCode: 0,
-    packageManager: 'pip',
+    packageManager: options.packageManager,
     projectPath: subject,
     status: 'passed',
     stderr: truncateOutput(install.stderr),
@@ -697,19 +751,20 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
   const pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
-  const configuredPythonOwner =
-    snapshot.python?.publication?.pypiOwner ?? snapshot.python?.publication?.owner;
-  const pythonOwner =
-    options.pythonOwner ??
-    (configuredPythonOwner?.strategy === 'fixed-owner' ? configuredPythonOwner.name : undefined) ??
-    snapshot.python?.publishOwner ??
-    snapshot.pythonPublishOwner;
-  const pythonIndexUrl =
-    (pythonManifest || pythonApplicationIndex) && pythonOwner
-      ? `${normalizeBaseUrl(options.giteaBaseUrl)}/api/packages/${encodeURIComponent(pythonOwner)}/pypi/simple`
-      : undefined;
   const gitSources = await readOptionalGitSources(bundleDir);
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-install-'));
+  let pythonBundleIndex: PythonBundleIndexServer | undefined;
+  try {
+    if (pythonManifest?.packages.length) {
+      pythonBundleIndex = await startPythonBundleIndexServer(bundleDir, pythonManifest);
+    }
+  } catch (error) {
+    if (options.keepTemp !== true) {
+      await fs.remove(tempRoot);
+    }
+    throw error;
+  }
+  const pythonIndexUrl = pythonBundleIndex?.indexUrl;
   const gitConfigPath = path.join(tempRoot, 'gitconfig');
   await fs.writeFile(gitConfigPath, gitConfigContent(gitSources, options.giteaBaseUrl));
 
@@ -783,27 +838,31 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
       );
     }
     for (const application of pythonApplicationIndex?.applications ?? []) {
-      projects.push(
-        pythonIndexUrl
-          ? await verifyPythonApplicationInstall({
-              application,
-              bundleDir,
-              env,
-              indexUrl: pythonIndexUrl,
-              runner,
-              tempRoot,
-              timeoutMs,
-            })
-          : {
-              packageManager: 'pip',
-              projectPath: `python-app:${application.targetId}`,
-              reason: 'Python publish owner is not configured',
-              status: 'skipped',
-              targetUrl: options.giteaBaseUrl,
-            }
-      );
+      for (const packageManager of ['pip', 'uv'] as const) {
+        projects.push(
+          pythonIndexUrl
+            ? await verifyPythonApplicationInstall({
+                application,
+                bundleDir,
+                env,
+                indexUrl: pythonIndexUrl,
+                packageManager,
+                runner,
+                tempRoot,
+                timeoutMs,
+              })
+            : {
+                packageManager,
+                projectPath: `python-app:${application.targetId}:${packageManager}`,
+                reason: 'The bundle contains no Python package index',
+                status: 'skipped',
+                targetUrl: options.giteaBaseUrl,
+              }
+        );
+      }
     }
   } finally {
+    await pythonBundleIndex?.close();
     if (options.keepTemp !== true) {
       await fs.remove(tempRoot);
     }

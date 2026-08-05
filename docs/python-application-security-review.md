@@ -65,10 +65,10 @@ python -m pip install --only-binary=:all: APP
 uv pip install --only-binary=:all: APP
 ```
 
-The checks must allow normal dependency resolution. A successful
-`--no-deps --require-hashes` install proves that one precomputed lock is internally
-usable; it does not prove that the published repository is sufficient for arbitrary
-standard clients.
+The checks must allow normal dependency resolution. The built-in verifier serves the
+bundle through a loopback-only Simple API, clears user pip/uv index configuration, and
+uses fresh caches. Static verification checks every planned cell; CI and release
+testing should execute the dynamic checks across the supported OS/Python matrix.
 
 ## Operator obligations
 
@@ -98,7 +98,6 @@ standard clients.
 - Additional packages published into a shared owner can change which compatible
   versions a resolver selects. This is accepted behavior, not a completeness failure;
   registry access control and publisher trust remain operator responsibilities.
-- Existing code still verifies Python applications through generated locks and can
-  collect `all-compatible` wheels. Until plain bundle-only resolution and minimum-cover
-  selection are implemented, those checks do not satisfy the complete target contract
-  in [Python Support](python.md).
+- The built-in verifier constrains package indexes but does not create an
+  operating-system network sandbox. Installer or health-check code can still initiate
+  arbitrary network access unless the test host applies its own isolation.

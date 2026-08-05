@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { semanticDigest } from '../../src/core/canonical-json.js';
 import * as fs from '../../src/core/fs.js';
 import {
+  pruneInactivePythonApplicationPlans,
   readActivePythonApplicationPlan,
   writeActivePythonApplicationPlan,
 } from '../../src/core/python/active-plan-store.js';
@@ -100,5 +101,19 @@ describe('active Python application plan store', () => {
     expect(stored.plan).toEqual(plan);
     expect(stored.evidence[0]?.pylock.content).toBe(content);
     expect(stored.diff.planId.to).toBe(plan.planId);
+  });
+
+  it('removes only plans that no active target references', async () => {
+    const plansRoot = path.join(workspaceDir, '.airgap-sync/python-plans');
+    await fs.ensureDir(path.join(plansRoot, 'kept--desktop'));
+    await fs.ensureDir(path.join(plansRoot, 'removed--desktop'));
+    await fs.writeFile(path.join(plansRoot, 'kept--desktop', 'active-plan.json'), '{}');
+    await fs.writeFile(path.join(plansRoot, 'removed--desktop', 'active-plan.json'), '{}');
+
+    await expect(
+      pruneInactivePythonApplicationPlans(workspaceDir, ['kept--desktop'])
+    ).resolves.toEqual(['removed--desktop']);
+    await expect(fs.pathExists(path.join(plansRoot, 'kept--desktop'))).resolves.toBe(true);
+    await expect(fs.pathExists(path.join(plansRoot, 'removed--desktop'))).resolves.toBe(false);
   });
 });

@@ -87,6 +87,7 @@ async function writeBundle(
         kind: 'uv',
         references: [
           {
+            cells: ['linux-glibc-x86_64--py312'],
             platforms: ['linux-glibc-x86_64'],
             targetId: 'demo--desktop-x64',
           },
@@ -103,6 +104,7 @@ async function writeBundle(
         kind: 'cpython',
         references: [
           {
+            cells: ['linux-glibc-x86_64--py312'],
             platforms: ['linux-glibc-x86_64'],
             targetId: 'demo--desktop-x64',
           },
@@ -114,7 +116,7 @@ async function writeBundle(
       },
     ],
     createdAt: '2026-07-27T00:00:00.000Z',
-    schemaVersion: 2,
+    schemaVersion: 3,
     summary: {
       applications: 1,
       artifacts: 2,

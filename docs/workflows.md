@@ -91,18 +91,16 @@ before the menu or command continues. The original file is retained as
 `airgap-sync migrate --dry-run` only when a non-writing preview is useful.
 
 New workspaces use schema v2 and store Python application intent separately from named
-coverage policies. During the current migration, `airgap-sync.json` may still contain
-`python.planner`, `python.artifactTransfer`, and `uvVersions`. Those fields describe the
-existing implementation and optional runtime artifacts; they are not consumer
-requirements. The target contract no longer asks operators to enumerate consumer
-package-manager versions.
+coverage policies. `python.planner` identifies the collector's internal resolver.
+Older workspaces may still contain `python.artifactTransfer` and `uvVersions`; those
+fields are retained for compatibility and ignored by normal application planning. The
+target contract never asks operators to enumerate consumer package-manager versions.
 
 `download` resolves every selected application across the requested platform/Python
 envelope and follows each dependency tree down to its leaves. The ready condition is
 stronger than producing a lock: ordinary clients must be able to install from an index
 populated only with the bundle's artifacts. Shared wheels are stored once. The separate
-`plan` command remains useful for review, size estimates, and explicit refresh while the
-implementation is migrated.
+`plan` command remains useful for review, size estimates, and explicit refresh.
 
 Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
 `python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.
@@ -137,9 +135,9 @@ The download step fetches configured Git targets as bare mirrors under
 `airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
 configured npm targets as root package specs, and writes the transfer bundle under
 `airgap-bundle/` by default. For Python applications it calculates bounded repository
-coverage, downloads the deduplicated wheel union, and retains planning evidence and
-reports. Current builds also emit exact locks as transitional artifacts; consumers are
-not expected to depend on them in the target workflow.
+coverage, downloads the deduplicated minimum wheel union, and retains planning evidence
+and reports. Exact locks are audit artifacts; consumers are not expected to depend on
+them.
 
 Pinned pnpm is part of that closure. A `packageManager: pnpm@<version>` declaration
 adds exact `pnpm` and `@pnpm/exe` roots. `devEngines.packageManager` ranges are resolved
@@ -325,9 +323,9 @@ Use this index as the primary `index-url`, not as an extra index, to avoid depen
 confusion and accidental access to the public internet.
 
 The Git, PyPI, and optional Generic Package calls use the same Gitea token. By default
-the PyPI repository and transitional Generic artifacts use the managed public
-`airgap-packages` organization. Set `python.publication.pypiOwner` or
-`python.publication.genericOwner` only when a separate namespace is operationally
+the PyPI repository uses the managed public `airgap-packages` organization. Generic
+evidence publication is disabled by default; set `python.publication.publishEvidence`
+and an optional `genericOwner` only when those internal documents are operationally
 useful.
 
 The PyPI owner may also receive packages from other `airgap-sync` workspaces or other
@@ -405,9 +403,10 @@ uv pip install \
 
 Python consumer infrastructure provides a CPython inside the published compatibility
 envelope and any system prerequisites. `airgap-sync` does not create or manage that
-production environment. Current `verify install` still exercises the transitional
-generated-lock path; it must be extended to verify ordinary `pip` and `uv` resolution
-against an index populated only from the collected bundle.
+production environment. `verify install` exposes only bundled wheels through a
+temporary local Simple API and performs unlocked installs with pip and uv for a locally
+matching planned cell. Static verification checks closure and compatible wheel
+availability for all planned cells.
 
 pnpm v11 applies `minimumReleaseAge: 1440` by default and verifies loaded lockfiles
 unless `trustLockfile` is enabled. Because `airgap-sync` fills Verdaccio through
@@ -527,16 +526,15 @@ mirrors, or writing global Git config.
 
 ## Current Gaps
 
-- `verify install` runs real installs with isolated package-manager caches and Git
-  rewrites, but it does not yet enforce a network-deny sandbox. Use
+- `verify install` runs real installs with isolated package-manager caches, Git
+  rewrites, and a bundle-only Python index, but it does not enforce a network-deny
+  operating-system sandbox. Use
   `--ignore-scripts` when lifecycle scripts should not execute during verification.
-- Python verification currently installs a generated lock rather than proving ordinary
-  `pip install APP` and `uv pip install APP` against an index populated only from the
-  collected bundle.
-- Python collection still uses `all-compatible` wheel expansion instead of minimizing
-  the artifact set that covers CPython 3.10–3.13 on Windows/Linux x86-64.
-- Consumer `uvVersions` and default CPython transfer are transitional and still need to
-  be separated from normal application targets.
+- Dynamic Python install checks cover cells for which the verification host has a
+  matching interpreter; a multi-OS/CPython integration matrix is still needed to
+  execute every cell.
+- CPython and package-manager executable transfer still need their own explicit target
+  model if that optional capability is retained.
 - Real-environment testing is still needed for large monorepositories, private source
   registries, private Git hosts, and authentication variants.
 - Complex native applications, multiple source indexes, and explicit artifact variants

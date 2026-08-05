@@ -68,17 +68,12 @@ describe('workspace config', () => {
           id: 'desktop-x64',
           platforms: ['linux-glibc-x86_64'],
           version: 1,
-          wheelStrategy: 'all-compatible',
+          wheelStrategy: 'minimum-cover',
         },
       ],
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
       python: {
-        artifactTransfer: {
-          cpython: true,
-          uv: false,
-          uvVersions: ['0.11.16'],
-        },
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -149,7 +144,7 @@ describe('workspace config', () => {
     ]);
   });
 
-  it('adds a Python application with automatic runtime and default broad coverage', async () => {
+  it('expands legacy automatic Python coverage to the initial supported minor matrix', async () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     const coverage = config.coveragePolicies?.[0]?.id;
     expect(coverage).toBe('desktop-x64');
@@ -181,7 +176,8 @@ describe('workspace config', () => {
         },
         coverage: 'desktop-x64',
         python: {
-          policy: 'auto',
+          policy: 'selected',
+          versions: ['3.10', '3.11', '3.12', '3.13'],
         },
         spec: 'ktransformers',
         type: 'python-app',
@@ -820,7 +816,7 @@ describe('workspace config', () => {
           id: 'desktop-x64',
           platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
           version: 1,
-          wheelStrategy: 'all-compatible',
+          wheelStrategy: 'minimum-cover',
         },
       ],
       python: {
@@ -852,7 +848,8 @@ describe('workspace config', () => {
           },
           coverage: 'desktop-x64',
           python: {
-            policy: 'auto',
+            policy: 'selected',
+            versions: ['3.10', '3.11', '3.12', '3.13'],
           },
           spec: 'ktransformers',
           type: 'python-app',
@@ -879,7 +876,8 @@ describe('workspace config', () => {
           policyId: 'desktop-x64',
         },
         python: {
-          policy: 'auto',
+          policy: 'selected',
+          versions: ['3.10', '3.11', '3.12', '3.13'],
         },
         source: {
           indexUrl: 'https://pypi.org/simple',
@@ -991,14 +989,9 @@ describe('workspace config', () => {
       '0001-workspace-schema-v2',
       '0002-python-application-publication',
       '0003-python-publication-profile',
-      '0004-python-runtime-transfer',
     ]);
     expect(first.config).toMatchObject({
       python: {
-        artifactTransfer: {
-          cpython: true,
-          uv: false,
-        },
         legacySeed: {
           resolutionMode: 'locked-only',
         },

@@ -112,6 +112,7 @@ async function bundleFixture(): Promise<PythonApplicationBundleIndex> {
         kind: 'cpython',
         references: [
           {
+            cells: ['windows-x86_64--py311'],
             platforms: ['windows-x86_64'],
             targetId: 'demo--windows',
           },
@@ -124,7 +125,7 @@ async function bundleFixture(): Promise<PythonApplicationBundleIndex> {
       },
     ],
     createdAt: '2026-07-28T00:00:00.000Z',
-    schemaVersion: 2,
+    schemaVersion: 3,
     summary: { applications: 1, artifacts: 0, totalBytes: 0 },
   };
 }

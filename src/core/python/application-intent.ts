@@ -1,5 +1,7 @@
 import type { InlinePlatformCoveragePolicy, PlatformCoveragePolicy } from './coverage-policy.js';
 
+export const initialPythonApplicationMinors = ['3.10', '3.11', '3.12', '3.13'];
+
 export type PythonRuntimePolicy =
   | { policy: 'auto' }
   | { policy: 'constrained'; version: string }

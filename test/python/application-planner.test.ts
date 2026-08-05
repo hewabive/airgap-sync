@@ -189,7 +189,7 @@ describe('Python application planner', () => {
     });
   });
 
-  it('selects complete coverage, searches glibc floors, and collects every wheel variant', async () => {
+  it('selects complete coverage, searches glibc floors, and keeps a minimum wheel cover', async () => {
     const resolver = new FixtureResolver();
     const result = await planPythonApplication({
       cacheDir: '/cache',
@@ -232,7 +232,6 @@ describe('Python application planner', () => {
         .map((wheel) => wheel.filename)
     ).toEqual([
       'native_dep-4.0.0-cp311-cp311-manylinux_2_28_x86_64.whl',
-      'native_dep-4.0.0-cp311-cp311-manylinux_2_35_x86_64.whl',
       'native_dep-4.0.0-cp311-cp311-win_amd64.whl',
     ]);
     expect(

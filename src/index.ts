@@ -23,6 +23,7 @@ export {
 export { applyBundle } from './core/apply.js';
 export { collectBundle } from './core/collect.js';
 export { HttpPythonIndexClient, MemoizedPythonIndexClient } from './core/python/index-client.js';
+export { startPythonBundleIndexServer } from './core/python/bundle-index-server.js';
 export { publishPythonBundle } from './core/python/publisher.js';
 export { canonicalizeJson, canonicalJson, semanticDigest } from './core/canonical-json.js';
 export {
@@ -33,6 +34,7 @@ export {
   pythonApplicationTargetId,
   pythonApplicationVariantId,
   pythonApplicationsDirectory,
+  pythonCompatibilityCellId,
   pythonOptionalArtifactsDirectory,
   pythonPlatformLockBase,
   pythonPlatformPylockPath,
@@ -41,6 +43,7 @@ export {
 } from './core/python/application-paths.js';
 export {
   activePythonApplicationPlanDirectory,
+  pruneInactivePythonApplicationPlans,
   readActivePythonApplicationPlan,
   writeActivePythonApplicationPlan,
 } from './core/python/active-plan-store.js';
@@ -73,6 +76,7 @@ export {
   planPythonApplication,
   PythonApplicationPlanningError,
 } from './core/python/application-planner.js';
+export { initialPythonApplicationMinors } from './core/python/application-intent.js';
 export {
   assertPythonApplicationRecipeCurrent,
   normalizePythonApplicationRecipe,

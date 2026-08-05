@@ -276,7 +276,7 @@ describe('verifyInstall', () => {
     });
   });
 
-  it('creates a venv and verifies pinned wheels against the anonymous Gitea index', async () => {
+  it('creates a venv and verifies legacy pinned wheels against the bundle-only index', async () => {
     if (process.platform !== 'linux' || process.arch !== 'x64') {
       return;
     }
@@ -344,21 +344,17 @@ describe('verifyInstall', () => {
     expect(calls[0]).toMatchObject({ args: ['--version'], command: 'python3' });
     expect(calls[1]?.args.slice(0, 2)).toEqual(['-m', 'venv']);
     expect(calls[2]?.args).toEqual(
-      expect.arrayContaining([
-        'pip',
-        'install',
-        '--index-url',
-        'http://gitea.local/api/packages/public/pypi/simple',
-        '--no-deps',
-        'demo==1.0',
-      ])
+      expect.arrayContaining(['pip', 'install', '--index-url', '--no-deps', 'demo==1.0'])
+    );
+    expect(calls[2]?.args.find((argument) => argument.startsWith('http://127.0.0.1:'))).toMatch(
+      /\/simple\/$/u
     );
     expect(report.projects).toEqual(
       expect.arrayContaining([expect.objectContaining({ packageManager: 'pip', status: 'passed' })])
     );
   });
 
-  it('verifies each matching Python application from its hash-complete lock', async () => {
+  it('verifies each matching Python application with unlocked pip and uv resolution', async () => {
     if (process.platform !== 'linux' || process.arch !== 'x64') {
       return;
     }
@@ -429,12 +425,53 @@ describe('verifyInstall', () => {
       ],
       artifacts: [],
       createdAt: '2026-07-27T00:00:00.000Z',
-      schemaVersion: 2,
+      schemaVersion: 3,
       summary: { applications: 1, artifacts: 0, totalBytes: 0 },
     };
     await fs.writeJson(path.join(bundleDir, 'python/application-index.json'), index, {
       spaces: 2,
     });
+    const wheelFile = 'python/artifacts/wheels/' + 'c'.repeat(64) + '/demo-1.0.0-py3-none-any.whl';
+    await fs.ensureDir(path.dirname(path.join(bundleDir, wheelFile)));
+    await fs.writeFile(path.join(bundleDir, wheelFile), 'fixture');
+    await fs.writeJson(
+      path.join(bundleDir, 'python-seed-manifest.json'),
+      {
+        createdAt: '2026-07-27T00:00:00.000Z',
+        packages: [
+          {
+            files: [
+              {
+                coreMetadata: {
+                  metadataVersion: '2.4',
+                  name: 'demo',
+                  projectUrls: [],
+                  providesExtra: [],
+                  requiresDist: [],
+                  requiresPython: '>=3.11,<3.12',
+                  version: '1.0.0',
+                },
+                environments: ['linux-glibc-x86_64--py311'],
+                file: wheelFile,
+                filename: 'demo-1.0.0-py3-none-any.whl',
+                kind: 'wheel',
+                sha256: 'c'.repeat(64),
+                sourceHashes: { sha256: 'c'.repeat(64) },
+                url: 'https://example.test/demo-1.0.0-py3-none-any.whl',
+              },
+            ],
+            name: 'demo',
+            resolvedFrom: [],
+            version: '1.0.0',
+          },
+        ],
+        roots: ['demo==1.0.0'],
+        schemaVersion: 1,
+        sourceIndex: 'https://pypi.org/simple/',
+        targetEnvironments: [],
+      },
+      { spaces: 2 }
+    );
     await writeWorkspaceSnapshot({
       createdAt: '2026-07-27T00:00:00.000Z',
       output: './bundle',
@@ -463,23 +500,44 @@ describe('verifyInstall', () => {
       },
     });
 
-    expect(calls).toHaveLength(5);
-    expect(calls[0]).toMatchObject({ args: ['--version'], command: 'python3.11' });
-    expect(calls[2]?.args).toEqual(
+    expect(calls).toHaveLength(11);
+    expect(calls.filter((call) => call.command === 'python3.11')).toHaveLength(4);
+    const pipInstall = calls.find(
+      (call) => call.command.includes('/python') && call.args.includes('install')
+    );
+    expect(pipInstall?.args).toEqual(
+      expect.arrayContaining(['pip', 'install', '--only-binary=:all:', 'demo==1.0.0'])
+    );
+    expect(pipInstall?.args).not.toEqual(
+      expect.arrayContaining(['--no-deps', '--require-hashes', '-r'])
+    );
+    const uvInstall = calls.find((call) => call.command === 'uv' && call.args.includes('install'));
+    expect(uvInstall?.args).toEqual(
       expect.arrayContaining([
+        'pip',
         'install',
+        '--python',
+        '--default-index',
         '--only-binary=:all:',
-        '--no-deps',
-        '--require-hashes',
-        '-r',
-        path.join(bundleDir, lockFile),
+        'demo==1.0.0',
       ])
     );
-    expect(calls[3]).toMatchObject({ args: ['-m', 'pip', 'check'] });
-    expect(calls[4]).toMatchObject({ args: ['-c', 'import demo'] });
+    expect(pipInstall?.env.PIP_CONFIG_FILE).toBe('/dev/null');
+    expect(pipInstall?.env.PIP_INDEX_URL).toBeUndefined();
+    expect(uvInstall?.env.UV_NO_CONFIG).toBe('1');
+    expect(uvInstall?.env.UV_INDEX).toBeUndefined();
+    expect(calls.filter((call) => call.args.join(' ') === '-m pip check')).toHaveLength(2);
+    expect(calls.filter((call) => call.args.join(' ') === '-c import demo')).toHaveLength(2);
+    expect(report.pythonIndexUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/simple\/$/u);
     expect(report.projects).toEqual([
       expect.objectContaining({
-        projectPath: 'python-app:demo--linux-x64',
+        packageManager: 'pip',
+        projectPath: 'python-app:demo--linux-x64:pip',
+        status: 'passed',
+      }),
+      expect.objectContaining({
+        packageManager: 'uv',
+        projectPath: 'python-app:demo--linux-x64:uv',
         status: 'passed',
       }),
     ]);

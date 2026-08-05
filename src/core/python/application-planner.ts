@@ -365,7 +365,7 @@ async function enumerateBranchArtifacts(options: {
         lowestWheelFloor(installable.map(({ wheel }) => wheel))
       );
     }
-    const branchWheels = candidates
+    const branchWheels = installable
       .sort((left, right) => left.file.filename.localeCompare(right.file.filename))
       .map(({ file, sha256 }) => ({
         filename: file.filename,
@@ -418,6 +418,131 @@ function mergePlanWheels(
     }
   }
   return [...wheels.values()].sort((left, right) => left.filename.localeCompare(right.filename));
+}
+
+interface ResolvedBranchArtifacts {
+  artifacts: EnumeratedBranch;
+  glibc?: string;
+  platformFamilyId: BuiltInPlatformFamilyId;
+  pythonMinor: string;
+}
+
+interface WheelCoverCandidate {
+  branchMask: bigint;
+  key: string;
+  size?: number;
+}
+
+interface WheelCoverSelection {
+  keys: string[];
+  knownBytes: number;
+  unknownSizes: number;
+}
+
+function planWheelKey(wheel: EnumeratedBranch['wheels'][number]): string {
+  return `${wheel.package}\0${wheel.version}\0${wheel.filename}\0${wheel.sha256}`;
+}
+
+function betterWheelCover(
+  candidate: WheelCoverSelection,
+  current: WheelCoverSelection | undefined
+): boolean {
+  if (!current) {
+    return true;
+  }
+  if (candidate.unknownSizes !== current.unknownSizes) {
+    return candidate.unknownSizes < current.unknownSizes;
+  }
+  if (candidate.knownBytes !== current.knownBytes) {
+    return candidate.knownBytes < current.knownBytes;
+  }
+  if (candidate.keys.length !== current.keys.length) {
+    return candidate.keys.length < current.keys.length;
+  }
+  return candidate.keys.join('\0').localeCompare(current.keys.join('\0')) < 0;
+}
+
+function selectMinimumWheelCover(branches: ResolvedBranchArtifacts[]): void {
+  const packageBranches = new Map<string, number[]>();
+  for (const [branchIndex, branch] of branches.entries()) {
+    for (const pkg of branch.artifacts.packages) {
+      const packageKey = `${pkg.name}\0${pkg.version}`;
+      const indexes = packageBranches.get(packageKey) ?? [];
+      indexes.push(branchIndex);
+      packageBranches.set(packageKey, indexes);
+    }
+  }
+
+  const selectedWheelKeys = new Set<string>();
+  for (const [packageKey, branchIndexes] of packageBranches) {
+    const candidates = new Map<string, WheelCoverCandidate>();
+    for (const branchIndex of branchIndexes) {
+      const branch = branches[branchIndex]!;
+      const [packageName, packageVersion] = packageKey.split('\0');
+      for (const wheel of branch.artifacts.wheels.filter(
+        (item) => item.package === packageName && item.version === packageVersion
+      )) {
+        const key = planWheelKey(wheel);
+        const existing = candidates.get(key);
+        candidates.set(key, {
+          branchMask: (existing?.branchMask ?? 0n) | (1n << BigInt(branchIndex)),
+          key,
+          ...(wheel.size !== undefined ? { size: wheel.size } : {}),
+        });
+      }
+    }
+    const requiredMask = branchIndexes.reduce(
+      (mask, branchIndex) => mask | (1n << BigInt(branchIndex)),
+      0n
+    );
+    const states = new Map<bigint, WheelCoverSelection>([
+      [0n, { keys: [], knownBytes: 0, unknownSizes: 0 }],
+    ]);
+    for (const candidate of [...candidates.values()].sort((left, right) =>
+      left.key.localeCompare(right.key)
+    )) {
+      for (const [mask, selection] of [...states.entries()]) {
+        const nextMask = mask | candidate.branchMask;
+        if (nextMask === mask) {
+          continue;
+        }
+        const next: WheelCoverSelection = {
+          keys: [...selection.keys, candidate.key],
+          knownBytes: selection.knownBytes + (candidate.size ?? 0),
+          unknownSizes: selection.unknownSizes + (candidate.size === undefined ? 1 : 0),
+        };
+        if (betterWheelCover(next, states.get(nextMask))) {
+          states.set(nextMask, next);
+        }
+      }
+    }
+    const selected = states.get(requiredMask);
+    if (!selected) {
+      throw new Error(`No wheel set covers every compatibility cell for ${packageKey}`);
+    }
+    for (const key of selected.keys) {
+      selectedWheelKeys.add(key);
+    }
+  }
+
+  for (const branch of branches) {
+    branch.artifacts.wheels = branch.artifacts.wheels.filter((wheel) =>
+      selectedWheelKeys.has(planWheelKey(wheel))
+    );
+    for (const pkg of branch.artifacts.packages) {
+      const selectedFilenames = new Set(
+        branch.artifacts.wheels
+          .filter((wheel) => wheel.package === pkg.name && wheel.version === pkg.version)
+          .map((wheel) => wheel.filename)
+      );
+      pkg.wheels = pkg.wheels.filter((filename) => selectedFilenames.has(filename));
+      if (pkg.wheels.length === 0) {
+        throw new Error(
+          `Minimum wheel cover left ${pkg.name}==${pkg.version} uncovered for ${branch.platformFamilyId} on Python ${branch.pythonMinor}`
+        );
+      }
+    }
+  }
 }
 
 async function resolveCandidate(
@@ -569,10 +694,7 @@ export async function planPythonApplication(
     const pythonMinors = uniqueCandidates
       .filter((candidate) => candidate.applicationVersion === applicationVersion)
       .map((candidate) => candidate.pythonMinor);
-    const attempts =
-      options.intent.python.policy === 'selected'
-        ? [pythonMinors]
-        : pythonMinors.map((pythonMinor) => [pythonMinor]);
+    const attempts = [pythonMinors];
     for (const attempt of attempts) {
       const resolvedBranches: {
         artifacts: EnumeratedBranch;
@@ -598,6 +720,7 @@ export async function planPythonApplication(
       if (!complete) {
         continue;
       }
+      selectMinimumWheelCover(resolvedBranches);
       const families = options.coveragePolicy.platforms.map((id) => {
         const family = getBuiltInPlatformFamily(id);
         if (!family) {
@@ -675,7 +798,7 @@ export async function planPythonApplication(
     }
   }
   throw new PythonApplicationPlanningError(
-    `No application version and Python minor covers ${options.coveragePolicy.platforms.join(', ')}`,
+    `No application version and Python selection covers every requested cell for ${options.coveragePolicy.platforms.join(', ')}`,
     rejectedCandidates
   );
 }

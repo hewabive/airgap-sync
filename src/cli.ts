@@ -42,6 +42,7 @@ import {
   HttpRegistryClient,
   HttpPythonIndexClient,
   initWorkspace,
+  initialPythonApplicationMinors,
   installMaintainedPythonApplicationRecipe,
   listBuiltInPlatformFamilies,
   migrateWorkspaceConfig,
@@ -58,6 +59,7 @@ import {
   PythonApplicationPlanningError,
   previewWorkspaceMigration,
   probeMachine,
+  pruneInactivePythonApplicationPlans,
   publishBundle,
   pruneBundle,
   readBundleInfo,
@@ -212,7 +214,6 @@ interface VerifyInstallOptions {
   gitea: string;
   json?: boolean;
   keepTemp?: boolean;
-  pythonOwner?: string;
   registry: string;
   timeoutMs: number;
 }
@@ -824,10 +825,11 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
           `Python application source: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`,
           `Python publication owner: ${publicationOwner(publication.owner)}`,
           `Python PyPI owner: ${publicationOwner(publication.pypiOwner ?? publication.owner)}`,
-          `Python Generic owner: ${publicationOwner(publication.genericOwner ?? publication.owner)}`,
-          `Consumer uv coverage: ${(
-            config.python?.artifactTransfer?.uvVersions ?? [workspacePythonPlannerVersion]
-          ).join(', ')}`,
+          ...(publication.publishEvidence === true
+            ? [
+                `Python Generic evidence owner: ${publicationOwner(publication.genericOwner ?? publication.owner)}`,
+              ]
+            : []),
           `Default application coverage: ${
             defaultCoverage
               ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
@@ -882,7 +884,7 @@ function findCoveragePolicy(config: WorkspaceConfig, id: string): PlatformCovera
       id: family.id,
       platforms: [family.id as PlatformCoveragePolicy['platforms'][number]],
       version: 1,
-      wheelStrategy: 'all-compatible',
+      wheelStrategy: 'minimum-cover',
     };
   }
   throw new Error(`Unknown coverage policy or platform family: ${id}`);
@@ -1121,12 +1123,7 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
           throw error;
         }
         const plan = addPythonRuntimeContract(result.plan, {
-          includeCpython: options.config.python?.artifactTransfer?.cpython === true,
-          includeUv: options.config.python?.artifactTransfer?.uv === true,
           ...(recipe ? { recipe } : {}),
-          uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
-            options.config.python!.planner.version,
-          ],
         });
         planned.push({
           plan,
@@ -2357,7 +2354,7 @@ async function configureApplicationCoverage(
     id: current?.id ?? 'desktop-x64',
     platforms,
     version: 1,
-    wheelStrategy: 'all-compatible',
+    wheelStrategy: 'minimum-cover',
   };
   const nextConfig: WorkspaceConfig = {
     ...config,
@@ -2393,11 +2390,14 @@ async function configurePythonApplicationPublication(
   if (!owner) {
     throw new Error('Python publication organization is required');
   }
-  const splitOwners = await askYesNo(
-    rl,
-    'Use separate organizations for PyPI and Generic Packages?',
-    Boolean(currentPublication.pypiOwner ?? currentPublication.genericOwner)
-  );
+  const publishEvidence = currentPublication.publishEvidence === true;
+  const splitOwners = publishEvidence
+    ? await askYesNo(
+        rl,
+        'Use separate organizations for PyPI and optional Generic evidence?',
+        Boolean(currentPublication.pypiOwner ?? currentPublication.genericOwner)
+      )
+    : false;
   const pypiOwner = splitOwners
     ? (
         await ask(
@@ -2423,27 +2423,12 @@ async function configurePythonApplicationPublication(
   if (splitOwners && (!pypiOwner || !genericOwner)) {
     throw new Error('Both Python publication organizations are required');
   }
-  const uvVersions = (
-    await ask(
-      rl,
-      'Consumer uv versions (comma-separated)',
-      (config.python?.artifactTransfer?.uvVersions ?? [workspacePythonPlannerVersion]).join(', ')
-    )
-  )
-    .split(',')
-    .map((version) => version.trim())
-    .filter(Boolean);
-  if (uvVersions.length === 0 || uvVersions.some((version) => !/^\d+\.\d+\.\d+$/u.test(version))) {
-    throw new Error('Consumer uv versions must contain one or more X.Y.Z versions');
-  }
   const nextConfig: WorkspaceConfig = {
     ...config,
     python: {
-      artifactTransfer: {
-        cpython: config.python?.artifactTransfer?.cpython ?? true,
-        uv: config.python?.artifactTransfer?.uv ?? false,
-        uvVersions: [...new Set(uvVersions)],
-      },
+      ...(config.python?.artifactTransfer
+        ? { artifactTransfer: config.python.artifactTransfer }
+        : {}),
       ...(config.python?.legacySeed ? { legacySeed: config.python.legacySeed } : {}),
       planner: config.python?.planner ?? {
         engine: 'uv',
@@ -2473,6 +2458,7 @@ async function configurePythonApplicationPublication(
               },
             }
           : {}),
+        ...(publishEvidence ? { publishEvidence: true } : {}),
         visibility: 'public',
       },
       sourceIndex,
@@ -2720,7 +2706,11 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
           defaultCoverage
         );
         const pythonVersions = (
-          await ask(rl, 'Python minor versions (comma-separated, blank = select automatically)')
+          await ask(
+            rl,
+            'Python minor versions (comma-separated)',
+            initialPythonApplicationMinors.join(', ')
+          )
         )
           .split(',')
           .map((version) => version.trim())
@@ -3683,7 +3673,7 @@ targetAddCommand
           ? {
               platforms: parsePythonApplicationPlatforms(options.platform ?? []),
               version: 1 as const,
-              wheelStrategy: 'all-compatible' as const,
+              wheelStrategy: 'minimum-cover' as const,
             }
           : (options.coverage ?? config.coveragePolicies?.[0]?.id);
       if (!coverage) {
@@ -3714,7 +3704,7 @@ targetAddCommand
             ? { policy: 'selected', versions: options.pythonVersion! }
             : options.python
               ? { policy: 'constrained', version: options.python }
-              : { policy: 'auto' },
+              : { policy: 'selected', versions: [...initialPythonApplicationMinors] },
         spec,
         type: 'python-app',
       };
@@ -3725,7 +3715,7 @@ targetAddCommand
         }\nPython runtime: ${
           (options.pythonVersion?.length ?? 0) > 0
             ? options.pythonVersion!.join(', ')
-            : (options.python ?? 'selected automatically during planning')
+            : (options.python ?? initialPythonApplicationMinors.join(', '))
         }${
           recipe ? `\nRecipe: ${recipe}` : ''
         }\nTotal targets: ${String(result.config.targets.length)}`
@@ -4248,6 +4238,17 @@ program
 
         const pruneReport =
           prune && options.dryRun !== true ? await pruneAfterSuccessfulDownload(report) : undefined;
+        if (pruneReport?.errors.length === 0) {
+          const removedPlans = await pruneInactivePythonApplicationPlans(
+            workspaceDir,
+            pythonApplicationPreflight.targets.map(({ activePlan }) => activePlan.manifest.targetId)
+          );
+          if (removedPlans.length > 0) {
+            console.error(
+              `[prune] removed ${String(removedPlans.length)} inactive Python workspace plans`
+            );
+          }
+        }
         if (beforeState) {
           await writeDownloadRunHistory({
             before: beforeState,
@@ -4629,7 +4630,6 @@ verifyCommand
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('-r, --registry <url>', 'Target npm registry URL')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
-  .option('--python-owner <owner>', 'Public Gitea owner for the Python package index')
   .option('--timeout-ms <ms>', 'Install timeout per project', parsePositiveInteger, 10 * 60_000)
   .option('--ignore-scripts', 'Skip npm/pnpm/yarn lifecycle scripts during install verification')
   .option('--keep-temp', 'Keep temporary project copies for debugging')
@@ -4641,7 +4641,6 @@ verifyCommand
         giteaBaseUrl: options.gitea,
         ignoreScripts: options.ignoreScripts === true,
         keepTemp: options.keepTemp === true,
-        ...(options.pythonOwner ? { pythonOwner: options.pythonOwner } : {}),
         registryUrl: options.registry,
         timeoutMs: options.timeoutMs,
       });

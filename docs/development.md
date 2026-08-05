@@ -85,9 +85,10 @@ npm run e2e:ktransformers
 The KTransformers check exercises a difficult native-wheel boundary: broad
 Windows/Linux coverage fails, while the reviewed Linux branch can be collected. It is
 a useful fixture, not the definition of Python support. Today this test checks planning
-and transitional generated records; it does not yet prove that an ordinary client can
-install KTransformers from an index populated only with its collected bundle or
-transfer model weights.
+and generated evidence across that reviewed boundary. The general install verifier
+separately exercises ordinary pip and uv resolution from a bundle-only index. The live
+KTransformers test does not transfer model weights, which are outside Python package
+coverage.
 
 The Python end-to-end acceptance suite should publish each test bundle into a temporary
 Gitea owner for test isolation and, for every supported compatibility cell, install
@@ -95,9 +96,9 @@ representative applications with both ordinary pip resolution and ordinary uv
 resolution. The test environment must expose only that Gitea PyPI index. The clean
 owner is a test fixture, not a production constraint. A separate coexistence test
 should publish independent bundles and unrelated packages into one shared owner and
-confirm that each contributed application remains installable. A lock-driven
-`--no-deps` install may remain as an additional integrity test, but cannot replace
-repository-resolution tests.
+confirm that each contributed application remains installable. A lock-driven install
+may remain as an additional integrity test, but cannot replace repository-resolution
+tests.
 
 To measure sequential read and SHA-256 performance on the actual removable medium:
 

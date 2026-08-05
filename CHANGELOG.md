@@ -8,26 +8,28 @@
   resolved version while deduplicating shared artifacts.
 - Added an optional Gitea token prompt to interactive first-time workspace setup so
   publish credentials can be saved without visiting the settings menu.
-- Made consumer uv versions an explicit runtime-coverage dimension, with reviewed
-  catalog selection and stale-plan detection when the requested uv matrix changes.
-- Added repeatable `python-app --python-version` selection and matrix planning so one
-  application version can ship independent hash-complete locks for several CPython
-  minors.
-- Enabled verified CPython artifact transfer by default and added an automatic
-  workspace migration that invalidates runtime-stale active plans.
+- Made the collector's pinned uv an internal planning tool; normal application targets
+  no longer ask for consumer uv versions or transfer CPython/uv executables.
+- Added repeatable `python-app --python-version` selection and complete matrix planning,
+  defaulting new targets to CPython 3.10–3.13 and retaining one resolved tree per
+  requested platform/Python cell.
+- Added exact compatibility-cell references and minimum practical wheel-cover
+  selection so universal and `abi3` wheels are shared while redundant builds are
+  omitted.
 - Added the persistent `defaults.publish.provisionGit` workspace setting, defaulting to
   `true`, with `false` and `"ask"` behavior matching the other interactive defaults.
 - Added schema-v2 `python-app` targets with application-first Windows/Linux coverage,
-  automatic CPython-minor selection, pinned `uv` planning, wheels-only closures,
-  inferred glibc boundaries, and collector-independent cross-platform resolution.
+  explicit CPython-minor selection, pinned internal `uv` planning, wheels-only
+  closures, inferred glibc boundaries, and collector-independent cross-platform
+  resolution.
 - Added immutable Python application plans, content-addressed shared wheels,
   per-platform pylock/requirements locks, external runtime prerequisite contracts,
   plan diffs, reference-safe partial updates/pruning, and bundle verification.
 - Made workspace downloads create missing Python application plans automatically,
   rebuild plans invalidated by explicit configuration changes, and reuse current plans.
-- Added Gitea Generic Package publication for application plans, consumer contracts,
-  locks, and optional hash-verified CPython/uv transfers; production installation
-  remains owned by consumer infrastructure using standard pip/uv commands.
+- Added optional Gitea Generic Package publication for application plans, consumer
+  contracts, locks, and legacy runtime/tool artifacts. It is disabled by default;
+  Gitea PyPI is sufficient for production installation with standard pip/uv commands.
 - Serialized identical Generic Package blob uploads across application packages to
   avoid Gitea PostgreSQL `UQE_package_blob_md5` races while retaining parallel uploads
   for different content.
@@ -37,9 +39,8 @@
 - Added a maintained KTransformers recipe and captured fixture. Broad native Windows
   coverage is rejected precisely because the reviewed `kt-kernel` release has Linux
   wheels only; Linux planning selects Python 3.11 and infers glibc 2.35.
-- Added interrupted download/publication recovery tests, fixed-cutoff reproducibility
-  coverage, removable-media bundle benchmarking, and a Python application security
-  review.
+- Added interrupted download/publication recovery tests, fixed-cutoff planning tests,
+  removable-media bundle benchmarking, and a Python application security review.
 - Added workspace targets for repeatable removable-media workflows.
 - Added automatic, backed-up, atomic workspace migration from schema v1 to schema v2
   when a workspace is opened.
@@ -92,7 +93,8 @@
   publish instead of stored as hundreds of entries in `dist-tags.json`.
 - Added stable tag dependency reuse so repeated downloads do not follow moved tags when
   the declaring parent did not change.
-- Added static bundle verification, install verification, and local Gitea/Verdaccio e2e testing.
+- Added static bundle verification, bundle-only unlocked pip/uv install verification,
+  and local Gitea/Verdaccio e2e testing.
 - Added `verify install --ignore-scripts` and documented the tool security model.
 - Changed pnpm install verification to trust loaded lockfiles so Verdaccio import time
   does not trip pnpm v11 `minimumReleaseAge`.

@@ -52,34 +52,25 @@ export interface EnsureWorkspacePythonApplicationPlansResult {
 }
 
 interface ExpectedWorkspacePythonApplicationPlan {
-  includeCpython: boolean;
-  includeUv: boolean;
   intent: ReturnType<typeof pythonApplicationIntentForVersionSelector>;
   recipeDigest?: string;
   resolved: ReturnType<typeof resolveWorkspacePythonApplication>;
   selector: PythonApplicationVersionSelector;
   targetId: string;
   targetIndex: number;
-  uvVersions: string[];
 }
 
 function planIsCurrent(
   activePlan: ActivePythonApplicationPlan,
   expected: ExpectedWorkspacePythonApplicationPlan
 ): boolean {
-  const includesCpython =
-    activePlan.plan.runtimeArtifacts?.some((artifact) => artifact.kind === 'cpython') === true;
-  const includesUv =
-    activePlan.plan.runtimeArtifacts?.some((artifact) => artifact.kind === 'uv') === true;
   return (
     semanticDigest(activePlan.plan.intent) === semanticDigest(expected.intent) &&
     activePlan.plan.coverage.digest ===
       platformCoveragePolicyDigest(expected.resolved.coveragePolicy) &&
     activePlan.plan.recipe?.digest === expected.recipeDigest &&
-    includesCpython === expected.includeCpython &&
-    includesUv === expected.includeUv &&
-    semanticDigest(activePlan.plan.runtimeContract?.uvVersions ?? []) ===
-      semanticDigest(expected.uvVersions)
+    (activePlan.plan.runtimeArtifacts?.length ?? 0) === 0 &&
+    activePlan.plan.runtimeContract?.uvVersions === undefined
   );
 }
 
@@ -97,8 +88,6 @@ async function expectedPlans(
     const recipe = await options.readRecipe(target);
     expected.push(
       ...resolved.versionSelection.selectors.map((selector) => ({
-        includeCpython: options.config.python?.artifactTransfer?.cpython === true,
-        includeUv: options.config.python?.artifactTransfer?.uv === true,
         intent: pythonApplicationIntentForVersionSelector(resolved, selector),
         ...(recipe ? { recipeDigest: semanticDigest(recipe) } : {}),
         resolved,
@@ -109,9 +98,6 @@ async function expectedPlans(
           selector
         ),
         targetIndex,
-        uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
-          options.config.python!.planner.version,
-        ],
       }))
     );
   }

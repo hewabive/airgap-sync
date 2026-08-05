@@ -75,28 +75,8 @@ function activePlanFor(
       policyVersion: 1,
       version: '0.11.16',
     },
-    ...(workspaceConfig.python?.artifactTransfer?.cpython
-      ? {
-          runtimeArtifacts: [
-            {
-              filename:
-                'cpython-3.13.14+20260718-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz',
-              kind: 'cpython' as const,
-              license: {
-                spdx: 'Python-2.0',
-                url: 'https://docs.python.org/3/license.html',
-              },
-              platforms: ['linux-glibc-x86_64'],
-              sha256: 'a'.repeat(64),
-              sourceUrl: 'https://example.test/cpython.tar.gz',
-              version: '3.13.14',
-            },
-          ],
-        }
-      : {}),
     runtimeContract: {
       platforms: [],
-      uvVersions: workspaceConfig.python?.artifactTransfer?.uvVersions ?? ['0.11.16'],
     },
     schemaVersion: 2,
     wheels: [],
@@ -184,28 +164,25 @@ describe('workspace Python application plan preflight', () => {
     expect(result.targets[0]?.activePlan.plan.intent.application.extras).toEqual(['server']);
   });
 
-  it('replans when consumer uv coverage changed', async () => {
+  it('ignores legacy consumer uv settings when checking an application plan', async () => {
     const target = config.targets[0] as WorkspacePythonApplicationTarget;
-    let stored = activePlanFor(config, target);
-    config.python!.artifactTransfer!.uvVersions = ['0.11.16', '0.12.1'];
+    const stored = activePlanFor(config, target);
+    config.python!.artifactTransfer = {
+      cpython: false,
+      uv: true,
+      uvVersions: ['0.12.1'],
+    };
 
     const result = await ensureWorkspacePythonApplicationPlans({
       config,
-      planTargets: (indexes) => {
-        expect(indexes).toEqual([1]);
-        stored = activePlanFor(config, target);
-        return Promise.resolve();
-      },
+      planTargets: () => Promise.reject(new Error('planner must not run')),
       readActivePlan: () => Promise.resolve(stored),
       readRecipe: () => Promise.resolve(undefined),
       workspaceDir,
     });
 
-    expect(result.plannedTargetIndexes).toEqual([1]);
-    expect(result.targets[0]?.activePlan.plan.runtimeContract?.uvVersions).toEqual([
-      '0.11.16',
-      '0.12.1',
-    ]);
+    expect(result.plannedTargetIndexes).toEqual([]);
+    expect(result.targets[0]?.activePlan.plan.runtimeContract?.uvVersions).toBeUndefined();
   });
 
   it('keeps a current plan when publication coordinates changed', async () => {

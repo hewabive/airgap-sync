@@ -74,6 +74,21 @@ export function pythonPlatformLockBase(platformFamilyId: string, pythonMinor: st
   return `${platformFamilyId}--py${pythonMinor.replace('.', '')}`;
 }
 
+export function pythonCompatibilityCellId(
+  platformFamilyId: string,
+  pythonMinor: string,
+  glibc?: string
+): string {
+  const base = pythonPlatformLockBase(platformFamilyId, pythonMinor);
+  if (glibc === undefined) {
+    return base;
+  }
+  if (!/^2\.\d+$/u.test(glibc)) {
+    throw new Error(`Invalid Python compatibility cell glibc version: ${glibc}`);
+  }
+  return `${base}--glibc-${glibc}`;
+}
+
 export function pythonPlatformPylockPath(platformFamilyId: string, pythonMinor: string): string {
   return path.posix.join(
     'lock',

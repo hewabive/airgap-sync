@@ -13,6 +13,7 @@ import {
   pythonApplicationPlanDirectory,
   pythonApplicationPlanPath,
   pythonApplicationTargetId,
+  pythonCompatibilityCellId,
   pythonOptionalArtifactsDirectory,
   pythonWheelArtifactsDirectory,
 } from './application-paths.js';
@@ -36,7 +37,14 @@ import {
 } from './bundle.js';
 import { parseCoreMetadata } from './metadata.js';
 import { readWheelMetadata } from './wheel-metadata.js';
-import type { PythonTargetEnvironmentConfig } from './environments.js';
+import {
+  resolveTargetEnvironment,
+  wheelPriorityInEnvironment,
+  type PythonTargetEnvironmentConfig,
+} from './environments.js';
+import { normalizePackageName } from './names.js';
+import { compareVersions, versionSatisfies } from './pep440.js';
+import { parseWheelFilename } from './wheels.js';
 import {
   createPythonConsumerLocks,
   createPythonRequirementsLock,
@@ -46,6 +54,7 @@ import {
 export type PythonApplicationArtifactKind = 'cpython' | 'license' | 'uv' | 'wheel';
 
 export interface PythonApplicationArtifactReference {
+  cells: string[];
   platforms: string[];
   targetId: string;
 }
@@ -65,6 +74,7 @@ export interface PythonApplicationBundleArtifact {
 
 export interface PythonApplicationBundleBranchSize {
   artifactCount: number;
+  cellId: string;
   glibc?: string;
   incrementalBytes: number;
   platformFamilyId: string;
@@ -96,7 +106,7 @@ export interface PythonApplicationBundleIndex {
   applications: PythonApplicationBundleEntry[];
   artifacts: PythonApplicationBundleArtifact[];
   createdAt: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
   summary: {
     applications: number;
     artifacts: number;
@@ -341,6 +351,9 @@ function addArtifact(
       (candidate) => candidate.targetId === reference.targetId
     );
     if (existingReference) {
+      existingReference.cells = [
+        ...new Set([...existingReference.cells, ...reference.cells]),
+      ].sort();
       existingReference.platforms = [
         ...new Set([...existingReference.platforms, ...reference.platforms]),
       ].sort();
@@ -357,6 +370,12 @@ function collectPlannedArtifacts(
 ): Map<string, PlannedArtifact> {
   const artifacts = new Map<string, PlannedArtifact>();
   for (const { activePlan, targetId } of targets) {
+    const planCell = (platform: PythonEnvironmentPlan['platforms'][number]): string =>
+      pythonCompatibilityCellId(
+        platform.platformFamilyId,
+        platform.pythonMinor,
+        platform.supportBoundary?.glibc
+      );
     for (const wheel of activePlan.plan.wheels) {
       const id = artifactId(wheel.sha256, wheel.filename);
       addArtifact(
@@ -372,7 +391,21 @@ function collectPlannedArtifacts(
           sourceUrl: wheel.url,
           version: wheel.version,
         },
-        { platforms: [...wheel.platforms], targetId }
+        {
+          cells: activePlan.plan.platforms
+            .filter((platform) =>
+              platform.packages.some(
+                (pkg) =>
+                  pkg.name === wheel.package &&
+                  pkg.version === wheel.version &&
+                  pkg.wheels.includes(wheel.filename)
+              )
+            )
+            .map(planCell)
+            .sort(),
+          platforms: [...wheel.platforms],
+          targetId,
+        }
       );
     }
     for (const runtime of activePlan.plan.runtimeArtifacts ?? []) {
@@ -389,7 +422,14 @@ function collectPlannedArtifacts(
           sourceUrl: runtime.sourceUrl,
           version: runtime.version,
         },
-        { platforms: [...runtime.platforms], targetId }
+        {
+          cells: activePlan.plan.platforms
+            .filter((platform) => runtime.platforms.includes(platform.platformFamilyId))
+            .map(planCell)
+            .sort(),
+          platforms: [...runtime.platforms],
+          targetId,
+        }
       );
     }
   }
@@ -406,16 +446,19 @@ async function readCurrentIndex(
   }
   const index = await fs.readJson<PythonApplicationBundleIndex>(filePath);
   if (
-    (index as { schemaVersion?: unknown }).schemaVersion !== 2 ||
+    (index as { schemaVersion?: unknown }).schemaVersion !== 3 ||
     !Array.isArray(index.applications) ||
     !Array.isArray(index.artifacts)
   ) {
-    if ((index as { schemaVersion?: unknown }).schemaVersion === 1) {
+    if (
+      (index as { schemaVersion?: unknown }).schemaVersion === 1 ||
+      (index as { schemaVersion?: unknown }).schemaVersion === 2
+    ) {
       if (replaceLegacy) {
         return undefined;
       }
       throw new Error(
-        'Python application bundle schemaVersion 1 is obsolete; run airgap-sync download again'
+        'Python application bundle schemaVersion 1/2 is obsolete; run airgap-sync download again'
       );
     }
     throw new Error(`${pythonApplicationIndexPath} is invalid`);
@@ -458,14 +501,19 @@ function branchSizes(
   incrementalIds: Set<string>
 ): PythonApplicationBundleBranchSize[] {
   return plan.platforms.map((platform) => {
+    const cellId = pythonCompatibilityCellId(
+      platform.platformFamilyId,
+      platform.pythonMinor,
+      platform.supportBoundary?.glibc
+    );
     const branchArtifacts = [...artifacts.values()].filter((artifact) =>
       artifact.references.some(
-        (reference) =>
-          reference.targetId === targetId && reference.platforms.includes(platform.platformFamilyId)
+        (reference) => reference.targetId === targetId && reference.cells.includes(cellId)
       )
     );
     return {
       artifactCount: branchArtifacts.length,
+      cellId,
       ...(platform.supportBoundary?.glibc ? { glibc: platform.supportBoundary.glibc } : {}),
       incrementalBytes: branchArtifacts
         .filter((artifact) => incrementalIds.has(artifact.id))
@@ -537,17 +585,13 @@ function mergeIndex(
     applications,
     artifacts,
     createdAt,
-    schemaVersion: 2,
+    schemaVersion: 3,
     summary: {
       applications: applications.length,
       artifacts: artifacts.length,
       totalBytes: artifacts.reduce((total, artifact) => total + artifact.size, 0),
     },
   };
-}
-
-function environmentName(platformFamilyId: string, pythonMinor: string): string {
-  return `${platformFamilyId}--py${pythonMinor.replace('.', '')}`;
 }
 
 function targetEnvironment(
@@ -557,7 +601,7 @@ function targetEnvironment(
   if (branch.platformFamilyId === 'windows-x86_64') {
     return {
       arch: 'x86_64',
-      name: environmentName(branch.platformFamilyId, branch.pythonMinor),
+      name: branch.cellId,
       os: 'windows',
       pythonVersion: `${branch.pythonMinor}.0`,
     };
@@ -570,7 +614,7 @@ function targetEnvironment(
   return {
     arch: 'x86_64',
     manylinux: `manylinux_${glibc.replace('.', '_')}`,
-    name: environmentName(branch.platformFamilyId, branch.pythonMinor),
+    name: branch.cellId,
     os: 'linux',
     pythonVersion: `${branch.pythonMinor}.0`,
   };
@@ -625,27 +669,7 @@ async function createPythonSeedCompatibilityManifest(
         ? previousFile.coreMetadata
         : parseCoreMetadata(await readWheelMetadata(path.join(bundleDir, artifact.file)));
     const environments = [
-      ...new Set(
-        artifact.references.flatMap((reference) => {
-          const application = index.applications.find(
-            (candidate) => candidate.targetId === reference.targetId
-          );
-          return reference.platforms.map((platformFamilyId) => {
-            const branch = application?.branchSizes.find(
-              (candidate) => candidate.platformFamilyId === platformFamilyId
-            );
-            return environmentName(
-              platformFamilyId,
-              branch?.pythonMinor ??
-                selectedPlans
-                  .get(reference.targetId)
-                  ?.platforms.find((platform) => platform.platformFamilyId === platformFamilyId)
-                  ?.pythonMinor ??
-                '3.0'
-            );
-          });
-        })
-      ),
+      ...new Set(artifact.references.flatMap((reference) => reference.cells)),
     ].sort();
     const file: PythonSeedFile = {
       coreMetadata: metadata,
@@ -660,15 +684,7 @@ async function createPythonSeedCompatibilityManifest(
     const key = `${artifact.package}\0${artifact.version}`;
     const current = packages.get(key);
     const resolvedFrom = artifact.references.map((reference) => ({
-      environments: reference.platforms.map((platformFamilyId) => {
-        const application = index.applications.find(
-          (candidate) => candidate.targetId === reference.targetId
-        );
-        const branch = application?.branchSizes.find(
-          (candidate) => candidate.platformFamilyId === platformFamilyId
-        );
-        return environmentName(platformFamilyId, branch?.pythonMinor ?? '3.0');
-      }),
+      environments: [...reference.cells],
       raw: `${packageName}==${artifact.version}`,
       requiredBy: `python-app:${reference.targetId}`,
       sourcePath:
@@ -1140,6 +1156,7 @@ export async function verifyPythonApplicationBundle(
     return { applications: 0, artifacts: 0, errors };
   }
   const targetIds = new Set(index.applications.map((application) => application.targetId));
+  const plansByTarget = new Map<string, PythonEnvironmentPlan>();
   for (const application of index.applications) {
     let environmentPlan: PythonEnvironmentPlan | undefined;
     if (
@@ -1154,6 +1171,7 @@ export async function verifyPythonApplicationBundle(
         await fs.readJson<PythonEnvironmentPlan>(path.join(resolvedBundleDir, application.planPath))
       );
       environmentPlan = plan;
+      plansByTarget.set(application.targetId, plan);
       if (plan.planId !== application.planId) {
         errors.push(`Python application plan ID mismatch: ${application.targetId}`);
       }
@@ -1231,6 +1249,7 @@ export async function verifyPythonApplicationBundle(
     }
   }
   const artifactIds = new Set(index.artifacts.map((artifact) => artifact.id));
+  const artifactMetadata = new Map<string, ReturnType<typeof parseCoreMetadata>>();
   for (const application of index.applications) {
     for (const id of application.artifactIds) {
       if (!artifactIds.has(id)) {
@@ -1247,6 +1266,15 @@ export async function verifyPythonApplicationBundle(
       continue;
     }
     for (const reference of artifact.references) {
+      if (
+        !Array.isArray(reference.cells) ||
+        reference.cells.length === 0 ||
+        !Array.isArray(reference.platforms) ||
+        reference.platforms.length === 0
+      ) {
+        errors.push(`Python application artifact ${artifact.id} has an empty cell reference`);
+        continue;
+      }
       if (!targetIds.has(reference.targetId)) {
         errors.push(
           `Python application artifact ${artifact.id} references unknown target ${reference.targetId}`
@@ -1259,20 +1287,128 @@ export async function verifyPythonApplicationBundle(
         errors.push(
           `Python application artifact ${artifact.id} has an asymmetric reference to ${reference.targetId}`
         );
+      } else {
+        const application = index.applications.find(
+          (candidate) => candidate.targetId === reference.targetId
+        );
+        const applicationCells = new Set(
+          application?.branchSizes.map((branch) => branch.cellId) ?? []
+        );
+        for (const cell of reference.cells) {
+          if (!applicationCells.has(cell)) {
+            errors.push(
+              `Python application artifact ${artifact.id} references unknown cell ${cell} for ${reference.targetId}`
+            );
+          }
+        }
       }
     }
     try {
-      const actual = await hashFile(path.join(resolvedBundleDir, artifact.file));
+      const artifactPath = path.join(resolvedBundleDir, artifact.file);
+      const actual = await hashFile(artifactPath);
       if (actual.sha256 !== artifact.sha256) {
         errors.push(`Python application artifact SHA-256 mismatch: ${artifact.file}`);
       }
       if (actual.size !== artifact.size) {
         errors.push(`Python application artifact size mismatch: ${artifact.file}`);
       }
+      if (artifact.kind === 'wheel') {
+        const metadata = parseCoreMetadata(await readWheelMetadata(artifactPath));
+        artifactMetadata.set(artifact.id, metadata);
+        if (
+          !artifact.package ||
+          normalizePackageName(metadata.name) !== normalizePackageName(artifact.package) ||
+          compareVersions(metadata.version, artifact.version) !== 0
+        ) {
+          errors.push(`Python application wheel metadata identity mismatch: ${artifact.file}`);
+        }
+      }
     } catch (error) {
       errors.push(
         `Python application artifact is missing or unreadable (${artifact.file}): ${(error as Error).message}`
       );
+    }
+  }
+  for (const application of index.applications) {
+    const plan = plansByTarget.get(application.targetId);
+    if (!plan) {
+      continue;
+    }
+    const expectedCells = new Set(
+      plan.platforms.map((platform) =>
+        pythonCompatibilityCellId(
+          platform.platformFamilyId,
+          platform.pythonMinor,
+          platform.supportBoundary?.glibc
+        )
+      )
+    );
+    const indexedCells = new Set(application.branchSizes.map((branch) => branch.cellId));
+    for (const cell of expectedCells) {
+      if (!indexedCells.has(cell)) {
+        errors.push(`Python application ${application.targetId} is missing branch ${cell}`);
+      }
+    }
+    for (const cell of indexedCells) {
+      if (!expectedCells.has(cell)) {
+        errors.push(`Python application ${application.targetId} has unexpected branch ${cell}`);
+      }
+    }
+    for (const platform of plan.platforms) {
+      const cellId = pythonCompatibilityCellId(
+        platform.platformFamilyId,
+        platform.pythonMinor,
+        platform.supportBoundary?.glibc
+      );
+      const branch = application.branchSizes.find((candidate) => candidate.cellId === cellId);
+      if (!branch) {
+        continue;
+      }
+      const environment = resolveTargetEnvironment(targetEnvironment(branch, plan));
+      const packageNames = new Set(platform.packages.map((pkg) => normalizePackageName(pkg.name)));
+      for (const pkg of platform.packages) {
+        for (const dependency of pkg.dependencies) {
+          if (!packageNames.has(normalizePackageName(dependency))) {
+            errors.push(
+              `Python application ${application.targetId} has an open dependency edge in ${cellId}: ${pkg.name}==${pkg.version} -> ${dependency}`
+            );
+          }
+        }
+        const wheels = index.artifacts.filter(
+          (artifact) =>
+            artifact.kind === 'wheel' &&
+            normalizePackageName(artifact.package ?? '') === normalizePackageName(pkg.name) &&
+            artifact.version === pkg.version &&
+            pkg.wheels.includes(artifact.filename) &&
+            application.artifactIds.includes(artifact.id) &&
+            artifact.references.some(
+              (reference) =>
+                reference.targetId === application.targetId && reference.cells.includes(cellId)
+            )
+        );
+        if (wheels.length === 0) {
+          errors.push(
+            `Python application ${application.targetId} has no wheel for ${pkg.name}==${pkg.version} in ${cellId}`
+          );
+          continue;
+        }
+        if (
+          !wheels.some((artifact) => {
+            const wheel = parseWheelFilename(artifact.filename);
+            const metadata = artifactMetadata.get(artifact.id);
+            return (
+              wheel !== undefined &&
+              wheelPriorityInEnvironment(wheel, environment) !== undefined &&
+              (!metadata?.requiresPython ||
+                versionSatisfies(`${platform.pythonMinor}.0`, metadata.requiresPython))
+            );
+          })
+        ) {
+          errors.push(
+            `Python application ${application.targetId} has no compatible wheel for ${pkg.name}==${pkg.version} in ${cellId}`
+          );
+        }
+      }
     }
   }
   if (

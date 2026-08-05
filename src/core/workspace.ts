@@ -32,6 +32,7 @@ import type {
   PythonApplicationVersionSelector,
   PythonRuntimePolicy,
 } from './python/application-intent.js';
+import { initialPythonApplicationMinors } from './python/application-intent.js';
 import { isValidPackageName, normalizePackageName } from './python/names.js';
 import { isValidSpecifierSet, normalizeVersion } from './python/pep440.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
@@ -288,7 +289,7 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
           id: 'desktop-x64',
           platforms: ['linux-glibc-x86_64'],
           version: 1,
-          wheelStrategy: 'all-compatible',
+          wheelStrategy: 'minimum-cover',
         },
       ],
       defaults: {
@@ -312,11 +313,6 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
       gitOwnerStrategy: 'preserve',
       output: defaultWorkspaceOutputDir,
       python: {
-        artifactTransfer: {
-          cpython: true,
-          uv: false,
-          uvVersions: [workspacePythonPlannerVersion],
-        },
         planner: {
           engine: 'uv',
           version: workspacePythonPlannerVersion,
@@ -390,7 +386,7 @@ export function workspaceSecretsPath(workspaceDir: string): string {
 
 function normalizePythonRuntimePolicy(value: unknown): PythonRuntimePolicy {
   if (value === undefined) {
-    return { policy: 'auto' };
+    return { policy: 'selected', versions: [...initialPythonApplicationMinors] };
   }
   if (
     !isRecord(value) ||
@@ -399,7 +395,7 @@ function normalizePythonRuntimePolicy(value: unknown): PythonRuntimePolicy {
     throw new Error('python-app target python policy must be auto, constrained, or selected');
   }
   if (value.policy === 'auto') {
-    return { policy: 'auto' };
+    return { policy: 'selected', versions: [...initialPythonApplicationMinors] };
   }
   if (value.policy === 'selected') {
     if (
@@ -1352,31 +1348,6 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   });
 }
 
-function addWorkspacePythonRuntimeTransfer(config: WorkspaceConfig): WorkspaceConfig {
-  const normalized = normalizeWorkspaceConfig(config);
-  if (normalized.schemaVersion !== 2 || normalized.python?.artifactTransfer) {
-    return normalized;
-  }
-  return normalizeWorkspaceConfig({
-    ...normalized,
-    python: {
-      ...(normalized.python ?? {
-        planner: {
-          engine: 'uv',
-          version: workspacePythonPlannerVersion,
-        },
-        publication: defaultPythonPublicationProfile(),
-        sourceIndex: defaultWorkspacePythonSourceIndex,
-      }),
-      artifactTransfer: {
-        cpython: true,
-        uv: false,
-        uvVersions: [workspacePythonPlannerVersion],
-      },
-    },
-  });
-}
-
 const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
   {
     apply: previewWorkspaceConfigMigration,
@@ -1398,13 +1369,6 @@ const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
     backupFileName: workspaceConfigPythonPublicationProfileBackupFileName,
     id: '0003-python-publication-profile',
     isApplied: (config) => config.schemaVersion !== 2 || Boolean(config.python?.publication),
-  },
-  {
-    apply: addWorkspacePythonRuntimeTransfer,
-    backupFileName: workspaceConfigPythonRuntimeTransferBackupFileName,
-    id: '0004-python-runtime-transfer',
-    isApplied: (config) =>
-      config.schemaVersion !== 2 || config.python?.artifactTransfer !== undefined,
   },
 ];
 

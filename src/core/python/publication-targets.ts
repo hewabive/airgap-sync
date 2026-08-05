@@ -13,6 +13,7 @@ export interface PythonPublicationProfile {
   genericOwner?: GiteaOwnerTarget;
   owner: GiteaOwnerTarget;
   pypiOwner?: GiteaOwnerTarget;
+  publishEvidence?: boolean;
   visibility: GiteaOwnerVisibility;
 }
 
@@ -20,6 +21,7 @@ export interface ResolvedPythonPublicationProfile {
   genericOwner: ResolvedGiteaOwner;
   ownerRequirements: GiteaOwnerRequirement[];
   pypiOwner: ResolvedGiteaOwner;
+  publishEvidence: boolean;
   visibility: GiteaOwnerVisibility;
 }
 
@@ -84,6 +86,7 @@ export function normalizePythonPublicationProfile(value: unknown): PythonPublica
     ...(value.pypiOwner !== undefined
       ? { pypiOwner: normalizeOwnerTarget(value.pypiOwner, 'python.publication.pypiOwner') }
       : {}),
+    ...(value.publishEvidence === true ? { publishEvidence: true } : {}),
     visibility,
   };
 }
@@ -97,6 +100,7 @@ export function resolvePythonPublicationProfile(
     profile.genericOwner ?? profile.owner,
     authenticatedUser
   );
+  const publishEvidence = profile.publishEvidence === true;
   return {
     genericOwner,
     ownerRequirements: mergeGiteaOwnerRequirements([
@@ -105,13 +109,18 @@ export function resolvePythonPublicationProfile(
         purposes: ['pypi'],
         visibility: profile.visibility,
       },
-      {
-        ...genericOwner,
-        purposes: ['generic'],
-        visibility: profile.visibility,
-      },
+      ...(publishEvidence
+        ? [
+            {
+              ...genericOwner,
+              purposes: ['generic' as const],
+              visibility: profile.visibility,
+            },
+          ]
+        : []),
     ]),
     pypiOwner,
+    publishEvidence,
     visibility: profile.visibility,
   };
 }

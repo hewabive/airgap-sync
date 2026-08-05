@@ -1,7 +1,12 @@
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { applyBundle, type ApplyProgressEvent, type GiteaClient } from '../src/index.js';
+import {
+  applyBundle,
+  defaultPythonPublicationProfile,
+  type ApplyProgressEvent,
+  type GiteaClient,
+} from '../src/index.js';
 import * as fs from '../src/core/fs.js';
 import type { BundleManifest, DistTagsManifest, GitSourcesManifest } from '../src/types.js';
 import type { GitCommandInvocation } from '../src/core/git-fetch.js';
@@ -123,7 +128,7 @@ async function writePythonApplicationBundle(): Promise<void> {
     ],
     artifacts: [],
     createdAt: '2026-07-28T00:00:00.000Z',
-    schemaVersion: 2,
+    schemaVersion: 3,
     summary: { applications: 1, artifacts: 0, totalBytes: 0 },
   };
   await fs.writeJson(path.join(bundleDir, 'python/application-index.json'), index, { spaces: 2 });
@@ -266,6 +271,10 @@ describe('applyBundle', () => {
       generatedAt: '2026-07-28T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
       giteaClient: noopClient,
+      pythonPublicationProfile: {
+        ...defaultPythonPublicationProfile(),
+        publishEvidence: true,
+      },
       registryUrl: 'http://verdaccio.local:4873',
     });
 
@@ -303,6 +312,10 @@ describe('applyBundle', () => {
       giteaClient: {
         ...noopClient,
         createOrganization: () => Promise.reject(new Error('organization create failed')),
+      },
+      pythonPublicationProfile: {
+        ...defaultPythonPublicationProfile(),
+        publishEvidence: true,
       },
       registryUrl: 'http://verdaccio.local:4873',
     });

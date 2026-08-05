@@ -29,7 +29,7 @@ export interface PlatformCoveragePolicyExplanation {
   id: string;
   platforms: PlatformCoverageExplanation[];
   version: number;
-  wheelStrategy: 'all-compatible';
+  wheelStrategy: 'minimum-cover';
 }
 
 export function compareCompatibilityVersions(left: string, right: string): number {

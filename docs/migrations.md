@@ -22,12 +22,11 @@ See [Python Support](python.md).
 
 ## Registered migrations
 
-| id                                    | source                         | destination                      | backup                                                           |
-| ------------------------------------- | ------------------------------ | -------------------------------- | ---------------------------------------------------------------- |
-| `0001-workspace-schema-v2`            | workspace schema v1            | workspace schema v2              | `airgap-sync.json.v1.backup`                                     |
-| `0002-python-application-publication` | early schema v2 without owners | legacy publication defaults      | `airgap-sync.json.before-0002-python-publication.backup`         |
-| `0003-python-publication-profile`     | legacy Python owner strings    | typed Gitea publication profile  | `airgap-sync.json.before-0003-python-publication-profile.backup` |
-| `0004-python-runtime-transfer`        | external-only CPython default  | managed CPython transfer enabled | `airgap-sync.json.before-0004-python-runtime-transfer.backup`    |
+| id                                    | source                         | destination                     | backup                                                           |
+| ------------------------------------- | ------------------------------ | ------------------------------- | ---------------------------------------------------------------- |
+| `0001-workspace-schema-v2`            | workspace schema v1            | workspace schema v2             | `airgap-sync.json.v1.backup`                                     |
+| `0002-python-application-publication` | early schema v2 without owners | legacy publication defaults     | `airgap-sync.json.before-0002-python-publication.backup`         |
+| `0003-python-publication-profile`     | legacy Python owner strings    | typed Gitea publication profile | `airgap-sync.json.before-0003-python-publication-profile.backup` |
 
 `0001` maps legacy Python configuration into `python.legacySeed`, preserves all
 targets and common settings, and installs maintained Python application recipes.
@@ -42,11 +41,11 @@ strings so that `0003` has an explicit input.
 cannot be classified safely as users or organizations, so migration stops with an
 actionable request to configure `python.publication.owner` and its explicit kind.
 
-`0004` historically enabled verified CPython transfer while leaving optional uv binary
-transfer disabled. The fields remain supported for migration compatibility, but
-runtime/tool transfer is now considered a separate concern and the long-term target
-shape is undecided. Existing active application planning evidence is re-created on the
-next normal download so current publication documents cannot remain stale.
+Early development builds could write `python.artifactTransfer` and the backup filename
+`airgap-sync.json.before-0004-python-runtime-transfer.backup`. There is no registered
+`0004` migration now: new and migrated workspaces do not enable runtime transfer.
+Existing fields remain readable for 0.x compatibility and are ignored by normal
+application planning.
 
 ## Operator behavior
 

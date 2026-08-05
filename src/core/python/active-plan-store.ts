@@ -52,6 +52,28 @@ export interface WriteActivePythonApplicationPlanOptions {
 
 const activePlansDirectory = path.join('.airgap-sync', 'python-plans');
 
+export async function pruneInactivePythonApplicationPlans(
+  workspaceDir: string,
+  activeTargetIds: Iterable<string>
+): Promise<string[]> {
+  const root = path.resolve(workspaceDir, activePlansDirectory);
+  if (!(await fs.pathExists(root))) {
+    return [];
+  }
+  const active = new Set(activeTargetIds);
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const removed: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || active.has(entry.name)) {
+      continue;
+    }
+    pythonApplicationPlanPath(entry.name);
+    await fs.remove(path.join(root, entry.name));
+    removed.push(entry.name);
+  }
+  return removed.sort();
+}
+
 export function activePythonApplicationPlanDirectory(
   workspaceDir: string,
   targetId: string

@@ -55,7 +55,7 @@ export interface PythonPlanTransferArtifact {
 }
 
 export interface PythonRuntimeContract {
-  uvVersions: string[];
+  uvVersions?: string[];
   platforms: {
     implementation: 'CPython';
     platformFamilyId: string;

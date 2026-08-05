@@ -222,7 +222,7 @@ describe('KTransformers vertical slice', () => {
     expect(resolver.requests).toEqual([]);
   });
 
-  it('creates a complete Linux plan, runtime contract, and exact consumer lock', async () => {
+  it('creates a complete Linux plan for every requested Python minor', async () => {
     const resolver = new KTransformersResolver();
     const result = await planPythonApplication({
       cacheDir: '/cache',
@@ -264,6 +264,15 @@ describe('KTransformers vertical slice', () => {
     expect(plan.platforms).toEqual([
       expect.objectContaining({
         platformFamilyId: 'linux-glibc-x86_64',
+        pythonMinor: '3.11',
+        status: 'supported',
+        supportBoundary: {
+          glibc: '2.35',
+        },
+      }),
+      expect.objectContaining({
+        platformFamilyId: 'linux-glibc-x86_64',
+        pythonMinor: '3.12',
         status: 'supported',
         supportBoundary: {
           glibc: '2.35',
@@ -272,6 +281,7 @@ describe('KTransformers vertical slice', () => {
     ]);
     expect(plan.wheels.map((wheel) => wheel.filename)).toEqual([
       'kt_kernel-0.6.1.post1-cp311-cp311-manylinux_2_35_x86_64.whl',
+      'kt_kernel-0.6.1.post1-cp312-cp312-manylinux_2_35_x86_64.whl',
       'ktransformers-0.6.1.post1-py3-none-any.whl',
     ]);
     expect(plan.runtimeContract?.platforms[0]).toMatchObject({
@@ -290,6 +300,8 @@ describe('KTransformers vertical slice', () => {
         command: 'python',
       },
     ]);
-    expect(resolver.requests.map((request) => request.glibc)).toEqual(['2.28', '2.35']);
+    expect(
+      resolver.requests.map((request) => `${request.pythonMinor}:${request.glibc ?? 'no-glibc'}`)
+    ).toEqual(['3.11:2.28', '3.11:2.35', '3.12:2.28', '3.12:2.35']);
   });
 });

@@ -262,7 +262,13 @@ describe('pruneBundle', () => {
             filename: 'shared.whl',
             id: 'a'.repeat(64) + ':shared.whl',
             kind: 'wheel',
-            references: [{ platforms: ['linux-glibc-x86_64'], targetId: 'kept--linux' }],
+            references: [
+              {
+                cells: ['linux-glibc-x86_64--py311'],
+                platforms: ['linux-glibc-x86_64'],
+                targetId: 'kept--linux',
+              },
+            ],
             sha256: 'a'.repeat(64),
             size: 4,
             sourceUrl: 'https://example.test/shared.whl',
@@ -270,7 +276,7 @@ describe('pruneBundle', () => {
           },
         ],
         createdAt: generatedAt,
-        schemaVersion: 2,
+        schemaVersion: 3,
         summary: { applications: 1, artifacts: 1, totalBytes: 4 },
       },
       { spaces: 2 }

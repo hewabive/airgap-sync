@@ -3,9 +3,9 @@
 This document defines the intended Python product contract. It is the canonical source
 for Python scope, coverage, collection, publication, and consumer behavior.
 
-The implementation is being migrated to this contract. Existing bundle fields and CLI
-commands that expose immutable plans, generated locks, or managed CPython artifacts are
-transitional unless this document explicitly retains them.
+The normal application path implements this contract. Plans and resolver locks remain
+internal evidence. Legacy raw-PyPI and runtime-transfer fields are still readable, but
+they do not define normal application coverage.
 
 ## Goal
 
@@ -209,33 +209,25 @@ Verification must check that:
 Exact lock installation remains a useful additional test, not a substitute for testing
 normal repository resolution.
 
-## Current Transition
+## Implemented Boundary And Remaining Work
 
-The repository already implements platform-aware resolution, wheel validation,
-content-addressed storage, Gitea PyPI publication, reports, and optional runtime
-artifacts. The following behaviors are transitional and must not be treated as the
-long-term product contract:
+The application path now:
 
-- generated lock files as the required consumer path;
-- `--no-deps --require-hashes` as the only verified installation;
-- one automatically selected CPython minor when consumers use unknown existing
-  interpreters;
-- `all-compatible` wheel collection instead of minimum coverage;
-- `python.artifactTransfer.uvVersions` as an application setting;
-- CPython transfer enabled by default;
-- verification only against a generated lock rather than ordinary dependency
-  resolution from the collected bundle.
+- expands an unspecified Python selection to CPython 3.10–3.13;
+- resolves every requested platform/Python compatibility cell with the collector's
+  pinned `uv`;
+- keeps a minimum practical wheel cover for the resulting trees and deduplicates files
+  by content;
+- records exact cell references and checks dependency closure and wheel compatibility
+  statically;
+- verifies ordinary unlocked installs with both pip and uv against a temporary Simple
+  API containing only bundle files;
+- publishes wheels additively to Gitea PyPI, with Generic evidence disabled by default;
+- prunes inactive workspace plans and locally unreferenced bundle artifacts after a
+  successful full pruned download.
 
 Legacy raw PyPI, exact-wheel, runtime, requirements, and lockfile inputs remain readable
-during migration. They must stay clearly separated from the normal application flow.
-
-## Delivery Order
-
-1. Make this Python transfer contract and its acceptance tests authoritative.
-2. Verify plain `pip` and `uv` installation from a temporary bundle-only index.
-3. Model the complete CPython 3.10–3.13 × Windows/Linux x86-64 envelope.
-4. Ensure every target/cell tree is recursively complete and retains parent references.
-5. Replace `all-compatible` collection with minimum wheel coverage.
-6. Make target removal and local reference-based pruning match the npm lifecycle.
-7. Separate optional runtime/tool transfer from application targets.
-8. Expand platforms and sources only after the initial envelope is stable.
+through the 0.x compatibility period. Existing `python.artifactTransfer` fields are
+preserved when encountered but are ignored by normal application planning. A dedicated
+CPython/tool target model, broader indexes/platforms, and a full multi-platform Gitea
+integration matrix remain future work.
