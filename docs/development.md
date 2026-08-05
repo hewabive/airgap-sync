@@ -86,13 +86,18 @@ The KTransformers check exercises a difficult native-wheel boundary: broad
 Windows/Linux coverage fails, while the reviewed Linux branch can be collected. It is
 a useful fixture, not the definition of Python support. Today this test checks planning
 and transitional generated records; it does not yet prove that an ordinary client can
-install KTransformers from the final Gitea index or transfer model weights.
+install KTransformers from an index populated only with its collected bundle or
+transfer model weights.
 
-The Python end-to-end acceptance suite should publish into a clean Gitea owner and, for
-every supported compatibility cell, install representative applications with both
-ordinary pip resolution and ordinary uv resolution. The test environment must expose
-only the Gitea PyPI index. A lock-driven `--no-deps` install may remain as an additional
-integrity test, but cannot replace repository-resolution tests.
+The Python end-to-end acceptance suite should publish each test bundle into a temporary
+Gitea owner for test isolation and, for every supported compatibility cell, install
+representative applications with both ordinary pip resolution and ordinary uv
+resolution. The test environment must expose only that Gitea PyPI index. The clean
+owner is a test fixture, not a production constraint. A separate coexistence test
+should publish independent bundles and unrelated packages into one shared owner and
+confirm that each contributed application remains installable. A lock-driven
+`--no-deps` install may remain as an additional integrity test, but cannot replace
+repository-resolution tests.
 
 To measure sequential read and SHA-256 performance on the actual removable medium:
 
@@ -112,10 +117,12 @@ Suggested test groups:
 - Python coverage/recipe/planner decisions against captured fixtures;
 - CPython 3.10–3.13 × Windows/Linux x86-64 compatibility-cell expansion;
 - minimum wheel-cover selection, including universal and `abi3` sharing;
-- fixed-point resolution against the exact candidate set published to Gitea;
-- plain pip and uv installs against a clean, isolated Gitea PyPI owner;
+- complete recursive dependency trees down to leaves for every target and cell;
+- plain pip and uv installs against an index populated only from the bundle;
+- additive coexistence of independent bundles in one shared Gitea PyPI owner;
+- target removal and reference-safe pruning of only local bundle artifacts;
 - interrupted Python download/publication recovery and idempotent retries;
-- destination-state conflicts and reference-safe application artifact pruning.
+- exact-coordinate upload conflicts without whole-registry reconciliation.
 
 ## Safety Rules
 

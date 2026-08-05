@@ -29,7 +29,7 @@ Python package index. They do not need to know how `airgap-sync` produced its co
 
 Generated locks may remain useful for audit, diagnostics, or an operator who explicitly
 wants a frozen installation. They are not the normal consumer interface and are not
-required for repository correctness.
+required for bundle completeness.
 
 ## Compatibility Envelope
 
@@ -56,9 +56,10 @@ additional artifact sources without changing the Gitea PyPI consumer contract.
 
 ## Guarantee Boundary
 
-For every environment class declared supported by a completed plan, `airgap-sync` must
-publish enough Python artifacts for a standards-compliant client to resolve and install
-the selected application from Gitea without public-network access.
+For every environment class declared supported by a completed target collection,
+`airgap-sync` must bring the application and its recursive Python dependency tree down
+to the leaves, so a standards-compliant client can resolve and install it from Gitea
+without public-network access.
 
 The guarantee does not cover:
 
@@ -91,29 +92,49 @@ Complex applications are validation cases, not special architecture. Features su
 CPU, CUDA, or ROCm matter only when they change which Python artifacts and indexes must
 be collected. Driver installation remains outside `airgap-sync`.
 
-## Resolution And Repository Closure
+## Dependency Closure And Target Lifecycle
 
-The collector may use a pinned resolver version to discover candidate package versions
-for each environment class. That resolver is an implementation detail of the online
-collection process; it is not a required consumer version and does not define a matrix
-of consumer `uv` releases.
+Python follows the same transfer model as npm. For each application target and every
+declared compatibility cell, the collector resolves one complete recursive dependency
+tree and brings every wheel required by that tree. A successful bundle has no missing
+dependency edge and needs no source index after transfer.
 
-Planning must distinguish two graphs:
+The collector may use a pinned resolver version to choose that tree. The pin is an
+implementation and tool-integrity detail: it is not a required consumer version, does
+not define a matrix of consumer `uv` releases, and does not promise that another
+resolver will choose the same versions.
 
-1. the candidate graph resolved against the source indexes;
-2. the graph ordinary clients can resolve against the exact artifact set that will be
-   visible in Gitea.
+An application target is transfer intent, not permanent memory of Gitea. A typical
+one-time workflow is:
 
-The second graph is the product contract. Before a bundle is considered complete, its
-planned repository contents must be tested as a closed index for every environment
-class. If resolving against that closed index selects another valid candidate or
-exposes a missing dependency, collection must extend or constrain the repository and
-repeat until it reaches a fixed point.
+1. add the application target;
+2. download its complete Python tree;
+3. publish it to Gitea;
+4. remove the target when updates are no longer wanted;
+5. prune locally unreferenced bundle artifacts on a later full download.
 
-The state already present in the destination Gitea can affect resolution. The final
-design must therefore either account for that state or publish into an isolated,
-well-defined repository namespace or channel. Local bundle pruning alone is not a
-destination retention policy.
+Removing or pruning a target affects only the transfer workspace and removable-media
+bundle. Packages already published to Gitea remain there. Parent references are needed
+only to decide which local artifacts are still required by other active targets.
+
+## No Reproducibility Requirement
+
+`airgap-sync` does not guarantee or control the exact dependency graph selected later
+by pip, uv, Poetry, PDM, or another client. In particular, it does not:
+
+- require consumers to use the collector's resolver or lock;
+- require an exclusive or empty Gitea owner;
+- inventory all packages already present in Gitea;
+- coordinate independent `airgap-sync` workspaces that publish to the same owner;
+- reconcile or delete older published versions;
+- promise that two installations performed at different times select identical
+  versions.
+
+The guarantee is availability: every bundle contributed by `airgap-sync` contains a
+complete installable tree for its own targets and declared compatibility cells.
+Additional packages published by another process are an allowed additive extension of
+the shared registry. Deletion, replacement, or corruption of previously published
+artifacts is outside this guarantee.
 
 ## Artifact Selection And Size
 
@@ -121,9 +142,9 @@ Only compatible wheels are collected in the normal path. Source distributions an
 automatic PEP 517 builds remain excluded; an absent wheel is a coverage failure or a
 request for an explicitly supplied, reviewed wheel.
 
-The desired artifact set is the smallest set that covers every cell in the declared
-compatibility envelope and remains resolvable from the final Gitea index. This is not
-the same as downloading every compatible wheel:
+The desired artifact set is the smallest set that both covers every cell in the
+declared compatibility envelope and contains the complete dependency trees selected
+for the active targets. This is not the same as downloading every compatible wheel:
 
 - universal and `abi3` wheels should be reused across environment cells;
 - platform- and CPython-specific wheels are included only where needed;
@@ -132,8 +153,9 @@ the same as downloading every compatible wheel:
 - total and incremental bytes must be reported before transfer.
 
 Package versions can differ between environment classes when markers or wheel
-availability require it. The union published to Gitea must still be closed under normal
-consumer resolution.
+availability require it. Multiple active targets contribute a union of their trees;
+content-identical wheels are stored once and remain locally live while any target
+references them.
 
 ## Gitea Publication
 
@@ -145,9 +167,10 @@ Plans, reports, provenance, and optional operational artifacts may be published 
 Gitea Generic Packages, but successful installation must not depend on a consumer
 understanding an `airgap-sync`-specific document.
 
-Publication is additive unless an explicit destination lifecycle policy says otherwise.
-The tool must not assume that pruning the removable-media bundle removes old candidates
-from Gitea.
+Publication is additive. Multiple independent `airgap-sync` workspaces and other
+publishers may populate the same owner. `airgap-sync` verifies conflicts for the exact
+files it uploads but does not otherwise control or remember registry contents. Pruning
+the removable-media bundle never removes packages from Gitea.
 
 ## Python Runtimes And Package Managers
 
@@ -165,9 +188,10 @@ collector machine.
 
 ## Verification
 
-The primary acceptance test is an unlocked install from the final closed index for every
-supported environment class. At minimum, representative `pip` and `uv` clients must be
-tested with only the Gitea index configured:
+The primary acceptance test is an unlocked install from a clean temporary index
+containing only the bundle's Python artifacts. This proves that the bundle itself has a
+complete tree for every supported environment class. At minimum, representative `pip`
+and `uv` clients must be tested with only that index configured:
 
 ```bash
 python -m pip install --index-url GITEA_SIMPLE_URL APP
@@ -199,19 +223,19 @@ long-term product contract:
 - `all-compatible` wheel collection instead of minimum coverage;
 - `python.artifactTransfer.uvVersions` as an application setting;
 - CPython transfer enabled by default;
-- verification only against a generated lock rather than against the final sparse
-  Gitea index.
+- verification only against a generated lock rather than ordinary dependency
+  resolution from the collected bundle.
 
 Legacy raw PyPI, exact-wheel, runtime, requirements, and lockfile inputs remain readable
 during migration. They must stay clearly separated from the normal application flow.
 
 ## Delivery Order
 
-1. Make this repository contract and its acceptance tests authoritative.
-2. Verify plain `pip` and `uv` installation from a temporary closed index.
+1. Make this Python transfer contract and its acceptance tests authoritative.
+2. Verify plain `pip` and `uv` installation from a temporary bundle-only index.
 3. Model the complete CPython 3.10–3.13 × Windows/Linux x86-64 envelope.
-4. Resolve and validate the final sparse-index closure to a fixed point.
+4. Ensure every target/cell tree is recursively complete and retains parent references.
 5. Replace `all-compatible` collection with minimum wheel coverage.
-6. Separate optional runtime/tool transfer from application targets.
-7. Define destination namespace and retention behavior.
+6. Make target removal and local reference-based pruning match the npm lifecycle.
+7. Separate optional runtime/tool transfer from application targets.
 8. Expand platforms and sources only after the initial envelope is stable.

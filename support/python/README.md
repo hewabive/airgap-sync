@@ -70,6 +70,7 @@ or runtime artifacts to Gitea Generic Packages.
 
 These records support migration and auditing, but they are not the intended consumer
 interface. The target implementation publishes a minimum wheel set to Gitea PyPI and
-validates normal dependency-resolving pip and uv installs against that final sparse
-index. Plans, locks, templates, and optional runtime archives may change format or move
-to a separate target without changing how consumers install applications.
+validates normal dependency-resolving pip and uv installs against an index populated
+only from that bundle. Plans, locks, templates, and optional runtime archives may
+change format or move to a separate target without changing how consumers install
+applications.

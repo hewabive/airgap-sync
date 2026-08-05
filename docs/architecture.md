@@ -6,8 +6,8 @@ registries through normal publication APIs.
 The product direction is broader: a portable airgap dependency sync tool for projects
 that combine Git repositories, npm registry dependencies, npm Git dependencies, and
 Python applications. The npm/Verdaccio bundle, Python application planner, Git mirror
-transfer, fixed-point collection, and top-level publish orchestration are the main
-architectural layers.
+transfer, npm/Git fixed-point collection, and top-level publish orchestration are the
+main architectural layers.
 
 ## Problem
 
@@ -46,9 +46,9 @@ workspace targets / package specs / package.json / package list
   -> inspect package manifests from tarballs
   -> fetch Git dependencies as bundle-local mirrors
   -> recurse dependencies
-  -> resolve each Python application for every requested compatibility cell
+  -> resolve each Python application tree to its leaves for every compatibility cell
   -> minimize the wheels-only union that covers the declared envelope
-  -> validate normal package resolution against the planned sparse Python index
+  -> validate normal package resolution against a bundle-only Python index
   -> write airgap bundle
 
 airgap bundle
@@ -71,7 +71,7 @@ online removable media
   -> download npm tarballs
   -> mirror Git repositories
   -> plan Python repository coverage independently of collector OS/architecture
-  -> validate the planned Gitea index to a dependency fixed point
+  -> collect each selected Python dependency tree down to its leaves
   -> download the content-addressed minimum wheel union
   -> scan manifests from newly mirrored Git dependencies
   -> repeat npm/Git collection until no new inputs are found
@@ -205,18 +205,17 @@ installs normally with a standards-compatible client. It must not need an
 `airgap-sync` plan, lock, resolver version, or Generic Package in order to discover and
 install Python dependencies.
 
-Planning has two distinct responsibilities:
+Planning has two responsibilities:
 
-1. use a reviewed resolver and source-index metadata to discover candidate package
-   versions for every environment cell;
-2. prove that ordinary clients can resolve an installable graph from the exact sparse
-   index that will be visible in Gitea.
+1. use a reviewed resolver and source-index metadata to choose one complete recursive
+   dependency tree for every application/environment cell;
+2. prove that ordinary clients can install from an index populated only with the
+   resulting bundle artifacts.
 
-The second graph is authoritative. Planning repeats against the planned closed index
-until package versions, dependencies, and compatible wheels reach a fixed point. A
-shared destination can contain candidates from previous publications, so destination
-state must either be included in validation or isolated by a defined publication
-namespace.
+There is no requirement for consumers to select the same versions as the collector.
+The bundle must merely contribute at least one complete installable tree. Packages
+already present in Gitea, later additive publications, and other independent
+`airgap-sync` workspaces are outside planning and need not be inventoried.
 
 Collection is wheels-only. Rather than retaining every compatible build, the planner
 selects the smallest content-addressed wheel union that covers all declared cells.
@@ -232,6 +231,10 @@ outside the bundle.
 Locks and resolver evidence may be retained for audit or an explicitly frozen install,
 but are not the normal consumer contract. A pinned collector `uv` is likewise an
 internal implementation detail rather than a consumer compatibility dimension.
+
+Target ownership follows the npm model. Active targets and their `requiredBy` edges
+keep local bundle objects alive. Removing a one-time target allows locally unreferenced
+objects to be pruned, but never removes packages already published to Gitea.
 
 Optional transfer of CPython runtimes or package-manager binaries is a separate concern
 and will not be implied by adding an application target. `airgap-sync` does not install
@@ -257,11 +260,6 @@ scan project package.json files
   -> scan package.json files from newly mirrored Git repositories
   -> repeat until no new npm requirements and no new Git repositories appear
 ```
-
-Python repository coverage has a separate fixed point: resolve the selected application
-against the exact planned Gitea artifact set for every compatibility cell, add any
-missing package/wheel closure, and repeat until ordinary resolution no longer changes
-the required set.
 
 If a new Git repository is cloned or updated in a way that exposes new manifests, the
 npm resolver must run again before the bundle is considered complete.

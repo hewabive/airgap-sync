@@ -40,8 +40,9 @@ been tested with Verdaccio and Gitea:
 - platform-aware Python application collection for Windows and glibc Linux x86-64,
   with wheel validation, inferred glibc boundaries, content-addressed storage, and
   Gitea PyPI publishing;
-- transitional Python plans and locks while ordinary lock-free resolution against the
-  final Gitea index is being made the primary verified consumer path;
+- transitional Python plans and locks while ordinary dependency-resolving installs
+  from an index populated only with the collected bundle are made the primary
+  completeness check;
 - Git dependency discovery and mirroring;
 - npm publish with temporary tags, dist-tag restoration, and bundled `latest` handling;
 - Gitea repository creation or publishing to already-created Git repositories;
@@ -49,7 +50,7 @@ been tested with Verdaccio and Gitea:
   Git/Python application targets;
 - append-only download and publish run reports under `airgap-bundle/runs/`.
 
-Remaining Python work focuses on sparse-index closure validation, minimum wheel
+Remaining Python work focuses on complete per-target dependency trees, minimum wheel
 coverage, ordinary `pip`/`uv` installs without an airgap-sync lock, and separating
 optional runtime transfer from package repository population.
 
@@ -180,10 +181,16 @@ ABI, libc, extras, and artifact-changing features bound what must be transferred
 Unsupported environments are reported rather than silently omitted. System packages,
 drivers, services, and model weights remain outside the Python dependency bundle.
 
-Collection is wheels-only. The target design minimizes the union of wheels needed to
-cover the envelope, publishes their standard dependency metadata to Gitea, and verifies
-ordinary resolution against that exact closed index. Universal and `abi3` wheels are
-shared across compatible environments; content-identical files are stored once.
+Collection is wheels-only. The target design brings every selected dependency tree down
+to its leaves, minimizes the union of wheels needed to cover the envelope, and verifies
+ordinary resolution against an index populated only from the bundle. Universal and
+`abi3` wheels are shared across compatible environments; content-identical files are
+stored once.
+
+As with npm, `airgap-sync` does not own the destination registry or promise a
+reproducible resolver result. Multiple workspaces and other publishers may add packages
+to the same Gitea owner. Removing a one-time target later prunes only locally
+unreferenced bundle files; packages already published to Gitea remain available.
 
 The current implementation already provides platform-aware planning, wheel/hash
 validation, deduplicated storage, and Gitea PyPI publication. Its generated locks,
@@ -296,9 +303,10 @@ tarballs and wheels, package identity and hashes, reports, and Git metadata.
 `airgap-sync verify install ./airgap-bundle` runs real package-manager installs against
 closed-network services. The current Python verifier still installs a generated exact
 lock when a matching interpreter is available. This is transitional: the primary
-Python acceptance path will install the application normally from the final Gitea
-index with representative `pip` and `uv` clients. It does not yet enforce a network-deny
-sandbox. Production Python provisioning remains outside `airgap-sync`.
+Python acceptance path will populate a temporary index only from the bundle and install
+the application normally with representative `pip` and `uv` clients. It does not yet
+enforce a network-deny sandbox. Production Python provisioning remains outside
+`airgap-sync`.
 
 pnpm v11 treats packages published into local Verdaccio as newly published packages.
 For closed-network consumers that install trusted project lockfiles, configure pnpm to

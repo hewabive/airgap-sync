@@ -97,12 +97,12 @@ existing implementation and optional runtime artifacts; they are not consumer
 requirements. The target contract no longer asks operators to enumerate consumer
 package-manager versions.
 
-`download` plans every selected application across the requested platform/Python
-envelope. The long-term ready condition is stronger than producing a lock: ordinary
-clients must be able to resolve the application from the exact sparse artifact set that
-will be published to Gitea. Shared wheels are stored once. The separate `plan` command
-remains useful for review, size estimates, and explicit refresh while the implementation
-is migrated.
+`download` resolves every selected application across the requested platform/Python
+envelope and follows each dependency tree down to its leaves. The ready condition is
+stronger than producing a lock: ordinary clients must be able to install from an index
+populated only with the bundle's artifacts. Shared wheels are stored once. The separate
+`plan` command remains useful for review, size estimates, and explicit refresh while the
+implementation is migrated.
 
 Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
 `python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.
@@ -127,6 +127,11 @@ airgap-sync download --target 2
 
 Partial target downloads update the shared bundle but skip pruning, even if pruning is
 enabled in defaults, so dependencies for other configured targets are not removed.
+
+For a one-time transfer, remove the application target after a successful publish. A
+later full download plus prune removes its locally unreferenced wheels while preserving
+anything still required by another active target. This has no effect on packages
+already published to Gitea.
 
 The download step fetches configured Git targets as bare mirrors under
 `airgap-bundle/git-mirrors/`, scans package manifests from those mirrors, includes
@@ -325,6 +330,10 @@ the PyPI repository and transitional Generic artifacts use the managed public
 `python.publication.genericOwner` only when a separate namespace is operationally
 useful.
 
+The PyPI owner may also receive packages from other `airgap-sync` workspaces or other
+publishers. Publication is additive; this workflow neither inventories unrelated
+packages nor attempts to make the destination match the local bundle exactly.
+
 If Git repositories are created by another process, or the target Git host is not
 Gitea-compatible, skip repository provisioning:
 
@@ -398,7 +407,7 @@ Python consumer infrastructure provides a CPython inside the published compatibi
 envelope and any system prerequisites. `airgap-sync` does not create or manage that
 production environment. Current `verify install` still exercises the transitional
 generated-lock path; it must be extended to verify ordinary `pip` and `uv` resolution
-against the final Gitea index.
+against an index populated only from the collected bundle.
 
 pnpm v11 applies `minimumReleaseAge: 1440` by default and verifies loaded lockfiles
 unless `trustLockfile` is enabled. Because `airgap-sync` fills Verdaccio through
@@ -522,7 +531,8 @@ mirrors, or writing global Git config.
   rewrites, but it does not yet enforce a network-deny sandbox. Use
   `--ignore-scripts` when lifecycle scripts should not execute during verification.
 - Python verification currently installs a generated lock rather than proving ordinary
-  `pip install APP` and `uv pip install APP` against the final sparse Gitea index.
+  `pip install APP` and `uv pip install APP` against an index populated only from the
+  collected bundle.
 - Python collection still uses `all-compatible` wheel expansion instead of minimizing
   the artifact set that covers CPython 3.10–3.13 on Windows/Linux x86-64.
 - Consumer `uvVersions` and default CPython transfer are transitional and still need to

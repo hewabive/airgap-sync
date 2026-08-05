@@ -17,9 +17,12 @@ Python application health checks run only during explicit install verification a
 inside its temporary environment, but a workspace recipe remains trusted executable
 policy. Review custom recipes before use. Python collection is wheels-only and verifies
 artifact identity and hashes; this protects transfer integrity, not against malicious
-upstream package code. Generated locks are optional evidence. The security/completeness
-claim depends on ordinary clients resolving only from the validated Gitea PyPI index,
-not on consumers following an `airgap-sync` lock.
+upstream package code. Generated locks are optional evidence. Completeness means that
+each collected target brings its recursive dependency tree down to leaves for every
+declared compatibility cell. It is tested with ordinary clients against an index
+populated only from that bundle; it does not require consumers to follow an
+`airgap-sync` lock or require airgap-sync to control all packages in the shared Gitea
+owner. Consumer configuration should still avoid unintended public-index fallback.
 
 The tool is designed to avoid storing credentials in workspace config files. Pass
 Gitea tokens through `GITEA_TOKEN` where possible; command-line token arguments

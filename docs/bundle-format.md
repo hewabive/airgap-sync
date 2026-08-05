@@ -200,9 +200,9 @@ documents. Tokens, authenticated login, publication-run timestamps, and upload r
 are excluded. Therefore a byte-identical application bundle can be retried
 idempotently, changed evidence documents receive new immutable Generic Package
 versions, and the same collected files can be uploaded to another Gitea deployment
-without downloading the wheels again. Repository completeness still has to obey the
-destination-state policy in [Python Support](python.md). Generic Package objects are
-not part of normal Python dependency resolution.
+without downloading the wheels again. Bundle completeness is established independently
+of other packages already present at the destination. Generic Package objects are not
+part of normal Python dependency resolution.
 
 ## Reports
 

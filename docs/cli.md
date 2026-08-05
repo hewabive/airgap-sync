@@ -71,8 +71,9 @@ requirements; no separate npm target is needed.
 policy; repeatable `--platform` creates target-local coverage instead. The initial
 maximum supported envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
 Repeat `--python-version` to request exact minor branches; the target design covers the
-declared range and publishes a resolvable sparse index rather than requiring consumers
-to use its planning lock. Repeat `--include-version` with
+declared range by collecting a complete recursive dependency tree for every
+compatibility cell rather than requiring consumers to use its planning lock. Repeat
+`--include-version` with
 an exact PEP 440 version or `latest` to include alternative application releases in one
 target. Every exact release must satisfy the requested Python/platform matrix; `latest`
 falls back only among stable releases until it finds a complete closure. Exact and
@@ -156,7 +157,7 @@ advanced entry point for resolving in advance, forcing an update, or supplying a
 platform with wheels-only policy, and store evidence under
 `.airgap-sync/python-plans/`. The resolver pin belongs to collection and says nothing
 about consumer `uv` versions. Planning must evolve to validate ordinary resolution
-against the exact sparse index intended for Gitea.
+against a temporary index populated only from the collected bundle.
 
 Large HTTP artifacts use one resumable download model, including the pinned `uv`, npm
 tarballs, Python wheels, CPython runtimes, and application artifacts. A slow transfer
@@ -483,7 +484,9 @@ published lock from Gitea, installs with wheels-only, `--no-deps`, and
 compatible interpreter is available, it records a clear skip. This lock-based path is
 transitional. The acceptance path defined in [Python Support](python.md) is an ordinary
 dependency-resolving `pip install APP` and an equivalent `uv` install against the
-final Gitea PyPI index for every supported environment cell.
+bundle-only test index for every supported environment cell. Publishing that complete
+tree into a shared Gitea owner does not require inventorying or reconciling unrelated
+packages already there.
 
 When the detected package manager is pnpm, `verify install` sets `trustLockfile: true`
 for that verification process. This avoids false failures from pnpm v11's default
