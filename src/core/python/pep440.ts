@@ -4,6 +4,10 @@ export function isValidVersion(version: string): boolean {
   return valid(version) !== null;
 }
 
+export function normalizeVersion(version: string): string | null {
+  return valid(version);
+}
+
 export function isValidSpecifierSet(specifiers: string): boolean {
   return validRange(specifiers);
 }

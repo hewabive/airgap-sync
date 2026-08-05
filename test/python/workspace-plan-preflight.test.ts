@@ -5,11 +5,17 @@ import { semanticDigest } from '../../src/core/canonical-json.js';
 import * as fs from '../../src/core/fs.js';
 import type { ActivePythonApplicationPlan } from '../../src/core/python/active-plan-store.js';
 import type { PythonApplicationRecipe } from '../../src/core/python/application-recipe.js';
+import type { PythonApplicationVersionSelector } from '../../src/core/python/application-intent.js';
+import {
+  pythonApplicationSelectorId,
+  pythonApplicationVariantId,
+} from '../../src/core/python/application-paths.js';
 import { platformCoveragePolicyDigest } from '../../src/core/python/coverage-policy.js';
 import { createPythonEnvironmentPlan } from '../../src/core/python/environment-plan.js';
 import { ensureWorkspacePythonApplicationPlans } from '../../src/core/python/workspace-plan-preflight.js';
 import {
   initWorkspace,
+  pythonApplicationIntentForVersionSelector,
   resolveWorkspacePythonApplication,
   type WorkspaceConfig,
   type WorkspacePythonApplicationTarget,
@@ -36,13 +42,16 @@ function applicationTarget(spec = 'demo'): WorkspacePythonApplicationTarget {
 function activePlanFor(
   workspaceConfig: WorkspaceConfig,
   target: WorkspacePythonApplicationTarget,
-  recipe?: PythonApplicationRecipe
+  recipe?: PythonApplicationRecipe,
+  selector?: PythonApplicationVersionSelector,
+  applicationVersion = '1.0.0'
 ): ActivePythonApplicationPlan {
   const resolved = resolveWorkspacePythonApplication(workspaceConfig, target);
+  const selected = selector ?? resolved.versionSelection.selectors[0]!;
   const plan = createPythonEnvironmentPlan({
     application: {
       name: resolved.intent.application.name,
-      version: '1.0.0',
+      version: applicationVersion,
     },
     coverage: {
       digest: platformCoveragePolicyDigest(resolved.coveragePolicy),
@@ -50,7 +59,7 @@ function activePlanFor(
       policy: resolved.coveragePolicy,
     },
     createdAt: '2026-07-27T00:00:00.000Z',
-    intent: resolved.intent,
+    intent: pythonApplicationIntentForVersionSelector(resolved, selected),
     platforms: [],
     ...(recipe
       ? {
@@ -129,7 +138,9 @@ describe('workspace Python application plan preflight', () => {
 
     expect(planned).toEqual([[1]]);
     expect(result.plannedTargetIndexes).toEqual([1]);
-    expect(result.targets).toMatchObject([{ targetId: 'demo--desktop-x64', targetIndex: 1 }]);
+    expect(result.targets).toMatchObject([
+      { targetId: 'demo--desktop-x64--version-1.0.0', targetIndex: 1 },
+    ]);
   });
 
   it('reuses a current plan without invoking the planner', async () => {
@@ -271,7 +282,50 @@ describe('workspace Python application plan preflight', () => {
     });
 
     expect(result.plannedTargetIndexes).toEqual([2]);
-    expect(result.targets).toMatchObject([{ targetId: 'second--desktop-x64', targetIndex: 2 }]);
+    expect(result.targets).toMatchObject([
+      { targetId: 'second--desktop-x64--version-1.0.0', targetIndex: 2 },
+    ]);
+  });
+
+  it('requires every exact/latest selector and deduplicates the resolved variant', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    target.application.versionSelection = {
+      selectors: [{ type: 'exact', version: '0.25.1' }, { type: 'latest-compatible' }],
+    };
+    const resolved = resolveWorkspacePythonApplication(config, target);
+    const stored = new Map<string, ActivePythonApplicationPlan>();
+
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      planTargets: (indexes) => {
+        expect(indexes).toEqual([1]);
+        for (const selector of resolved.versionSelection.selectors) {
+          stored.set(
+            pythonApplicationSelectorId(
+              resolved.intent.application.name,
+              resolved.coveragePolicy.id,
+              selector
+            ),
+            activePlanFor(config, target, undefined, selector, '0.25.1')
+          );
+        }
+        return Promise.resolve();
+      },
+      readActivePlan: (_workspace, targetId) => {
+        const plan = stored.get(targetId);
+        return plan ? Promise.resolve(plan) : Promise.reject(new Error('missing'));
+      },
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+
+    expect(result.plannedTargetIndexes).toEqual([1]);
+    expect(result.targets).toHaveLength(1);
+    expect(result.targets[0]).toMatchObject({
+      selector: { type: 'exact', version: '0.25.1' },
+      selectionId: 'demo--desktop-x64',
+      targetId: pythonApplicationVariantId('demo', '0.25.1', 'desktop-x64'),
+    });
   });
 
   it('fails if planning does not produce a current plan', async () => {

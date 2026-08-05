@@ -51,6 +51,34 @@ export interface PythonIndexClient {
   getProject(name: string): Promise<PythonProjectIndex>;
 }
 
+export class MemoizedPythonIndexClient implements PythonIndexClient {
+  readonly #delegate: PythonIndexClient;
+  readonly #projects = new Map<string, Promise<PythonProjectIndex>>();
+
+  constructor(delegate: PythonIndexClient) {
+    this.#delegate = delegate;
+  }
+
+  get sourceIndex(): string {
+    return this.#delegate.sourceIndex;
+  }
+
+  getMetadata(file: PythonIndexFile, cache: PythonMetadataCache): Promise<PythonMetadataResult> {
+    return this.#delegate.getMetadata(file, cache);
+  }
+
+  getProject(name: string): Promise<PythonProjectIndex> {
+    const key = normalizePackageName(name);
+    const existing = this.#projects.get(key);
+    if (existing) {
+      return existing;
+    }
+    const request = this.#delegate.getProject(key);
+    this.#projects.set(key, request);
+    return request;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -12,6 +12,7 @@ import {
   pythonApplicationIndexPath,
   pythonApplicationPlanDirectory,
   pythonApplicationPlanPath,
+  pythonApplicationTargetId,
   pythonOptionalArtifactsDirectory,
   pythonWheelArtifactsDirectory,
 } from './application-paths.js';
@@ -87,6 +88,7 @@ export interface PythonApplicationBundleEntry {
   planDiffPath: string;
   planPath: string;
   prerequisiteReportPath: string;
+  selectionId?: string;
   targetId: string;
 }
 
@@ -157,6 +159,7 @@ export interface DownloadPythonApplicationPlansOptions {
   stallTimeoutMs?: number;
   targets: {
     activePlan: ActivePythonApplicationPlan;
+    selectionId?: string;
     targetId: string;
   }[];
 }
@@ -482,10 +485,15 @@ function mergeIndex(
   createdAt: string
 ): PythonApplicationBundleIndex {
   const selectedTargetIds = new Set(selectedEntries.map((entry) => entry.targetId));
+  const selectedSelectionIds = new Set(
+    selectedEntries.map((entry) => entry.selectionId ?? entry.targetId)
+  );
   const applications = [
     ...(replaceAll
       ? []
-      : (current?.applications ?? []).filter((entry) => !selectedTargetIds.has(entry.targetId))),
+      : (current?.applications ?? []).filter(
+          (entry) => !selectedSelectionIds.has(entry.selectionId ?? entry.targetId)
+        )),
     ...selectedEntries,
   ].sort((left, right) => left.targetId.localeCompare(right.targetId));
   const artifactsById = new Map(
@@ -993,7 +1001,7 @@ export async function downloadPythonApplicationPlans(
     }
   }
   const entries = options.targets
-    .map(({ activePlan, targetId }) => {
+    .map(({ activePlan, selectionId, targetId }) => {
       const locks = consumerLocks.get(targetId);
       if (!locks) {
         return undefined;
@@ -1017,6 +1025,7 @@ export async function downloadPythonApplicationPlans(
           pythonApplicationPlanDirectory(targetId),
           'prerequisites.json'
         ),
+        ...(selectionId ? { selectionId } : {}),
         targetId,
       };
     })
@@ -1147,6 +1156,13 @@ export async function verifyPythonApplicationBundle(
       environmentPlan = plan;
       if (plan.planId !== application.planId) {
         errors.push(`Python application plan ID mismatch: ${application.targetId}`);
+      }
+      if (
+        application.selectionId !== undefined &&
+        application.selectionId !==
+          pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id)
+      ) {
+        errors.push(`Python application selection ID mismatch: ${application.targetId}`);
       }
     } catch (error) {
       errors.push(

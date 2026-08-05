@@ -26,9 +26,14 @@ import {
   type InlinePlatformCoveragePolicy,
   type PlatformCoveragePolicy,
 } from './python/coverage-policy.js';
-import type { PythonApplicationIntent, PythonRuntimePolicy } from './python/application-intent.js';
+import type {
+  PythonApplicationIntent,
+  PythonApplicationVersionSelection,
+  PythonApplicationVersionSelector,
+  PythonRuntimePolicy,
+} from './python/application-intent.js';
 import { isValidPackageName, normalizePackageName } from './python/names.js';
-import { isValidSpecifierSet } from './python/pep440.js';
+import { isValidSpecifierSet, normalizeVersion } from './python/pep440.js';
 import type { GitOwnerStrategy, GitPublishOwnerKind } from './git-publish-targets.js';
 import { installMaintainedPythonApplicationRecipes } from './python/maintained-recipes.js';
 import {
@@ -91,6 +96,7 @@ export interface WorkspacePythonApplicationTarget {
     features: Record<string, string>;
     recipe?: string;
     version?: string;
+    versionSelection?: PythonApplicationVersionSelection;
   };
   coverage: InlinePlatformCoveragePolicy | string;
   python: PythonRuntimePolicy;
@@ -159,6 +165,7 @@ export interface ResolvedWorkspacePythonApplication {
   coveragePolicy: PlatformCoveragePolicy;
   intent: PythonApplicationIntent;
   target: WorkspacePythonApplicationTarget;
+  versionSelection: PythonApplicationVersionSelection;
 }
 
 export interface WorkspaceConfig {
@@ -443,6 +450,53 @@ function normalizeStringMap(value: unknown, description: string): Record<string,
   return normalized;
 }
 
+function normalizePythonApplicationVersionSelection(
+  value: unknown
+): PythonApplicationVersionSelection | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value) || !Array.isArray(value.selectors) || value.selectors.length === 0) {
+    throw new Error('python-app application.versionSelection must contain one or more selectors');
+  }
+  const selectors: PythonApplicationVersionSelector[] = [];
+  const seen = new Set<string>();
+  for (const item of value.selectors) {
+    if (!isRecord(item) || (item.type !== 'exact' && item.type !== 'latest-compatible')) {
+      throw new Error('python-app version selector type must be exact or latest-compatible');
+    }
+    let selector: PythonApplicationVersionSelector;
+    if (item.type === 'exact') {
+      if (typeof item.version !== 'string') {
+        throw new Error('exact python-app version selector requires a PEP 440 version');
+      }
+      const version = normalizeVersion(item.version.trim());
+      if (!version) {
+        throw new Error(`Invalid exact python-app version: ${item.version}`);
+      }
+      selector = { type: 'exact', version };
+    } else {
+      const constraint =
+        typeof item.constraint === 'string' && item.constraint.trim()
+          ? item.constraint.trim()
+          : undefined;
+      if (constraint && !isValidSpecifierSet(constraint)) {
+        throw new Error(`Invalid latest-compatible python-app constraint: ${constraint}`);
+      }
+      selector = {
+        ...(constraint ? { constraint } : {}),
+        type: 'latest-compatible',
+      };
+    }
+    const key = semanticDigest(selector);
+    if (!seen.has(key)) {
+      selectors.push(selector);
+      seen.add(key);
+    }
+  }
+  return { selectors };
+}
+
 function normalizePythonApplicationTarget(
   value: Record<string, unknown>
 ): WorkspacePythonApplicationTarget {
@@ -464,6 +518,7 @@ function normalizePythonApplicationTarget(
     typeof application.version === 'string' && application.version.trim()
       ? application.version.trim()
       : undefined;
+  const versionSelection = normalizePythonApplicationVersionSelection(application.versionSelection);
   if (explicitVersion && parsed.requirement.specifier) {
     throw new Error(
       'python-app target version must be set either in spec or application.version, not both'
@@ -472,6 +527,11 @@ function normalizePythonApplicationTarget(
   const version = explicitVersion ?? (parsed.requirement.specifier || undefined);
   if (version && !isValidSpecifierSet(version)) {
     throw new Error('python-app application.version must be a valid version specifier');
+  }
+  if (versionSelection && version) {
+    throw new Error(
+      'python-app target must use either application.version or application.versionSelection'
+    );
   }
 
   let extras = parsed.requirement.extras;
@@ -503,6 +563,7 @@ function normalizePythonApplicationTarget(
         ? { recipe: application.recipe.trim() }
         : {}),
       ...(version ? { version } : {}),
+      ...(versionSelection ? { versionSelection } : {}),
     },
     coverage,
     python: normalizePythonRuntimePolicy(value.python),
@@ -897,6 +958,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
     throw new Error('python-app targets require workspace schemaVersion 2');
   }
   const coveragePolicyIds = new Set(coveragePolicies.map((policy) => policy.id));
+  const pythonApplicationSelections = new Set<string>();
   for (const target of targets) {
     if (
       target.type === 'python-app' &&
@@ -904,6 +966,15 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       !coveragePolicyIds.has(target.coverage)
     ) {
       throw new Error(`python-app target references unknown coverage policy: ${target.coverage}`);
+    }
+    if (target.type === 'python-app') {
+      const selection = `${target.spec}\0${semanticDigest(target.coverage)}`;
+      if (pythonApplicationSelections.has(selection)) {
+        throw new Error(
+          `Duplicate python-app target for ${target.spec} and the same coverage; combine its version selectors`
+        );
+      }
+      pythonApplicationSelections.add(selection);
     }
   }
 
@@ -1132,6 +1203,14 @@ export function resolveWorkspacePythonApplication(
   if (!coveragePolicy) {
     throw new Error(`Unknown coverage policy: ${target.coverage as string}`);
   }
+  const versionSelection = target.application.versionSelection ?? {
+    selectors: [
+      {
+        ...(target.application.version ? { constraint: target.application.version } : {}),
+        type: 'latest-compatible' as const,
+      },
+    ],
+  };
   return {
     coveragePolicy,
     intent: {
@@ -1154,6 +1233,21 @@ export function resolveWorkspacePythonApplication(
       updatePolicy: 'manual',
     },
     target,
+    versionSelection,
+  };
+}
+
+export function pythonApplicationIntentForVersionSelector(
+  application: ResolvedWorkspacePythonApplication,
+  selector: PythonApplicationVersionSelector
+): PythonApplicationIntent {
+  const version = selector.type === 'exact' ? `==${selector.version}` : selector.constraint;
+  return {
+    ...application.intent,
+    application: {
+      ...application.intent.application,
+      ...(version ? { version } : {}),
+    },
   };
 }
 
@@ -1431,8 +1525,9 @@ export async function addWorkspaceTarget(
   target: WorkspaceTarget
 ): Promise<{ added: boolean; config: WorkspaceConfig }> {
   const config = await readWorkspaceConfig(workspaceDir);
+  const normalizedTarget = normalizeWorkspaceTarget(target);
   if (
-    (target.type === 'pypi' || target.type === 'python-wheel') &&
+    (normalizedTarget.type === 'pypi' || normalizedTarget.type === 'python-wheel') &&
     !(
       config.schemaVersion === 1
         ? config.pythonTargetEnvironments
@@ -1441,14 +1536,55 @@ export async function addWorkspaceTarget(
   ) {
     throw new Error('pypi targets require pythonTargetEnvironments');
   }
-  const id = targetKey(target);
+  const id = targetKey(normalizedTarget);
   const exists = config.targets.some((existing) => targetKey(existing) === id);
+  if (
+    !exists &&
+    normalizedTarget.type === 'python-app' &&
+    config.targets.some(
+      (existing) =>
+        existing.type === 'python-app' &&
+        existing.spec === normalizedTarget.spec &&
+        semanticDigest(existing.coverage) === semanticDigest(normalizedTarget.coverage)
+    )
+  ) {
+    throw new Error(
+      `Python application ${normalizedTarget.spec} already has a target for this coverage; update its version selection instead`
+    );
+  }
   if (!exists) {
-    config.targets.push(target);
+    config.targets.push(normalizedTarget);
     await writeWorkspaceConfig(workspaceDir, config);
   }
 
   return { added: !exists, config };
+}
+
+export async function setWorkspacePythonApplicationVersionSelection(
+  workspaceDir: string,
+  index: number,
+  versionSelection: PythonApplicationVersionSelection
+): Promise<{
+  config: WorkspaceConfig;
+  target: WorkspacePythonApplicationTarget;
+}> {
+  const config = await readWorkspaceConfig(workspaceDir);
+  if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+  const current = config.targets[index - 1];
+  if (current?.type !== 'python-app') {
+    throw new Error(`Target ${String(index)} is not a python-app target`);
+  }
+  const application = { ...current.application, versionSelection };
+  delete application.version;
+  const target = normalizePythonApplicationTarget({
+    ...current,
+    application,
+  });
+  config.targets[index - 1] = target;
+  await writeWorkspaceConfig(workspaceDir, config);
+  return { config, target };
 }
 
 export async function removeWorkspaceTarget(

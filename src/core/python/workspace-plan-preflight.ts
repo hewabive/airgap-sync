@@ -4,9 +4,15 @@ import {
   type ActivePythonApplicationPlan,
 } from './active-plan-store.js';
 import type { PythonApplicationRecipe } from './application-recipe.js';
-import { pythonApplicationTargetId } from './application-paths.js';
+import {
+  pythonApplicationSelectorId,
+  pythonApplicationTargetId,
+  pythonApplicationVariantId,
+} from './application-paths.js';
+import type { PythonApplicationVersionSelector } from './application-intent.js';
 import { platformCoveragePolicyDigest } from './coverage-policy.js';
 import {
+  pythonApplicationIntentForVersionSelector,
   resolveWorkspacePythonApplication,
   type WorkspaceConfig,
   type WorkspacePythonApplicationTarget,
@@ -22,6 +28,8 @@ export interface WorkspacePythonPlanRequirement {
 
 export interface CurrentWorkspacePythonApplicationPlan {
   activePlan: ActivePythonApplicationPlan;
+  selector: PythonApplicationVersionSelector;
+  selectionId: string;
   targetId: string;
   targetIndex: number;
 }
@@ -46,8 +54,10 @@ export interface EnsureWorkspacePythonApplicationPlansResult {
 interface ExpectedWorkspacePythonApplicationPlan {
   includeCpython: boolean;
   includeUv: boolean;
+  intent: ReturnType<typeof pythonApplicationIntentForVersionSelector>;
   recipeDigest?: string;
   resolved: ReturnType<typeof resolveWorkspacePythonApplication>;
+  selector: PythonApplicationVersionSelector;
   targetId: string;
   targetIndex: number;
   uvVersions: string[];
@@ -62,7 +72,7 @@ function planIsCurrent(
   const includesUv =
     activePlan.plan.runtimeArtifacts?.some((artifact) => artifact.kind === 'uv') === true;
   return (
-    semanticDigest(activePlan.plan.intent) === semanticDigest(expected.resolved.intent) &&
+    semanticDigest(activePlan.plan.intent) === semanticDigest(expected.intent) &&
     activePlan.plan.coverage.digest ===
       platformCoveragePolicyDigest(expected.resolved.coveragePolicy) &&
     activePlan.plan.recipe?.digest === expected.recipeDigest &&
@@ -85,20 +95,25 @@ async function expectedPlans(
     }
     const resolved = resolveWorkspacePythonApplication(options.config, target);
     const recipe = await options.readRecipe(target);
-    expected.push({
-      includeCpython: options.config.python?.artifactTransfer?.cpython === true,
-      includeUv: options.config.python?.artifactTransfer?.uv === true,
-      ...(recipe ? { recipeDigest: semanticDigest(recipe) } : {}),
-      resolved,
-      targetId: pythonApplicationTargetId(
-        resolved.intent.application.name,
-        resolved.coveragePolicy.id
-      ),
-      targetIndex,
-      uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
-        options.config.python!.planner.version,
-      ],
-    });
+    expected.push(
+      ...resolved.versionSelection.selectors.map((selector) => ({
+        includeCpython: options.config.python?.artifactTransfer?.cpython === true,
+        includeUv: options.config.python?.artifactTransfer?.uv === true,
+        intent: pythonApplicationIntentForVersionSelector(resolved, selector),
+        ...(recipe ? { recipeDigest: semanticDigest(recipe) } : {}),
+        resolved,
+        selector,
+        targetId: pythonApplicationSelectorId(
+          resolved.intent.application.name,
+          resolved.coveragePolicy.id,
+          selector
+        ),
+        targetIndex,
+        uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
+          options.config.python!.planner.version,
+        ],
+      }))
+    );
   }
   return expected;
 }
@@ -108,18 +123,32 @@ export async function ensureWorkspacePythonApplicationPlans(
 ): Promise<EnsureWorkspacePythonApplicationPlansResult> {
   const readActivePlan = options.readActivePlan ?? readActivePythonApplicationPlan;
   const expected = await expectedPlans(options);
-  const current = new Map<number, CurrentWorkspacePythonApplicationPlan>();
+  const current = new Map<string, CurrentWorkspacePythonApplicationPlan>();
   const requirements: WorkspacePythonPlanRequirement[] = [];
+
+  const currentPlan = (
+    item: ExpectedWorkspacePythonApplicationPlan,
+    activePlan: ActivePythonApplicationPlan
+  ): CurrentWorkspacePythonApplicationPlan => ({
+    activePlan,
+    selector: item.selector,
+    selectionId: pythonApplicationTargetId(
+      activePlan.plan.application.name,
+      activePlan.plan.coverage.policy.id
+    ),
+    targetId: pythonApplicationVariantId(
+      activePlan.plan.application.name,
+      activePlan.plan.application.version,
+      activePlan.plan.coverage.policy.id
+    ),
+    targetIndex: item.targetIndex,
+  });
 
   for (const item of expected) {
     try {
       const activePlan = await readActivePlan(options.workspaceDir, item.targetId);
       if (planIsCurrent(activePlan, item)) {
-        current.set(item.targetIndex, {
-          activePlan,
-          targetId: item.targetId,
-          targetIndex: item.targetIndex,
-        });
+        current.set(item.targetId, currentPlan(item, activePlan));
       } else {
         requirements.push({
           reason: 'stale',
@@ -138,33 +167,38 @@ export async function ensureWorkspacePythonApplicationPlans(
 
   if (requirements.length > 0) {
     options.onPlanRequired?.(requirements);
-    const targetIndexes = requirements.map((requirement) => requirement.targetIndex);
+    const targetIndexes = [...new Set(requirements.map((requirement) => requirement.targetIndex))];
     await options.planTargets(targetIndexes);
-    for (const requirement of requirements) {
+    const plannedIndexes = new Set(targetIndexes);
+    for (const item of expected.filter((candidate) => plannedIndexes.has(candidate.targetIndex))) {
       let activePlan: ActivePythonApplicationPlan;
       try {
-        activePlan = await readActivePlan(options.workspaceDir, requirement.targetId);
+        activePlan = await readActivePlan(options.workspaceDir, item.targetId);
       } catch (error) {
         throw new Error(
-          `Planning did not create a usable active plan for ${requirement.targetId}: ${(error as Error).message}`
+          `Planning did not create a usable active plan for ${item.targetId}: ${(error as Error).message}`
         );
       }
-      const item = expected.find((candidate) => candidate.targetIndex === requirement.targetIndex)!;
       if (!planIsCurrent(activePlan, item)) {
         throw new Error(
-          `Planning produced a stale active plan for ${requirement.targetId}; the workspace changed while planning`
+          `Planning produced a stale active plan for ${item.targetId}; the workspace changed while planning`
         );
       }
-      current.set(requirement.targetIndex, {
-        activePlan,
-        targetId: requirement.targetId,
-        targetIndex: requirement.targetIndex,
-      });
+      current.set(item.targetId, currentPlan(item, activePlan));
+    }
+  }
+
+  const variants = new Map<string, CurrentWorkspacePythonApplicationPlan>();
+  for (const item of expected) {
+    const candidate = current.get(item.targetId)!;
+    const previous = variants.get(candidate.targetId);
+    if (!previous || (previous.selector.type !== 'exact' && candidate.selector.type === 'exact')) {
+      variants.set(candidate.targetId, candidate);
     }
   }
 
   return {
-    plannedTargetIndexes: requirements.map((requirement) => requirement.targetIndex),
-    targets: expected.map((item) => current.get(item.targetIndex)!),
+    plannedTargetIndexes: [...new Set(requirements.map((requirement) => requirement.targetIndex))],
+    targets: [...variants.values()],
   };
 }

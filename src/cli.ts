@@ -45,13 +45,16 @@ import {
   installMaintainedPythonApplicationRecipe,
   listBuiltInPlatformFamilies,
   migrateWorkspaceConfig,
+  MemoizedPythonIndexClient,
   normalizeMachineProbeFacts,
   normalizePythonApplicationRecipe,
   packageName,
   packageVersion,
   parseRootSpecs,
   planPythonApplication,
-  pythonApplicationTargetId,
+  pythonApplicationIntentForVersionSelector,
+  pythonApplicationSelectorId,
+  pythonApplicationVariantId,
   PythonApplicationPlanningError,
   previewWorkspaceMigration,
   probeMachine,
@@ -73,6 +76,7 @@ import {
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
   setWorkspaceTargetPythonResolutionMode,
+  setWorkspacePythonApplicationVersionSelection,
   updateRepositories,
   UvApplicationResolver,
   verifyBundle,
@@ -130,6 +134,7 @@ import type {
   WorkspacePromptBoolean,
   PythonEnvironmentPlanInput,
   PythonApplicationRecipe,
+  PythonApplicationVersionSelection,
   PythonEnvironmentPlan,
   PythonPublicationProfile,
   WorkspacePythonApplicationTarget,
@@ -253,6 +258,7 @@ interface TargetPythonApplicationOptions {
   coverage?: string;
   extra?: string[];
   feature?: string[];
+  includeVersion?: string[];
   platform?: string[];
   python?: string;
   pythonVersion?: string[];
@@ -404,6 +410,23 @@ function addNpmPublishOptions(command: Command): Command {
 
 function compactArgs(args: (string | undefined)[]): string[] {
   return args.filter((arg): arg is string => arg !== undefined && arg.length > 0);
+}
+
+function parsePythonApplicationVersionSelection(
+  versions: string[]
+): PythonApplicationVersionSelection {
+  const selectors = versions
+    .map((version) => version.trim())
+    .filter(Boolean)
+    .map((version) =>
+      version.toLowerCase() === 'latest'
+        ? { type: 'latest-compatible' as const }
+        : { type: 'exact' as const, version }
+    );
+  if (selectors.length === 0) {
+    throw new Error('At least one exact application version or latest is required');
+  }
+  return { selectors };
 }
 
 async function runSelfCommand(
@@ -745,7 +768,23 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
           ? target.python.version
           : 'auto'
       : undefined;
-  return `${value}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}${pythonResolutionMode ? ` [python resolution: ${pythonResolutionMode}]` : ''}`;
+  const pythonApplicationVersions =
+    target.type === 'python-app'
+      ? target.application.versionSelection
+        ? target.application.versionSelection.selectors
+            .map((selector) =>
+              selector.type === 'exact'
+                ? selector.version
+                : selector.constraint
+                  ? `latest (${selector.constraint})`
+                  : 'latest'
+            )
+            .join(', ')
+        : target.application.version
+          ? `latest (${target.application.version})`
+          : 'latest'
+      : undefined;
+  return `${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}${pythonResolutionMode ? ` [python resolution: ${pythonResolutionMode}]` : ''}`;
 }
 
 function formatPythonTargetEnvironment(environment: PythonTargetEnvironmentConfig): string {
@@ -1053,42 +1092,78 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
       const application = resolveWorkspacePythonApplication(options.config, target);
       const sourceIndex = application.intent.source.indexUrl ?? 'https://pypi.org/simple/';
       const recipe = await readWorkspacePythonRecipe(options.workspaceDir, target);
-      const result = await planPythonApplication({
-        cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'uv-cache'),
-        coveragePolicy: application.coveragePolicy,
-        createdAt,
-        cutoff,
-        index: new HttpPythonIndexClient(sourceIndex),
-        intent: application.intent,
-        ...(recipe ? { recipe } : {}),
-        resolver,
-        uvPath,
-        workDir: path.join(plannerWorkDir, String(index)),
-      });
-      const plan = addPythonRuntimeContract(result.plan, {
-        includeCpython: options.config.python?.artifactTransfer?.cpython === true,
-        includeUv: options.config.python?.artifactTransfer?.uv === true,
-        ...(recipe ? { recipe } : {}),
-        uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
-          options.config.python!.planner.version,
-        ],
-      });
-      const targetId = pythonApplicationTargetId(plan.application.name, plan.coverage.policy.id);
-      const stored = await writeActivePythonApplicationPlan({
-        evidence: result.evidence,
-        generatedAt: createdAt,
-        plan,
-        targetId,
-        targetIndex: index,
-        workspaceDir: options.workspaceDir,
-      });
-      results.push({
-        diff: stored.diff,
-        index,
-        plan,
-        rejectedCandidates: result.rejectedCandidates,
-        targetId,
-      });
+      const indexClient = new MemoizedPythonIndexClient(new HttpPythonIndexClient(sourceIndex));
+      const planned = [];
+      for (const [selectorIndex, selector] of application.versionSelection.selectors.entries()) {
+        const intent = pythonApplicationIntentForVersionSelector(application, selector);
+        let result;
+        try {
+          result = await planPythonApplication({
+            cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'uv-cache'),
+            coveragePolicy: application.coveragePolicy,
+            createdAt,
+            cutoff,
+            index: indexClient,
+            intent,
+            ...(recipe ? { recipe } : {}),
+            resolver,
+            uvPath,
+            workDir: path.join(plannerWorkDir, String(index), String(selectorIndex)),
+          });
+        } catch (error) {
+          if (error instanceof PythonApplicationPlanningError) {
+            const label = selector.type === 'exact' ? selector.version : 'latest-compatible';
+            throw new PythonApplicationPlanningError(
+              `Version selector ${label} failed: ${error.message}`,
+              error.rejectedCandidates
+            );
+          }
+          throw error;
+        }
+        const plan = addPythonRuntimeContract(result.plan, {
+          includeCpython: options.config.python?.artifactTransfer?.cpython === true,
+          includeUv: options.config.python?.artifactTransfer?.uv === true,
+          ...(recipe ? { recipe } : {}),
+          uvVersions: options.config.python?.artifactTransfer?.uvVersions ?? [
+            options.config.python!.planner.version,
+          ],
+        });
+        planned.push({
+          plan,
+          result,
+          selector,
+          storageTargetId: pythonApplicationSelectorId(
+            plan.application.name,
+            plan.coverage.policy.id,
+            selector
+          ),
+          targetId: pythonApplicationVariantId(
+            plan.application.name,
+            plan.application.version,
+            plan.coverage.policy.id
+          ),
+        });
+      }
+
+      for (const item of planned) {
+        const stored = await writeActivePythonApplicationPlan({
+          evidence: item.result.evidence,
+          generatedAt: createdAt,
+          plan: item.plan,
+          targetId: item.storageTargetId,
+          targetIndex: index,
+          workspaceDir: options.workspaceDir,
+        });
+        results.push({
+          diff: stored.diff,
+          index,
+          plan: item.plan,
+          rejectedCandidates: item.result.rejectedCandidates,
+          selector: item.selector,
+          storageTargetId: item.storageTargetId,
+          targetId: item.targetId,
+        });
+      }
     }
     return results;
   } finally {
@@ -2582,9 +2657,10 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('2. Add Git target');
     console.log('3. Add npm target');
     console.log('4. Add Python application');
-    console.log('5. Remove target');
-    console.log('6. Download selected target');
-    console.log('7. Advanced / legacy Python targets');
+    console.log('5. Set Python application versions');
+    console.log('6. Remove target');
+    console.log('7. Download selected target');
+    console.log('8. Advanced / legacy Python targets');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -2632,6 +2708,12 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
           throw new Error('Python application coverage was not configured');
         }
         const spec = await ask(rl, 'Python application package');
+        const applicationVersions = (
+          await ask(rl, 'Application versions (comma-separated exact versions or latest)', 'latest')
+        )
+          .split(',')
+          .map((version) => version.trim())
+          .filter(Boolean);
         const coverage = await ask(
           rl,
           `Platform coverage policy (${coveragePolicyIds.join('/')})`,
@@ -2653,6 +2735,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
               workspaceDir,
               '--coverage',
               coverage,
+              ...applicationVersions.flatMap((version) => ['--include-version', version]),
               ...pythonVersions.flatMap((version) => ['--python-version', version]),
             ],
             workspaceDir
@@ -2662,13 +2745,36 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
       }
       case '5': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
+        const index = await ask(rl, 'Python application target index');
+        const applicationVersions = (
+          await ask(rl, 'Application versions (comma-separated exact versions or latest)', 'latest')
+        )
+          .split(',')
+          .map((version) => version.trim())
+          .filter(Boolean);
+        if (index) {
+          await runSelfCommand(
+            [
+              'target',
+              'set-python-app-versions',
+              index,
+              workspaceDir,
+              ...applicationVersions.flatMap((version) => ['--include-version', version]),
+            ],
+            workspaceDir
+          );
+        }
+        break;
+      }
+      case '6': {
+        await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to remove');
         if (index) {
           await runSelfCommand(['target', 'remove', index, workspaceDir], workspaceDir);
         }
         break;
       }
-      case '6': {
+      case '7': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to download');
         if (index) {
@@ -2676,7 +2782,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '7':
+      case '8':
         await configureLegacyPythonTargetsMenu(workspaceDir, rl);
         break;
       default:
@@ -3536,6 +3642,12 @@ targetAddCommand
     []
   )
   .option('--version <specifier>', 'Application version constraint')
+  .option(
+    '--include-version <version>',
+    'Exact application version or latest; repeat to include multiple alternatives',
+    collectStrings,
+    []
+  )
   .option('--extra <name>', 'Application extra; repeat for additional extras', collectStrings, [])
   .option(
     '--feature <name=value>',
@@ -3563,6 +3675,9 @@ targetAddCommand
       if (options.python && (options.pythonVersion?.length ?? 0) > 0) {
         throw new Error('Use either --python or --python-version, not both');
       }
+      if (options.version && (options.includeVersion?.length ?? 0) > 0) {
+        throw new Error('Use either --version or --include-version, not both');
+      }
       const coverage =
         (options.platform?.length ?? 0) > 0
           ? {
@@ -3589,6 +3704,9 @@ targetAddCommand
           features: parseCapabilities(options.feature ?? []),
           ...(recipe ? { recipe } : {}),
           ...(options.version ? { version: options.version } : {}),
+          ...((options.includeVersion?.length ?? 0) > 0
+            ? { versionSelection: parsePythonApplicationVersionSelection(options.includeVersion!) }
+            : {}),
         },
         coverage,
         python:
@@ -3860,6 +3978,33 @@ targetCommand
   });
 
 targetCommand
+  .command('set-python-app-versions')
+  .description('Replace the exact/latest version selectors of a Python application target')
+  .argument('<index>', 'Target index from target list')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option(
+    '--include-version <version>',
+    'Exact application version or latest; repeat to include multiple alternatives',
+    collectStrings,
+    []
+  )
+  .action(async (index: string, workspace: string, options: { includeVersion?: string[] }) => {
+    try {
+      const result = await setWorkspacePythonApplicationVersionSelection(
+        workspace,
+        parsePositiveInteger(index),
+        parsePythonApplicationVersionSelection(options.includeVersion ?? [])
+      );
+      console.log(
+        `Updated target: ${formatTargetValue(result.target)}\nTotal targets: ${String(result.config.targets.length)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetCommand
   .command('remove')
   .description('Remove a target by its one-based list index')
   .argument('<index>', 'Target index from target list')
@@ -4000,7 +4145,7 @@ program
           workspaceDir,
         });
         const pythonApplicationPlans = pythonApplicationPreflight.targets.map(
-          ({ activePlan, targetId }) => ({ activePlan, targetId })
+          ({ activePlan, selectionId, targetId }) => ({ activePlan, selectionId, targetId })
         );
         const registryUrl = options.registry ?? config.sourceRegistry;
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);

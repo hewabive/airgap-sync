@@ -22,14 +22,16 @@ export {
 } from './core/bundle.js';
 export { applyBundle } from './core/apply.js';
 export { collectBundle } from './core/collect.js';
-export { HttpPythonIndexClient } from './core/python/index-client.js';
+export { HttpPythonIndexClient, MemoizedPythonIndexClient } from './core/python/index-client.js';
 export { publishPythonBundle } from './core/python/publisher.js';
 export { canonicalizeJson, canonicalJson, semanticDigest } from './core/canonical-json.js';
 export {
   pythonApplicationIndexPath,
   pythonApplicationPlanDirectory,
   pythonApplicationPlanPath,
+  pythonApplicationSelectorId,
   pythonApplicationTargetId,
+  pythonApplicationVariantId,
   pythonApplicationsDirectory,
   pythonOptionalArtifactsDirectory,
   pythonPlatformLockBase,
@@ -368,6 +370,10 @@ export type {
   WorkspaceTargetSnapshot,
   SelectWorkspaceTargetsResult,
 } from './core/workspace.js';
+export {
+  pythonApplicationIntentForVersionSelector,
+  setWorkspacePythonApplicationVersionSelection,
+} from './core/workspace.js';
 
 export type { DownloadedTarball } from './core/tarball.js';
 export type { CanonicalJsonPrimitive, CanonicalJsonValue } from './core/canonical-json.js';
@@ -445,6 +451,8 @@ export type {
 export type {
   PythonApplicationIntent,
   PythonApplicationSelection,
+  PythonApplicationVersionSelection,
+  PythonApplicationVersionSelector,
   PythonRuntimePolicy,
 } from './core/python/application-intent.js';
 export type {

@@ -12,7 +12,10 @@ import {
   type PythonApplicationDownloadProgressEvent,
   verifyPythonApplicationBundle,
 } from '../../src/core/python/application-bundle.js';
-import { pythonApplicationTargetId } from '../../src/core/python/application-paths.js';
+import {
+  pythonApplicationTargetId,
+  pythonApplicationVariantId,
+} from '../../src/core/python/application-paths.js';
 import { normalizePlatformCoveragePolicy } from '../../src/core/python/coverage-policy.js';
 import {
   createPythonEnvironmentPlan,
@@ -368,6 +371,67 @@ describe('Python application bundle', () => {
     );
   });
 
+  it('stores independently installable versions from one application selection', async () => {
+    const firstContent = wheelBuffer('1.0.0');
+    const secondContent = wheelBuffer('2.0.0');
+    const firstSha = createHash('sha256').update(firstContent).digest('hex');
+    const secondSha = createHash('sha256').update(secondContent).digest('hex');
+    const firstSource = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    const secondSource = path.join(tempDir, 'shared-2.0.0-py3-none-any.whl');
+    await fs.writeFile(firstSource, firstContent);
+    await fs.writeFile(secondSource, secondContent);
+    const first = activePlan(
+      createPlan({
+        application: 'demo-app',
+        filename: path.basename(firstSource),
+        sha256: firstSha,
+        size: firstContent.byteLength,
+        sourceUrl: pathToFileURL(firstSource).toString(),
+        version: '0.25.1',
+      })
+    );
+    const second = activePlan(
+      createPlan({
+        application: 'demo-app',
+        filename: path.basename(secondSource),
+        sha256: secondSha,
+        size: secondContent.byteLength,
+        sourceUrl: pathToFileURL(secondSource).toString(),
+        version: '0.26.0',
+        wheelVersion: '2.0.0',
+      })
+    );
+    const selectionId = pythonApplicationTargetId('demo-app', 'linux-x64');
+    const bundleDir = path.join(tempDir, 'bundle-versions');
+
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [
+        {
+          activePlan: first,
+          selectionId,
+          targetId: pythonApplicationVariantId('demo-app', '0.25.1', 'linux-x64'),
+        },
+        {
+          activePlan: second,
+          selectionId,
+          targetId: pythonApplicationVariantId('demo-app', '0.26.0', 'linux-x64'),
+        },
+      ],
+    });
+
+    const index = await readPythonApplicationBundleIndex(bundleDir);
+    expect(index?.applications.map((application) => application.application.version)).toEqual([
+      '0.25.1',
+      '0.26.0',
+    ]);
+    expect(
+      index?.applications.every((application) => application.selectionId === selectionId)
+    ).toBe(true);
+    expect(index?.summary.applications).toBe(2);
+    expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
+  });
+
   it('recovers from an interrupted multi-artifact download without activating a partial index', async () => {
     const firstContent = wheelBuffer('1.0.0');
     const secondContent = wheelBuffer('2.0.0');
@@ -635,6 +699,71 @@ describe('Python application bundle', () => {
         targetId: second.manifest.targetId,
       }),
     ]);
+  });
+
+  it('replaces every stale version variant in a partially updated selection', async () => {
+    const oldContent = wheelBuffer('1.0.0');
+    const oldSha = createHash('sha256').update(oldContent).digest('hex');
+    const oldSource = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    await fs.writeFile(oldSource, oldContent);
+    const bundleDir = path.join(tempDir, 'bundle-selection');
+    const oldPlan = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(oldSource),
+        sha256: oldSha,
+        size: oldContent.byteLength,
+        sourceUrl: pathToFileURL(oldSource).toString(),
+        version: '0.25.1',
+      })
+    );
+    const selectionId = pythonApplicationTargetId('first-app', 'linux-x64');
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [
+        {
+          activePlan: oldPlan,
+          selectionId,
+          targetId: pythonApplicationVariantId('first-app', '0.25.1', 'linux-x64'),
+        },
+      ],
+    });
+
+    const newContent = wheelBuffer('2.0.0');
+    const newSha = createHash('sha256').update(newContent).digest('hex');
+    const newSource = path.join(tempDir, 'shared-2.0.0-py3-none-any.whl');
+    await fs.writeFile(newSource, newContent);
+    const newPlan = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(newSource),
+        sha256: newSha,
+        size: newContent.byteLength,
+        sourceUrl: pathToFileURL(newSource).toString(),
+        version: '0.26.0',
+        wheelVersion: '2.0.0',
+      })
+    );
+    await downloadPythonApplicationPlans({
+      bundleDir,
+      partial: true,
+      targets: [
+        {
+          activePlan: newPlan,
+          selectionId,
+          targetId: pythonApplicationVariantId('first-app', '0.26.0', 'linux-x64'),
+        },
+      ],
+    });
+
+    const index = await readPythonApplicationBundleIndex(bundleDir);
+    expect(index?.applications).toEqual([
+      expect.objectContaining({
+        application: { name: 'first-app', version: '0.26.0' },
+        selectionId,
+      }),
+    ]);
+    expect(index?.artifacts.map((artifact) => artifact.sha256)).toEqual([newSha]);
   });
 
   it('replaces stale references on a full replan and can synchronize an empty target set', async () => {

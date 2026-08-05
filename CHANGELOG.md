@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Added composable Python application version selectors so one target can require exact
+  releases together with `latest`, validate every selector against the full requested
+  Python/platform wheel closure, and publish one independently locked variant per
+  resolved version while deduplicating shared artifacts.
 - Added an optional Gitea token prompt to interactive first-time workspace setup so
   publish credentials can be saved without visiting the settings menu.
 - Made consumer uv versions an explicit runtime-coverage dimension, with reviewed

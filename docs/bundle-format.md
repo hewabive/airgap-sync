@@ -149,6 +149,8 @@ view over content-addressed wheel paths. The authoritative application contract 
 ## python/application-index.json
 
 Records every ready Python application plan and the shared artifacts it references.
+`selectionId` groups all resolved version variants produced by one workspace
+application selection; versioned `targetId` identifies one concrete alternative.
 Application entries point to:
 
 - immutable environment plan and human-readable plan diff;
@@ -166,8 +168,9 @@ total unique bytes.
 
 An interrupted download may leave verified content-addressed files, but the index and
 application document set are replaced only after the whole requested run succeeds.
-Retry reuses those files. Partial target downloads merge references and never remove
-objects belonging to unselected applications.
+Retry reuses those files. Partial target downloads replace every prior version variant
+of the selected application group, merge references, and never remove objects belonging
+to unselected applications.
 
 Incremental `download` treats an artifact recorded by the active index as previously
 verified when its path, identity, source URL, and current size still match. This avoids

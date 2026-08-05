@@ -55,6 +55,8 @@ airgap-sync target add python-runtime 3.12.13 \
 airgap-sync target list
 airgap-sync target set-python-resolution 1 approximate
 airgap-sync target set-python-resolution 1 inherit
+airgap-sync target set-python-app-versions 2 \
+  --include-version 0.25.1 --include-version latest
 airgap-sync target remove 1
 ```
 
@@ -68,11 +70,22 @@ requirements; no separate npm target is needed.
 policy; repeatable `--platform` creates target-local coverage instead. Python defaults
 to automatic selection of one compatible minor. Repeat `--python-version` to require
 one or more exact minor branches in the same plan; every branch must use the same
-application version and have a complete wheel closure. `--python` remains an advanced
-single-runtime version constraint and cannot be combined with `--python-version`. `--extra`
-selects package extras, `--feature name=value` records explicit application variants,
-and `--recipe` selects reviewed workspace-local compatibility policy. Known maintained
-applications may receive an installed recipe automatically.
+application version and have a complete wheel closure. Repeat `--include-version` with
+an exact PEP 440 version or `latest` to include alternative application releases in one
+target. Every exact release must satisfy the requested Python/platform matrix; `latest`
+falls back only among stable releases until it finds a complete closure. Exact and
+latest selectors resolving to the same release produce one bundle variant. `--version`
+retains the single-release constraint workflow and cannot be combined with
+`--include-version`. `--python` remains an advanced single-runtime version constraint
+and cannot be combined with `--python-version`. `--extra` selects package extras,
+`--feature name=value` records explicit application variants, and `--recipe` selects
+reviewed workspace-local compatibility policy. Known maintained applications may
+receive an installed recipe automatically.
+
+Only one `python-app` target may own a package/coverage combination. Use
+`target set-python-app-versions` or the corresponding Targets menu action to replace
+the version selectors of an existing target; this invalidates its active plan set and
+causes the next plan/download to validate every selector together.
 
 Raw PyPI targets use PEP 508 requirement syntax and require an exact legacy target
 environment. Git, PyPI, and exact root-wheel targets may set
@@ -98,9 +111,10 @@ specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
 `targetRegistry`, `giteaUrl`, bundle output, Python application publication settings,
-coverage, and default answers in `airgap-sync.json`. Initialization asks only whether
-Python applications should cover Windows, Linux, or both; it does not ask for Python
-versions, distributions, wheel tags, CPU/GPU inventory, or a resolver.
+coverage, and default answers in `airgap-sync.json`. Adding a Python application asks
+for comma-separated exact application versions and/or `latest`, plus optional Python
+minor versions. Initialization does not ask for distributions, wheel tags, CPU/GPU
+inventory, or a resolver.
 
 `Targets` → `Add Python application` is the normal flow. Raw PyPI targets, exact Python
 environments, and resolution modes are under Advanced/Legacy. Python application

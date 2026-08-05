@@ -127,11 +127,14 @@ New workspaces use application-first schema v2:
     },
     {
       "type": "python-app",
-      "spec": "orjson",
+      "spec": "vllm",
       "coverage": "desktop-x64",
       "application": {
         "extras": [],
-        "features": {}
+        "features": {},
+        "versionSelection": {
+          "selectors": [{ "type": "exact", "version": "0.25.1" }, { "type": "latest-compatible" }]
+        }
       },
       "python": {
         "policy": "auto"
@@ -146,11 +149,12 @@ consumer deployed in the target network, for example `"uvVersions": ["0.11.16",
 "0.12.1"]`; the planner itself remains pinned to `0.11.16`.
 
 `download` automatically plans a newly added Python application and replans after its
-coverage, feature, version constraint, or workspace-local recipe changes. Planning
-chooses an application version and compatible Python minor, resolves every requested
-platform with wheels only, and infers Linux's glibc floor. A current plan is reused and
-becomes active only when coverage is complete. The separate `plan` command is available
-for advance review, a fixed cutoff, or an explicit refresh.
+coverage, feature, version selection, or workspace-local recipe changes. Exact and
+`latest-compatible` selectors may be combined; every selector must resolve against the
+complete requested Python/platform wheel matrix before any new plan is activated.
+Each resolved application version gets independent locks while shared artifacts are
+stored once. A current plan set is reused. The separate `plan` command is available for
+advance review, a fixed cutoff, or an explicit refresh.
 
 Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
 `python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.

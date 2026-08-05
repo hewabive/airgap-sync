@@ -20,6 +20,7 @@ import {
   resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
+  setWorkspacePythonApplicationVersionSelection,
   setWorkspaceTargetPythonResolutionMode,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
@@ -210,6 +211,109 @@ describe('workspace config', () => {
         versions: ['3.12', '3.13'],
       },
     });
+  });
+
+  it('normalizes exact/latest application version selectors', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      application: {
+        extras: [],
+        features: {},
+        versionSelection: {
+          selectors: [
+            { type: 'exact', version: ' 0.25.1 ' },
+            { type: 'latest-compatible' },
+            { type: 'exact', version: '0.25.1' },
+          ],
+        },
+      },
+      coverage: 'desktop-x64',
+      python: { policy: 'selected', versions: ['3.12'] },
+      spec: 'vllm',
+      type: 'python-app',
+    });
+
+    const target = (await readWorkspaceConfig(tempDir)).targets[0];
+    expect(target).toMatchObject({
+      application: {
+        versionSelection: {
+          selectors: [{ type: 'exact', version: '0.25.1' }, { type: 'latest-compatible' }],
+        },
+      },
+    });
+    if (target?.type !== 'python-app') {
+      throw new Error('Expected a python-app target');
+    }
+    const resolved = resolveWorkspacePythonApplication(await readWorkspaceConfig(tempDir), target);
+    expect(resolved.versionSelection.selectors).toEqual([
+      { type: 'exact', version: '0.25.1' },
+      { type: 'latest-compatible' },
+    ]);
+  });
+
+  it('rejects conflicting or invalid application version selectors', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    const base = {
+      coverage: 'desktop-x64',
+      python: { policy: 'auto' as const },
+      spec: 'vllm',
+      type: 'python-app' as const,
+    };
+
+    await expect(
+      addWorkspaceTarget(tempDir, {
+        ...base,
+        application: {
+          extras: [],
+          features: {},
+          version: '>=0.25',
+          versionSelection: { selectors: [{ type: 'latest-compatible' }] },
+        },
+      })
+    ).rejects.toThrow('either application.version or application.versionSelection');
+    await expect(
+      addWorkspaceTarget(tempDir, {
+        ...base,
+        application: {
+          extras: [],
+          features: {},
+          versionSelection: { selectors: [{ type: 'exact', version: 'latest' }] },
+        },
+      })
+    ).rejects.toThrow('Invalid exact python-app version');
+    expect(config.targets).toEqual([]);
+  });
+
+  it('updates version selectors on the existing application target and rejects a colliding target', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    const baseTarget = {
+      application: { extras: [], features: {} },
+      coverage: 'desktop-x64',
+      python: { policy: 'selected' as const, versions: ['3.12'] },
+      spec: 'vllm',
+      type: 'python-app' as const,
+    };
+    await addWorkspaceTarget(tempDir, baseTarget);
+
+    await expect(
+      addWorkspaceTarget(tempDir, {
+        ...baseTarget,
+        application: {
+          ...baseTarget.application,
+          versionSelection: { selectors: [{ type: 'exact', version: '0.25.1' }] },
+        },
+      })
+    ).rejects.toThrow('update its version selection instead');
+
+    const updated = await setWorkspacePythonApplicationVersionSelection(tempDir, 1, {
+      selectors: [{ type: 'exact', version: '0.25.1' }, { type: 'latest-compatible' }],
+    });
+    expect(updated.target.application).toMatchObject({
+      versionSelection: {
+        selectors: [{ type: 'exact', version: '0.25.1' }, { type: 'latest-compatible' }],
+      },
+    });
+    expect(updated.config.targets).toHaveLength(1);
   });
 
   it('normalizes optional closed-network endpoints', async () => {

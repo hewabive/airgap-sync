@@ -163,6 +163,32 @@ npm exec -- airgap-sync target add python-app vllm \
 All requested minors must resolve to the same application version with a complete
 wheel-only closure. Each platform/minor branch receives its own hash-complete lock.
 
+An application target can also include several alternative application releases.
+Repeat `--include-version` with exact PEP 440 versions and/or `latest`:
+
+```bash
+npm exec -- airgap-sync target add python-app vllm \
+  --coverage desktop-x64 \
+  --include-version 0.25.1 \
+  --include-version latest \
+  --python-version 3.12
+```
+
+Every selector is strict: an exact version is never replaced by another release, while
+`latest` means the newest stable release with a complete requested wheel closure. No
+new plans are activated unless all selectors resolve. If exact and `latest` select the
+same release, the bundle contains one variant. Each resulting application version has
+its own locks and consumer contract; shared wheels remain content-addressed and are
+stored once.
+
+To change an existing target without creating a second application selection:
+
+```bash
+npm exec -- airgap-sync target set-python-app-versions 1 \
+  --include-version 0.25.1 \
+  --include-version latest
+```
+
 `download` automatically creates a missing plan or replaces one made stale by target,
 coverage, or recipe changes. A current plan is reused. Planning uses a pinned,
 hash-verified `uv` executable but remains independent of the collector platform. Every

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   generatePythonPlannerCandidates,
   planPythonApplication,
+  PythonApplicationPlanningError,
   type PythonPlannerPolicy,
 } from '../../src/core/python/application-planner.js';
 import type { PythonApplicationIntent } from '../../src/core/python/application-intent.js';
@@ -257,6 +258,37 @@ describe('Python application planner', () => {
           request.glibc === '2.17'
       )
     ).toBe(true);
+  });
+
+  it('rejects an incompatible exact application version without falling back', async () => {
+    const resolver = new FixtureResolver();
+    const exactIntent: PythonApplicationIntent = {
+      ...intent,
+      application: {
+        ...intent.application,
+        version: '==2.0.0',
+      },
+    };
+
+    await expect(
+      planPythonApplication({
+        cacheDir: '/cache',
+        coveragePolicy: normalizePlatformCoveragePolicy({
+          id: 'desktop-x64',
+          platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+        }),
+        createdAt: '2026-07-27T00:00:00.000Z',
+        index: new FixtureIndex(),
+        intent: exactIntent,
+        plannerPolicy,
+        resolver,
+        uvPath: '/tools/uv',
+        workDir: '/work',
+      })
+    ).rejects.toBeInstanceOf(PythonApplicationPlanningError);
+    expect(resolver.requests).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ requirement: 'demo-app==1.0.0' })])
+    );
   });
 
   it('reproduces the same semantic plan across runs with a fixed index cutoff', async () => {

@@ -201,12 +201,18 @@ versions are then expanded to all compatible wheel variants for the chosen Pytho
 platform families. Linux glibc support is inferred from the actual closure;
 distribution names are optional explanation hints.
 
+One workspace application target may contain exact-version and latest-compatible
+selectors. Each selector is planned independently against the same coverage and Python
+policy, and the set is activated only when every selector succeeds. Resolved versions
+become independent immutable plan variants; identical resolved versions and shared
+content-addressed artifacts are deduplicated.
+
 Workspace-local recipes capture reviewed upstream application guidance, explicit
 features, known unsupported combinations, prerequisites, and health checks. Their
 normalized digest is part of the immutable plan. Recipes never inspect CPU/GPU
 inventory; accelerator intent is a target feature such as `accelerator=cuda`.
 
-One application plan contains:
+One resolved application-version plan contains:
 
 - one independent package environment with platform-specific locks;
 - a preferred common CPython minor when coverage permits;

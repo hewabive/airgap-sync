@@ -5,6 +5,14 @@ export type PythonRuntimePolicy =
   | { policy: 'constrained'; version: string }
   | { policy: 'selected'; versions: string[] };
 
+export type PythonApplicationVersionSelector =
+  | { constraint?: string; type: 'latest-compatible' }
+  | { type: 'exact'; version: string };
+
+export interface PythonApplicationVersionSelection {
+  selectors: PythonApplicationVersionSelector[];
+}
+
 export interface PythonApplicationSelection {
   extras: string[];
   features: Record<string, string>;
