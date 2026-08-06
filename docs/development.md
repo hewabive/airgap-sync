@@ -124,6 +124,10 @@ Suggested test groups:
 - target removal and reference-safe pruning of only local bundle artifacts;
 - interrupted Python download/publication recovery and idempotent retries;
 - exact-coordinate upload conflicts without whole-registry reconciliation.
+- global successful-full-download watermark and rolling-window gap protection;
+- CPython stable-minor expansion and per-platform latest-patch selection;
+- CPython provider-build window selection and reference-safe rolling bundle prune;
+- additive CPython Generic Package publication from independent bundles.
 
 ## Safety Rules
 
