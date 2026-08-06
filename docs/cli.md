@@ -58,10 +58,14 @@ airgap-sync target add python-wheel \
   --sha256 <64-hex-digest> \
   --python-resolution-mode approximate
 airgap-sync target list
-airgap-sync target set-python-resolution 1 approximate
-airgap-sync target set-python-resolution 1 inherit
-airgap-sync target set-python-app-versions 2 \
+airgap-sync target edit <index> --branch release
+airgap-sync target edit <index> --python-resolution-mode inherit
+airgap-sync target edit <index> \
   --include-version 0.25.1 --include-version latest
+airgap-sync target edit <index> \
+  --from-minor 3.11 \
+  --platform windows-x86_64 --platform linux-glibc-x86_64 \
+  --latest 2 --window-days 30
 airgap-sync target remove 1
 ```
 
@@ -90,16 +94,16 @@ and cannot be combined with `--python-version`. `--extra` selects package extras
 reviewed workspace-local compatibility policy. Known maintained applications may
 receive an installed recipe automatically.
 
-Only one `python-app` target may own a package/coverage combination. Use
-`target set-python-app-versions` or the corresponding Targets menu action to replace
-the version selectors of an existing target; this invalidates its current planning
-evidence and causes the next plan/download to validate every selector together.
+Only one `python-app` target may own a package/coverage combination. Use `target edit
+<index> --include-version ...` or the corresponding Targets menu action to replace the
+version selectors of an existing target; this invalidates its current planning evidence
+and causes the next plan/download to validate every selector together.
 
 Raw PyPI targets use PEP 508 requirement syntax and require an exact legacy target
 environment. Git, PyPI, and exact root-wheel targets may set
 `--python-resolution-mode locked-only|approximate`. With no target override they inherit
-the workspace default. `target set-python-resolution <index> inherit` removes an
-existing override. These controls are under Advanced/Legacy in the interactive menu.
+the workspace default. `target edit <index> --python-resolution-mode inherit` removes
+an existing override.
 
 `cpython-distributions` is independent of `python-app`. It follows stable CPython 3
 minors from `--from-minor` through the newest stable minor visible in
@@ -107,6 +111,21 @@ minors from `--from-minor` through the newest stable minor visible in
 each platform. For each patch it includes the newest provider build plus rebuilds
 published in the last `--window-days` exact 24-hour days. The defaults are 3.10, all
 currently supported platforms, one patch, and 365 days.
+
+`target edit` is the common mutation entry point. It changes only fields declared
+editable for the selected target type; identity fields require removing the target and
+adding a new one. Supplying an option for the wrong type is an error.
+
+| Target type             | Editable settings                                                    |
+| ----------------------- | -------------------------------------------------------------------- |
+| `git`                   | branch; target-specific Python resolution mode                       |
+| `npm`                   | none                                                                 |
+| `python-app`            | exact/`latest` application version selectors                         |
+| `cpython-distributions` | lower minor, platform set, latest-patch depth, provider-build window |
+| `pypi`, `python-wheel`  | target-specific Python resolution mode                               |
+
+`target set-python-app-versions` and `target set-python-resolution` remain deprecated
+compatibility aliases. New scripts should use `target edit`.
 
 ## menu
 
@@ -120,6 +139,11 @@ Opens an interactive prompt menu for common workspace actions. The top level kee
 regular workflow compact: targets, download, publish, install verification, diagnostics,
 and settings. Target management, Python applications, Advanced/Legacy seeding, bundle
 checks, bundle info, and saved credentials live in submenus.
+
+The Targets submenu can add CPython distributions and edit any selected target through
+the same type-aware flow. It prompts only for fields supported by that type. When the
+selected target has no editable settings, such as an npm package spec, it says so and
+leaves the target unchanged.
 
 Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h` or a
 specific command's `-h` option for non-interactive help.

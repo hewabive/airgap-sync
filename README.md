@@ -92,8 +92,8 @@ manual migration command is required.
 
 The menu covers the normal workflow:
 
-- **Targets**: add, remove, configure, or download one Git/npm/Python application
-  target.
+- **Targets**: add, edit, remove, or download one Git/npm/Python application or CPython
+  distribution target. The editor exposes only settings supported by the selected type.
 - **Download updates**: run the online collection phase.
 - **Publish updates**: publish the bundle into the closed-network registry and Git host.
 - **Verify installs**: run package-manager installs for configured Git targets.
@@ -116,6 +116,12 @@ npm exec -- airgap-sync target add cpython-distributions \
   --from-minor 3.10 \
   --platform linux-glibc-x86_64 --platform windows-x86_64 \
   --latest 3 --window-days 365
+
+# Change the rolling policy later without removing the target.
+npm exec -- airgap-sync target edit 4 \
+  --from-minor 3.11 \
+  --platform linux-glibc-x86_64 --platform windows-x86_64 \
+  --latest 2 --window-days 30
 
 # Online machine.
 npm exec -- airgap-sync download --prune

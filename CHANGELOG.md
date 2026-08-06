@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Added a common type-aware target editing API, `target edit <index>` command, and
+  interactive editor. CPython rolling-policy fields can be changed in place; immutable
+  target types report that they have no editable settings. The former Python-specific
+  set commands remain deprecated compatibility aliases.
 - Added first-class `cpython-distributions` targets backed by
   `python-build-standalone`, with automatic discovery of new stable CPython 3 minors,
   independently evaluated per-platform latest-patch depth, and exact-day provider-build
