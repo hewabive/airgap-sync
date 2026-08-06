@@ -1,6 +1,7 @@
 import type { PythonFetchReport } from './core/python/bundle.js';
 import type { PythonApplicationDownloadReport } from './core/python/application-bundle.js';
 import type { CpythonDistributionDownloadReport } from './core/python/distribution-bundle.js';
+import type { CpythonDistributionPublishReport } from './core/python/distribution-publisher.js';
 import type { PythonGenericPublishReport } from './core/python/generic-publisher.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
 import type { PythonResolutionMode } from './core/python/resolution-policy.js';
@@ -480,6 +481,7 @@ export interface ApplyBundleReport {
   publish: PublishReport;
   python?: PythonPublishReport;
   pythonApplications?: PythonGenericPublishReport;
+  cpythonDistributions?: CpythonDistributionPublishReport;
   registryUrl: string;
   succeeded: boolean;
 }

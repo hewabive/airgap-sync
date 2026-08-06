@@ -145,6 +145,12 @@ export type {
 } from './core/python/distribution-bundle.js';
 export { discoverCpythonDistributionCandidates } from './core/python/distribution-provider.js';
 export {
+  cpythonDistributionPublishDryRunReportPath,
+  cpythonDistributionPublishReportPath,
+  publishCpythonDistributions,
+} from './core/python/distribution-publisher.js';
+export type { CpythonDistributionPublishAction } from './core/python/distribution-publisher.js';
+export {
   compareCompatibilityVersions,
   explainPlatformCoveragePolicy,
 } from './core/python/coverage-explain.js';

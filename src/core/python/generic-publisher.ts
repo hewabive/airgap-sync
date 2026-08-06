@@ -52,7 +52,7 @@ export interface PublishPythonGenericArtifactsOptions {
   timeoutMs?: number;
 }
 
-interface GenericFile {
+export interface GiteaGenericPackageFile {
   expectedSha256: string;
   file: string;
   filename: string;
@@ -62,11 +62,11 @@ interface GenericFile {
 }
 
 interface IndexedGenericFile {
-  file: GenericFile;
+  file: GiteaGenericPackageFile;
   index: number;
 }
 
-function normalizeBaseUrl(value: string): string {
+export function normalizeGiteaGenericBaseUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`Gitea URL must use HTTP or HTTPS: ${value}`);
@@ -76,7 +76,7 @@ function normalizeBaseUrl(value: string): string {
   return url.toString().replace(/\/+$/u, '');
 }
 
-function validateCoordinate(value: string, description: string): string {
+export function validateGiteaGenericCoordinate(value: string, description: string): string {
   if (!value || !/^[A-Za-z0-9._+-]+$/u.test(value)) {
     throw new Error(`Invalid Gitea Generic Package ${description}: ${value}`);
   }
@@ -121,7 +121,7 @@ function authHeaders(auth: PythonGenericPublishAuth | undefined): Record<string,
     : {};
 }
 
-function genericUrl(baseUrl: string, file: GenericFile): string {
+function genericUrl(baseUrl: string, file: GiteaGenericPackageFile): string {
   return `${baseUrl}/api/packages/${encodeURIComponent(file.owner)}/generic/${encodeURIComponent(file.package)}/${encodeURIComponent(file.version)}/${encodeURIComponent(file.filename)}`;
 }
 
@@ -161,12 +161,12 @@ async function remoteMatches(options: {
   return hash.digest('hex') === options.expectedSha256;
 }
 
-async function publishFile(options: {
+export async function publishGiteaGenericPackageFile(options: {
   auth?: PythonGenericPublishAuth;
   baseUrl: string;
   bundleDir: string;
   fetch: typeof globalThis.fetch;
-  file: GenericFile;
+  file: GiteaGenericPackageFile;
   onProgress?: PythonFilePublishProgress;
   timeoutMs: number;
 }): Promise<'published' | 'skipped'> {
@@ -232,8 +232,8 @@ async function publishFile(options: {
 function applicationFiles(
   index: PythonApplicationBundleIndex,
   manifest: PythonPublicationManifest
-): GenericFile[] {
-  const files: GenericFile[] = [];
+): GiteaGenericPackageFile[] {
+  const files: GiteaGenericPackageFile[] = [];
   for (const application of index.applications) {
     const publication = manifest.applications.find(
       (candidate) => candidate.targetId === application.targetId
@@ -264,10 +264,10 @@ function applicationFiles(
       files.push({
         expectedSha256: document.digest,
         file: document.file,
-        filename: validateCoordinate(path.posix.basename(document.file), 'filename'),
-        owner: validateCoordinate(publication.genericPackage.owner, 'owner'),
-        package: validateCoordinate(publication.genericPackage.package, 'package name'),
-        version: validateCoordinate(publication.genericPackage.version, 'version'),
+        filename: validateGiteaGenericCoordinate(path.posix.basename(document.file), 'filename'),
+        owner: validateGiteaGenericCoordinate(publication.genericPackage.owner, 'owner'),
+        package: validateGiteaGenericCoordinate(publication.genericPackage.package, 'package name'),
+        version: validateGiteaGenericCoordinate(publication.genericPackage.version, 'version'),
       });
     }
   }
@@ -277,7 +277,7 @@ function applicationFiles(
 function optionalArtifactFiles(
   index: PythonApplicationBundleIndex,
   manifest: PythonPublicationManifest
-): GenericFile[] {
+): GiteaGenericPackageFile[] {
   return index.artifacts.flatMap((artifact) => {
     if (artifact.kind === 'wheel') {
       return [];
@@ -292,16 +292,16 @@ function optionalArtifactFiles(
       {
         expectedSha256: artifact.sha256,
         file: artifact.file,
-        filename: validateCoordinate(artifact.filename, 'filename'),
-        owner: validateCoordinate(publication.genericPackage.owner, 'owner'),
-        package: validateCoordinate(publication.genericPackage.package, 'package name'),
-        version: validateCoordinate(publication.genericPackage.version, 'version'),
+        filename: validateGiteaGenericCoordinate(artifact.filename, 'filename'),
+        owner: validateGiteaGenericCoordinate(publication.genericPackage.owner, 'owner'),
+        package: validateGiteaGenericCoordinate(publication.genericPackage.package, 'package name'),
+        version: validateGiteaGenericCoordinate(publication.genericPackage.version, 'version'),
       },
     ];
   });
 }
 
-function groupFilesByPackage(files: GenericFile[]): IndexedGenericFile[][] {
+function groupFilesByPackage(files: GiteaGenericPackageFile[]): IndexedGenericFile[][] {
   const groups = new Map<string, IndexedGenericFile[]>();
   for (const [index, file] of files.entries()) {
     // Gitea creates the package row lazily, so concurrent first uploads for one
@@ -361,7 +361,7 @@ export async function publishPythonGenericArtifacts(
     options.onProgress?.({ current: 0, status: 'done', total: 0 });
     return report;
   }
-  let files: GenericFile[];
+  let files: GiteaGenericPackageFile[];
   try {
     files = [
       ...applicationFiles(index, options.publicationManifest),
@@ -479,9 +479,9 @@ export async function publishPythonGenericArtifacts(
                 owner: file.owner,
                 package: file.package,
                 status: await serializeByKey(digestUploadTails, file.expectedSha256, async () =>
-                  publishFile({
+                  publishGiteaGenericPackageFile({
                     ...(options.auth ? { auth: options.auth } : {}),
-                    baseUrl: normalizeBaseUrl(options.giteaBaseUrl),
+                    baseUrl: normalizeGiteaGenericBaseUrl(options.giteaBaseUrl),
                     bundleDir,
                     fetch: options.fetch ?? globalThis.fetch,
                     file,

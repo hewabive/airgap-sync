@@ -718,6 +718,8 @@ export async function writePublishRunHistory(
       'python-publish-dry-run-report.json',
       'python-application-publish-report.json',
       'python-application-publish-dry-run-report.json',
+      'python/distributions/publish-report.json',
+      'python/distributions/publish-dry-run-report.json',
     ].map((fileName) =>
       copyIfExists(path.join(options.bundleDir, fileName), path.join(targetDir, fileName))
     )

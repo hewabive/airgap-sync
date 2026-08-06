@@ -1,9 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyBundle,
   defaultPythonPublicationProfile,
+  downloadCpythonDistributionBundle,
   type ApplyProgressEvent,
   type GiteaClient,
 } from '../src/index.js';
@@ -176,6 +178,63 @@ describe('applyBundle', () => {
     });
     expect(await fs.pathExists(path.join(bundleDir, 'apply-dry-run-report.json'))).toBe(true);
     expect(await fs.pathExists(path.join(bundleDir, 'publish-dry-run-report.json'))).toBe(true);
+  });
+
+  it('plans additive CPython distribution publication through the generic package owner', async () => {
+    const content = Buffer.from('cpython archive');
+    const filename =
+      'cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
+    await downloadCpythonDistributionBundle({
+      bundleDir,
+      candidates: [
+        {
+          filename,
+          platformFamilyId: 'linux-glibc-x86_64',
+          provider: 'python-build-standalone',
+          providerBuild: '20260805',
+          providerPublishedAt: '2026-08-05T00:00:00.000Z',
+          pythonVersion: '3.12.13',
+          sha256: createHash('sha256').update(content).digest('hex'),
+          size: content.length,
+          sourceUrl: `https://github.example/${filename}`,
+        },
+      ],
+      fetch: () =>
+        Promise.resolve(
+          new Response(content, { headers: { 'content-length': String(content.length) } })
+        ),
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      targets: [
+        {
+          builds: { windowDays: 30 },
+          patches: { latest: 1 },
+          platforms: ['linux-glibc-x86_64'],
+          provider: 'python-build-standalone',
+          series: { from: '3.12', major: 3, through: 'latest-stable' },
+          type: 'cpython-distributions',
+        },
+      ],
+    });
+
+    const report = await applyBundle({
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.cpythonDistributions).toMatchObject({
+      enabled: true,
+      errors: [],
+      owner: 'airgap-packages',
+      planned: 1,
+    });
+    expect(report.gitea.organizations).toContainEqual(
+      expect.objectContaining({ owner: 'airgap-packages', status: 'planned' })
+    );
+    expect(report.succeeded).toBe(true);
   });
 
   it('plans Python publishing when a Python seed manifest is present', async () => {

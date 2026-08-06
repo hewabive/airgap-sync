@@ -626,6 +626,7 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
   const gitConfigErrors = report.gitConfig?.errors.length ?? 0;
   const pythonErrors = report.python?.errors.length ?? 0;
   const pythonApplicationErrors = report.pythonApplications?.errors.length ?? 0;
+  const cpythonDistributionErrors = report.cpythonDistributions?.errors.length ?? 0;
   const totalErrors =
     npmAuthErrors.length +
     npmPublishErrors.length +
@@ -634,7 +635,8 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     gitApplyErrors +
     gitConfigErrors +
     pythonErrors +
-    pythonApplicationErrors;
+    pythonApplicationErrors +
+    cpythonDistributionErrors;
   const mode = report.dryRun ? 'dry run, ' : '';
   const status = report.succeeded
     ? green(
@@ -678,6 +680,11 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     ...(report.pythonApplications
       ? [
           `Python application contracts: ${String(report.pythonApplications.actions.length)} total, ${String(report.pythonApplications.published + report.pythonApplications.planned)} ${report.dryRun ? 'planned' : 'published'}, ${String(report.pythonApplications.skipped)} already in registry, ${String(pythonApplicationErrors)} errors.`,
+        ]
+      : []),
+    ...(report.cpythonDistributions
+      ? [
+          `CPython distributions: ${String(report.cpythonDistributions.actions.length)} total, ${String(report.cpythonDistributions.published + report.cpythonDistributions.planned)} ${report.dryRun ? 'planned' : 'published'}, ${String(report.cpythonDistributions.skipped)} already in Gitea, ${String(cpythonDistributionErrors)} errors.`,
         ]
       : []),
     `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(
@@ -1335,6 +1342,7 @@ const collectPhaseLabels: Record<DownloadProgressEvent['phase'], string> = {
 };
 
 const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
+  'cpython-distribution-publish': 'publish CPython distributions',
   gitea: 'provision Gitea repositories',
   'git-apply': 'push Git mirrors',
   'git-config': 'configure Git rewrites',
@@ -1354,7 +1362,10 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
 
   function needsHeartbeat(phase: ApplyProgressPhase): boolean {
     return (
-      phase === 'git-apply' || phase === 'python-publish' || phase === 'python-application-publish'
+      phase === 'git-apply' ||
+      phase === 'python-publish' ||
+      phase === 'python-application-publish' ||
+      phase === 'cpython-distribution-publish'
     );
   }
 

@@ -51,6 +51,17 @@ import {
   resolvePythonPublicationProfile,
   type PythonPublicationProfile,
 } from './python/publication-targets.js';
+import {
+  cpythonDistributionPublishDryRunReportPath,
+  cpythonDistributionPublishReportPath,
+  publishCpythonDistributions,
+  type CpythonDistributionPublishReport,
+} from './python/distribution-publisher.js';
+import {
+  readCpythonDistributionBundleIndex,
+  type CpythonDistributionBundleIndex,
+} from './python/distribution-bundle.js';
+import { mergeGiteaOwnerRequirements } from './gitea-owners.js';
 
 export interface ApplyBundleOptions {
   bundleDir: string;
@@ -83,6 +94,7 @@ export type ApplyProgressPhase =
   | 'publish'
   | 'python-publish'
   | 'python-application-publish'
+  | 'cpython-distribution-publish'
   | 'gitea'
   | 'git-apply'
   | 'git-config'
@@ -128,11 +140,13 @@ function applySucceeded(reports: {
   publish: PublishReport;
   python?: PythonPublishReport;
   pythonApplications?: PythonGenericPublishReport;
+  cpythonDistributions?: CpythonDistributionPublishReport;
 }): boolean {
   return (
     reports.publish.errors.length === 0 &&
     (reports.python?.errors.length ?? 0) === 0 &&
     (reports.pythonApplications?.errors.length ?? 0) === 0 &&
+    (reports.cpythonDistributions?.errors.length ?? 0) === 0 &&
     reports.gitea.errors.length === 0 &&
     reports.gitea.organizationErrors.length === 0 &&
     reports.gitApply.errors.length === 0 &&
@@ -205,6 +219,37 @@ function blockedPythonGenericPublishReport(options: {
   };
 }
 
+function blockedCpythonDistributionPublishReport(
+  index: CpythonDistributionBundleIndex,
+  options: {
+    dryRun: boolean;
+    generatedAt: string;
+    owner: string;
+    reason: string;
+  }
+): CpythonDistributionPublishReport {
+  const actions = index.artifacts.map((artifact) => ({
+    error: options.reason,
+    file: artifact.file,
+    id: artifact.id,
+    owner: options.owner,
+    package: 'python-build-standalone',
+    status: 'error' as const,
+    version: artifact.providerBuild,
+  }));
+  return {
+    actions,
+    dryRun: options.dryRun,
+    enabled: true,
+    errors: actions,
+    generatedAt: options.generatedAt,
+    owner: options.owner,
+    planned: 0,
+    published: 0,
+    skipped: 0,
+  };
+}
+
 function mergeAssumedGitWithPackageOwners(
   assumed: GiteaRepositoryProvisionReport,
   packageOwners: GiteaRepositoryProvisionReport
@@ -254,7 +299,10 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
   const pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
-  const hasPythonPublication = Boolean(pythonManifest ?? pythonApplicationIndex);
+  const cpythonDistributionIndex = await readCpythonDistributionBundleIndex(bundleDir);
+  const hasPythonPublication = Boolean(
+    pythonManifest ?? pythonApplicationIndex ?? cpythonDistributionIndex
+  );
   const configuredPythonProfile =
     options.pythonPublicationProfile ?? defaultPythonPublicationProfile();
   const pythonProfile = hasPythonPublication
@@ -272,12 +320,22 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
         options.gitAuthenticatedUser
       )
     : undefined;
-  const ownerRequirements =
-    pythonProfile?.ownerRequirements.filter(
+  const ownerRequirements = mergeGiteaOwnerRequirements([
+    ...(pythonProfile?.ownerRequirements.filter(
       (requirement) =>
         (pythonManifest !== undefined && requirement.purposes.includes('pypi')) ||
         (pythonApplicationIndex !== undefined && requirement.purposes.includes('generic'))
-    ) ?? [];
+    ) ?? []),
+    ...(cpythonDistributionIndex && pythonProfile
+      ? [
+          {
+            ...pythonProfile.genericOwner,
+            purposes: ['generic' as const],
+            visibility: pythonProfile.visibility,
+          },
+        ]
+      : []),
+  ]);
 
   options.onProgress?.({ phase: 'gitea', status: 'start' });
   let gitea: GiteaRepositoryProvisionReport;
@@ -429,6 +487,57 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     };
   }
 
+  let cpythonDistributions: CpythonDistributionPublishReport;
+  if (cpythonDistributionIndex) {
+    const owner = pythonProfile!.genericOwner.name;
+    if (packageOwnerErrors.has(owner)) {
+      cpythonDistributions = blockedCpythonDistributionPublishReport(cpythonDistributionIndex, {
+        dryRun,
+        generatedAt,
+        owner,
+        reason: `Gitea owner ${owner} could not be provisioned`,
+      });
+      await fs.writeJsonAtomic(
+        path.join(
+          bundleDir,
+          dryRun ? cpythonDistributionPublishDryRunReportPath : cpythonDistributionPublishReportPath
+        ),
+        cpythonDistributions,
+        { spaces: 2 }
+      );
+    } else {
+      cpythonDistributions = await publishCpythonDistributions({
+        ...(options.pythonAuth ? { auth: options.pythonAuth } : {}),
+        bundleDir,
+        dryRun,
+        generatedAt,
+        giteaBaseUrl: options.giteaBaseUrl,
+        ...(options.onProgress
+          ? {
+              onProgress: (event) => {
+                options.onProgress?.({ ...event, phase: 'cpython-distribution-publish' });
+              },
+            }
+          : {}),
+        owner,
+        ...(options.publishConcurrency === undefined
+          ? {}
+          : { concurrency: options.publishConcurrency }),
+      });
+    }
+  } else {
+    cpythonDistributions = {
+      actions: [],
+      dryRun,
+      enabled: false,
+      errors: [],
+      generatedAt,
+      planned: 0,
+      published: 0,
+      skipped: 0,
+    };
+  }
+
   const gitApply = await applyGitSources({
     bundleDir,
     dryRun,
@@ -482,6 +591,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     publish,
     ...(python ? { python } : {}),
     ...(pythonApplications.enabled ? { pythonApplications } : {}),
+    ...(cpythonDistributions.enabled ? { cpythonDistributions } : {}),
     registryUrl: options.registryUrl,
     succeeded: applySucceeded({
       gitApply,
@@ -490,6 +600,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
       publish,
       ...(python ? { python } : {}),
       ...(pythonApplications.enabled ? { pythonApplications } : {}),
+      ...(cpythonDistributions.enabled ? { cpythonDistributions } : {}),
     }),
   };
   options.onProgress?.({ phase: 'report', status: 'start' });
