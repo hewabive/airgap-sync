@@ -35,6 +35,7 @@ import {
   defaultWorkspaceGiteaUrl,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
+  editWorkspaceTarget,
   fetchGitSources,
   fetchSeedBundle,
   findMaintainedPythonApplicationRecipe,
@@ -144,6 +145,7 @@ import type {
   PythonEnvironmentPlan,
   PythonPublicationProfile,
   WorkspacePythonApplicationTarget,
+  WorkspaceTargetEdit,
 } from './index.js';
 import {
   resolveTargetEnvironment,
@@ -279,6 +281,17 @@ interface TargetCpythonDistributionsOptions {
   windowDays: number;
 }
 
+interface TargetEditOptions {
+  branch?: string;
+  clearBranch?: boolean;
+  fromMinor?: string;
+  includeVersion?: string[];
+  latest?: number;
+  platform?: string[];
+  pythonResolutionMode?: string;
+  windowDays?: number;
+}
+
 interface GitSourcesOptions {
   write?: boolean;
 }
@@ -334,6 +347,10 @@ function collectNumbers(value: string, previous: number[]): number[] {
 
 function collectStrings(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+function collectOptionalStrings(value: string, previous: string[] | undefined): string[] {
+  return [...(previous ?? []), value];
 }
 
 function parseCapabilities(values: string[]): Record<string, string> {
@@ -4085,8 +4102,70 @@ secretsCommand
   });
 
 targetCommand
+  .command('edit')
+  .description('Edit the supported settings of a workspace target')
+  .argument('<index>', 'Target index from target list')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--branch <name>', 'Replace a Git target branch')
+  .option('--clear-branch', 'Remove an explicit Git target branch')
+  .option('--from-minor <version>', 'Replace the lowest CPython minor')
+  .option(
+    '--platform <id>',
+    'Replace CPython platform families; repeat for additional families',
+    collectOptionalStrings
+  )
+  .option('--latest <count>', 'Replace CPython patch depth', parsePositiveInteger)
+  .option(
+    '--window-days <days>',
+    'Replace the CPython provider-build window in fixed 24-hour days',
+    parsePositiveInteger
+  )
+  .option(
+    '--include-version <version>',
+    'Replace Python application exact/latest selectors; repeat for alternatives',
+    collectOptionalStrings
+  )
+  .option(
+    '--python-resolution-mode <mode>',
+    'Replace a target override: locked-only, approximate, or inherit'
+  )
+  .action(async (index: string, workspace: string, options: TargetEditOptions) => {
+    try {
+      if (options.branch !== undefined && options.clearBranch === true) {
+        throw new Error('Use either --branch or --clear-branch, not both');
+      }
+      const edit: WorkspaceTargetEdit = {
+        ...(options.branch !== undefined ? { branch: options.branch } : {}),
+        ...(options.clearBranch === true ? { branch: null } : {}),
+        ...(options.fromMinor !== undefined ? { fromMinor: options.fromMinor } : {}),
+        ...(options.includeVersion !== undefined
+          ? { versionSelection: parsePythonApplicationVersionSelection(options.includeVersion) }
+          : {}),
+        ...(options.latest !== undefined ? { latest: options.latest } : {}),
+        ...(options.platform !== undefined
+          ? { platforms: parsePythonApplicationPlatforms(options.platform) }
+          : {}),
+        ...(options.pythonResolutionMode !== undefined
+          ? {
+              pythonResolutionMode:
+                parseTargetPythonResolutionMode(options.pythonResolutionMode) ?? null,
+            }
+          : {}),
+        ...(options.windowDays !== undefined ? { windowDays: options.windowDays } : {}),
+      };
+      const result = await editWorkspaceTarget(workspace, parsePositiveInteger(index), edit);
+      console.log(
+        `${result.changed ? 'Updated' : 'Unchanged'} target: ${formatTargetValue(result.target)}\nTotal targets: ${String(result.config.targets.length)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetCommand
   .command('set-python-resolution')
-  .description('Override or inherit the Python resolution mode for a target')
+  .description('Deprecated alias for target edit --python-resolution-mode')
   .argument('<index>', 'Target index from target list')
   .argument('<mode>', 'locked-only, approximate, or inherit')
   .argument('[workspace]', 'Workspace directory', '.')
@@ -4112,7 +4191,7 @@ targetCommand
 
 targetCommand
   .command('set-python-app-versions')
-  .description('Replace the exact/latest version selectors of a Python application target')
+  .description('Deprecated alias for target edit --include-version')
   .argument('<index>', 'Target index from target list')
   .argument('[workspace]', 'Workspace directory', '.')
   .option(
