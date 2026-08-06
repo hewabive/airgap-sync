@@ -9,6 +9,7 @@ import {
   createWorkspacePythonRequirements,
   createWorkspacePythonRootWheels,
   createWorkspaceSnapshot,
+  editWorkspaceTarget,
   initWorkspace,
   migrateWorkspaceConfig,
   previewWorkspaceConfigMigration,
@@ -25,6 +26,7 @@ import {
   workspaceConfigPythonPublicationProfileBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceLegacyPythonSettings,
+  workspaceTargetEditableFields,
   workspaceSecretsFileName,
   writeWorkspaceConfig,
 } from '../src/core/workspace.js';
@@ -166,6 +168,90 @@ describe('workspace config', () => {
         type: 'cpython-distributions',
       },
     ]);
+  });
+
+  it('edits rolling CPython policy through the common target editor', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      builds: { windowDays: 365 },
+      patches: { latest: 1 },
+      platforms: ['linux-glibc-x86_64'],
+      provider: 'python-build-standalone',
+      series: { from: '3.10', major: 3, through: 'latest-stable' },
+      type: 'cpython-distributions',
+    });
+
+    const updated = await editWorkspaceTarget(tempDir, 1, {
+      fromMinor: '3.11',
+      latest: 3,
+      platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+      windowDays: 30,
+    });
+
+    expect(updated.changed).toBe(true);
+    expect(updated.target).toEqual({
+      builds: { windowDays: 30 },
+      patches: { latest: 3 },
+      platforms: ['linux-glibc-x86_64', 'windows-x86_64'],
+      provider: 'python-build-standalone',
+      series: { from: '3.11', major: 3, through: 'latest-stable' },
+      type: 'cpython-distributions',
+    });
+    await expect(editWorkspaceTarget(tempDir, 1, { latest: 3 })).resolves.toMatchObject({
+      changed: false,
+    });
+  });
+
+  it('declares editable fields by target type and reports immutable targets', async () => {
+    expect(workspaceTargetEditableFields({ spec: 'eslint@latest', type: 'npm' })).toEqual([]);
+    expect(
+      workspaceTargetEditableFields({
+        builds: { windowDays: 365 },
+        patches: { latest: 1 },
+        platforms: ['linux-glibc-x86_64'],
+        provider: 'python-build-standalone',
+        series: { from: '3.10', major: 3, through: 'latest-stable' },
+        type: 'cpython-distributions',
+      })
+    ).toEqual(['fromMinor', 'platforms', 'latest', 'windowDays']);
+
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, { spec: 'eslint@latest', type: 'npm' });
+    await expect(editWorkspaceTarget(tempDir, 1, {})).rejects.toThrow(
+      'npm target has no editable settings'
+    );
+    await expect(editWorkspaceTarget(tempDir, 1, { latest: 2 })).rejects.toThrow(
+      'latest cannot be edited for npm targets'
+    );
+  });
+
+  it('edits and clears shared target settings without changing target identity', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      branch: 'main',
+      type: 'git',
+      url: 'https://github.com/acme/app.git',
+    });
+
+    const updated = await editWorkspaceTarget(tempDir, 1, {
+      branch: 'release',
+      pythonResolutionMode: 'approximate',
+    });
+    expect(updated.target).toEqual({
+      branch: 'release',
+      pythonResolutionMode: 'approximate',
+      type: 'git',
+      url: 'https://github.com/acme/app.git',
+    });
+
+    const cleared = await editWorkspaceTarget(tempDir, 1, {
+      branch: null,
+      pythonResolutionMode: null,
+    });
+    expect(cleared.target).toEqual({
+      type: 'git',
+      url: 'https://github.com/acme/app.git',
+    });
   });
 
   it('expands legacy automatic Python coverage to the initial supported minor matrix', async () => {

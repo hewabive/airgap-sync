@@ -124,6 +124,26 @@ export type WorkspaceTarget =
   | WorkspacePypiTarget
   | WorkspacePythonApplicationTarget
   | WorkspacePythonWheelTarget;
+
+export type WorkspaceTargetEditableField =
+  | 'branch'
+  | 'fromMinor'
+  | 'latest'
+  | 'platforms'
+  | 'pythonResolutionMode'
+  | 'versionSelection'
+  | 'windowDays';
+
+export interface WorkspaceTargetEdit {
+  branch?: string | null;
+  fromMinor?: string;
+  latest?: number;
+  platforms?: BuiltInPlatformFamilyId[];
+  pythonResolutionMode?: PythonResolutionMode | null;
+  versionSelection?: PythonApplicationVersionSelection;
+  windowDays?: number;
+}
+
 export type WorkspacePromptBoolean = boolean | 'ask';
 
 export interface WorkspaceDefaults {
@@ -1491,6 +1511,40 @@ function targetKey(target: WorkspaceTarget): string {
           : [target.type, target.spec].join('\0');
 }
 
+const workspaceTargetEditFields: WorkspaceTargetEditableField[] = [
+  'branch',
+  'fromMinor',
+  'latest',
+  'platforms',
+  'pythonResolutionMode',
+  'versionSelection',
+  'windowDays',
+];
+
+export function workspaceTargetEditableFields(
+  target: WorkspaceTarget
+): WorkspaceTargetEditableField[] {
+  switch (target.type) {
+    case 'cpython-distributions':
+      return ['fromMinor', 'platforms', 'latest', 'windowDays'];
+    case 'git':
+      return ['branch', 'pythonResolutionMode'];
+    case 'npm':
+      return [];
+    case 'pypi':
+    case 'python-wheel':
+      return ['pythonResolutionMode'];
+    case 'python-app':
+      return ['versionSelection'];
+  }
+}
+
+function requestedWorkspaceTargetEditFields(
+  edit: WorkspaceTargetEdit
+): WorkspaceTargetEditableField[] {
+  return workspaceTargetEditFields.filter((field) => edit[field] !== undefined);
+}
+
 export async function addWorkspaceTarget(
   workspaceDir: string,
   target: WorkspaceTarget
@@ -1531,6 +1585,116 @@ export async function addWorkspaceTarget(
   return { added: !exists, config };
 }
 
+export async function editWorkspaceTarget(
+  workspaceDir: string,
+  index: number,
+  edit: WorkspaceTargetEdit
+): Promise<{ changed: boolean; config: WorkspaceConfig; target: WorkspaceTarget }> {
+  const config = await readWorkspaceConfig(workspaceDir);
+  if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+  const current = config.targets[index - 1];
+  if (!current) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+
+  const editableFields = workspaceTargetEditableFields(current);
+  const requestedFields = requestedWorkspaceTargetEditFields(edit);
+  if (requestedFields.length === 0) {
+    throw new Error(
+      editableFields.length === 0
+        ? `${current.type} target has no editable settings`
+        : `No editable fields were provided for ${current.type} target`
+    );
+  }
+  const unsupportedField = requestedFields.find((field) => !editableFields.includes(field));
+  if (unsupportedField) {
+    if (unsupportedField === 'pythonResolutionMode') {
+      throw new Error(`${current.type} targets do not resolve Python dependencies`);
+    }
+    if (unsupportedField === 'versionSelection') {
+      throw new Error(`Target ${String(index)} is not a python-app target`);
+    }
+    throw new Error(`${unsupportedField} cannot be edited for ${current.type} targets`);
+  }
+
+  let candidate: WorkspaceTarget;
+  switch (current.type) {
+    case 'cpython-distributions':
+      candidate = {
+        ...current,
+        builds: { windowDays: edit.windowDays ?? current.builds.windowDays },
+        patches: { latest: edit.latest ?? current.patches.latest },
+        platforms: edit.platforms ?? current.platforms,
+        series: {
+          ...current.series,
+          from: edit.fromMinor ?? current.series.from,
+        },
+      };
+      break;
+    case 'git': {
+      candidate = { ...current };
+      if (edit.branch !== undefined) {
+        if (edit.branch === null) {
+          delete candidate.branch;
+        } else {
+          candidate.branch = edit.branch;
+        }
+      }
+      if (edit.pythonResolutionMode !== undefined) {
+        if (edit.pythonResolutionMode === null) {
+          delete candidate.pythonResolutionMode;
+        } else {
+          candidate.pythonResolutionMode = edit.pythonResolutionMode;
+        }
+      }
+      break;
+    }
+    case 'pypi':
+    case 'python-wheel': {
+      candidate = { ...current };
+      if (edit.pythonResolutionMode === null) {
+        delete candidate.pythonResolutionMode;
+      } else if (edit.pythonResolutionMode !== undefined) {
+        candidate.pythonResolutionMode = edit.pythonResolutionMode;
+      }
+      break;
+    }
+    case 'python-app': {
+      candidate = {
+        ...current,
+        application: {
+          ...current.application,
+          versionSelection: edit.versionSelection!,
+        },
+      };
+      delete candidate.application.version;
+      break;
+    }
+    case 'npm':
+      throw new Error('npm target has no editable settings');
+  }
+
+  const target = normalizeWorkspaceTarget(candidate);
+  const duplicateIndex = config.targets.findIndex(
+    (existing, existingIndex) =>
+      existingIndex !== index - 1 && targetKey(existing) === targetKey(target)
+  );
+  if (duplicateIndex >= 0) {
+    throw new Error(
+      `Edited target ${String(index)} would duplicate target ${String(duplicateIndex + 1)}`
+    );
+  }
+
+  const changed = semanticDigest(current) !== semanticDigest(target);
+  if (changed) {
+    config.targets[index - 1] = target;
+    await writeWorkspaceConfig(workspaceDir, config);
+  }
+  return { changed, config, target };
+}
+
 export async function setWorkspacePythonApplicationVersionSelection(
   workspaceDir: string,
   index: number,
@@ -1539,23 +1703,11 @@ export async function setWorkspacePythonApplicationVersionSelection(
   config: WorkspaceConfig;
   target: WorkspacePythonApplicationTarget;
 }> {
-  const config = await readWorkspaceConfig(workspaceDir);
-  if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
-    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
-  }
-  const current = config.targets[index - 1];
-  if (current?.type !== 'python-app') {
+  const result = await editWorkspaceTarget(workspaceDir, index, { versionSelection });
+  if (result.target.type !== 'python-app') {
     throw new Error(`Target ${String(index)} is not a python-app target`);
   }
-  const application = { ...current.application, versionSelection };
-  delete application.version;
-  const target = normalizePythonApplicationTarget({
-    ...current,
-    application,
-  });
-  config.targets[index - 1] = target;
-  await writeWorkspaceConfig(workspaceDir, config);
-  return { config, target };
+  return { config: result.config, target: result.target };
 }
 
 export async function removeWorkspaceTarget(
@@ -1580,24 +1732,10 @@ export async function setWorkspaceTargetPythonResolutionMode(
   index: number,
   pythonResolutionMode: PythonResolutionMode | undefined
 ): Promise<{ config: WorkspaceConfig; target: WorkspaceTarget }> {
-  const config = await readWorkspaceConfig(workspaceDir);
-  if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
-    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
-  }
-  const target = config.targets[index - 1];
-  if (!target) {
-    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
-  }
-  if (target.type !== 'git' && target.type !== 'pypi' && target.type !== 'python-wheel') {
-    throw new Error(`${target.type} targets do not resolve Python dependencies`);
-  }
-  if (pythonResolutionMode) {
-    target.pythonResolutionMode = pythonResolutionMode;
-  } else {
-    delete target.pythonResolutionMode;
-  }
-  await writeWorkspaceConfig(workspaceDir, config);
-  return { config, target };
+  const result = await editWorkspaceTarget(workspaceDir, index, {
+    pythonResolutionMode: pythonResolutionMode ?? null,
+  });
+  return { config: result.config, target: result.target };
 }
 
 export function selectWorkspaceTargets(
