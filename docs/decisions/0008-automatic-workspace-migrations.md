@@ -4,12 +4,16 @@ Date: 2026-07-27
 
 ## Status
 
-Accepted
+Accepted. Superseded for `python-runtime` compatibility by
+[ADR 0011](0011-cpython-distribution-transfer.md).
 
 Amends the schema-v1 lifetime decision in
 [ADR 0007](0007-retain-legacy-python-seeding-until-1.0.md). Legacy Python target
 behavior remains supported, but its persisted workspace representation is migrated to
 schema v2.
+
+ADR 0011 later removes the unused `python-runtime` target and legacy transfer fields;
+the automatic migration mechanism and other legacy Python targets remain unchanged.
 
 ## Context
 

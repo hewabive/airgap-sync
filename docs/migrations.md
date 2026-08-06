@@ -5,9 +5,8 @@ behavior**. When `airgap-sync` opens an existing workspace, it upgrades the
 configuration before normal operations use it.
 
 These migrations describe compatibility with existing files, not the current Python
-consumer contract. In particular, preserving runtime-transfer fields does not make a
-managed CPython or a consumer `uv` version part of application repository coverage.
-See [Python Support](python.md).
+consumer contract. Managed CPython and consumer package managers are independent from
+application repository coverage. See [Python Support](python.md).
 
 ## Invariants
 
@@ -41,11 +40,12 @@ strings so that `0003` has an explicit input.
 cannot be classified safely as users or organizations, so migration stops with an
 actionable request to configure `python.publication.owner` and its explicit kind.
 
-Early development builds could write `python.artifactTransfer` and the backup filename
+Early development builds could write `python.artifactTransfer`, `python-runtime`
+targets, and the backup filename
 `airgap-sync.json.before-0004-python-runtime-transfer.backup`. There is no registered
-`0004` migration now: new and migrated workspaces do not enable runtime transfer.
-Existing fields remain readable for 0.x compatibility and are ignored by normal
-application planning.
+`0004` migration: that unused transfer experiment was removed. Unknown
+`python.artifactTransfer` data is dropped when a current configuration is normalized;
+replace any `python-runtime` target with `cpython-distributions` before opening it.
 
 ## Operator behavior
 

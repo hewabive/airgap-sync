@@ -2,6 +2,19 @@
 
 ## 0.1.0
 
+- Added first-class `cpython-distributions` targets backed by
+  `python-build-standalone`, with automatic discovery of new stable CPython 3 minors,
+  independently evaluated per-platform latest-patch depth, and exact-day provider-build
+  windows.
+- Added resumable, verified, content-addressed CPython distribution acquisition,
+  atomic bundle activation, reference-safe rolling prune, static verification, bundle
+  summaries, and additive idempotent publication to Gitea Generic Packages.
+- Added global successful full-download history and a watermark warning that prevents
+  a CPython build window from silently skipping releases after a long collection gap.
+  Partial, failed, and dry-run downloads do not advance the watermark.
+- Removed the unused `python-runtime` target, `python.artifactTransfer`, checked-in
+  runtime catalogs, and application-plan CPython/consumer-tool artifact transfer.
+  Package managers such as `uv` remain independent ordinary Python applications.
 - Added composable Python application version selectors so one target can require exact
   releases together with `latest`, validate every selector against the full requested
   Python/platform wheel closure, and publish one independently locked variant per
@@ -28,8 +41,8 @@
 - Made workspace downloads create missing Python application plans automatically,
   rebuild plans invalidated by explicit configuration changes, and reuse current plans.
 - Added optional Gitea Generic Package publication for application plans, consumer
-  contracts, locks, and legacy runtime/tool artifacts. It is disabled by default;
-  Gitea PyPI is sufficient for production installation with standard pip/uv commands.
+  contracts, locks, and evidence documents. It is disabled by default; Gitea PyPI is
+  sufficient for production installation with standard pip/uv commands.
 - Serialized identical Generic Package blob uploads across application packages to
   avoid Gitea PostgreSQL `UQE_package_blob_md5` races while retaining parallel uploads
   for different content.

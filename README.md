@@ -40,6 +40,9 @@ been tested with Verdaccio and Gitea:
 - platform-aware Python application collection for Windows and glibc Linux x86-64,
   with explicit CPython 3.10–3.13 cells, minimum wheel coverage, inferred glibc
   boundaries, content-addressed storage, and Gitea PyPI publishing;
+- rolling `python-build-standalone` CPython distribution collection with automatic
+  stable-minor discovery, per-platform patch depth, build windows, local pruning, and
+  additive Gitea Generic Package publication;
 - static dependency-closure checks plus ordinary dependency-resolving `pip` and `uv`
   verification from a temporary index populated only with the collected bundle;
 - Git dependency discovery and mirroring;
@@ -50,8 +53,8 @@ been tested with Verdaccio and Gitea:
 - append-only download and publish run reports under `airgap-bundle/runs/`.
 
 Remaining Python work focuses on broader real-application and Gitea integration
-coverage, additional artifact sources, and a separate explicit target model for
-optional runtime/tool transfer.
+coverage, additional distribution providers, and wider explicitly supported platform
+envelopes.
 
 ## Requirements
 
@@ -109,6 +112,10 @@ npm exec -- airgap-sync target add npm eslint@latest
 npm exec -- airgap-sync target add python-app orjson --coverage desktop-x64 \
   --python-version 3.10 --python-version 3.11 \
   --python-version 3.12 --python-version 3.13
+npm exec -- airgap-sync target add cpython-distributions \
+  --from-minor 3.10 \
+  --platform linux-glibc-x86_64 --platform windows-x86_64 \
+  --latest 3 --window-days 365
 
 # Online machine.
 npm exec -- airgap-sync download --prune
@@ -194,8 +201,16 @@ unreferenced bundle files; packages already published to Gitea remain available.
 The implementation plans one dependency tree per declared compatibility cell, retains
 the minimum practical wheel union covering those trees, and publishes the result to
 Gitea PyPI. The collector's pinned `uv` is internal; normal targets do not ask for a
-consumer `uv` version or transfer CPython. Generated plans and locks are audit evidence,
-not the consumer contract. See [Python Support](./docs/python.md).
+consumer `uv` version. Generated plans and locks are audit evidence, not the consumer
+contract. A consumer package manager such as `uv` can be transferred as its own
+ordinary Python application.
+
+Portable CPython archives are a separate input. A `cpython-distributions` target tracks
+stable CPython 3 minors from a fixed lower bound through the newest stable minor,
+retains the configured latest patch depth independently for each platform, and applies
+a provider-build window in exact days. These files are published additively to Gitea
+Generic Packages and are never mixed into an application's PyPI dependency closure.
+See [Python Support](./docs/python.md).
 
 ## Git Mirrors
 
@@ -282,6 +297,7 @@ airgap-bundle/python-packages/          Python wheels
 airgap-bundle/python/application-index.json
 airgap-bundle/python/applications/      Plans, resolver evidence, and optional locks
 airgap-bundle/python/artifacts/         Shared content-addressed Python artifacts
+airgap-bundle/python/distributions/     Rolling portable CPython distributions
 airgap-bundle/python/publications/      Closed-side publication manifests and reports
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions

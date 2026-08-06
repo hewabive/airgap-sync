@@ -4,7 +4,7 @@ Date: 2026-08-06
 
 ## Status
 
-Accepted. Implementation is split into the phases at the end of this document.
+Accepted and implemented.
 
 This decision completes the CPython transfer boundary reserved by
 [ADR 0010](0010-gitea-pypi-as-python-consumer-interface.md). It replaces the legacy
@@ -188,6 +188,8 @@ publication. Destination URLs and publication receipts are excluded.
   them.
 
 ## Implementation plan
+
+All phases below are complete. They are retained as an implementation record.
 
 ### Phase 1: decision and contracts
 

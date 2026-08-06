@@ -4,10 +4,11 @@
 registries through normal publication APIs.
 
 The product direction is broader: a portable airgap dependency sync tool for projects
-that combine Git repositories, npm registry dependencies, npm Git dependencies, and
-Python applications. The npm/Verdaccio bundle, Python application planner, Git mirror
-transfer, npm/Git fixed-point collection, and top-level publish orchestration are the
-main architectural layers.
+that combine Git repositories, npm registry dependencies, npm Git dependencies,
+Python applications, and explicitly selected portable CPython distributions. The
+npm/Verdaccio bundle, Python application planner, CPython distribution provider, Git
+mirror transfer, npm/Git fixed-point collection, and top-level publish orchestration
+are the main architectural layers.
 
 ## Problem
 
@@ -49,6 +50,7 @@ workspace targets / package specs / package.json / package list
   -> resolve each Python application tree to its leaves for every compatibility cell
   -> minimize the wheels-only union that covers the declared envelope
   -> validate normal package resolution against a bundle-only Python index
+  -> select portable CPython distributions independently from application packages
   -> write airgap bundle
 
 airgap bundle
@@ -58,6 +60,7 @@ airgap bundle
   -> push Git mirrors
   -> publish Python wheels to Gitea PyPI
   -> publish optional Python evidence and reports to Gitea Generic Packages
+  -> publish CPython distributions additively to Gitea Generic Packages
 ```
 
 ## Target Airgap Flow
@@ -73,6 +76,7 @@ online removable media
   -> plan Python repository coverage independently of collector OS/architecture
   -> collect each selected Python dependency tree down to its leaves
   -> download the content-addressed minimum wheel union
+  -> select and download the rolling portable CPython distribution set
   -> scan manifests from newly mirrored Git dependencies
   -> repeat npm/Git collection until no new inputs are found
   -> write transfer bundle
@@ -84,6 +88,7 @@ closed network
   -> create missing Gitea owners/repositories when enabled
   -> push Git mirrors into the closed-network Git host
   -> publish Python wheels and standard metadata to Gitea PyPI
+  -> publish portable CPython distributions to Gitea Generic Packages
   -> verify install against closed-network services
 
 consumer infrastructure
@@ -236,13 +241,16 @@ Target ownership follows the npm model. Active targets and their `requiredBy` ed
 keep local bundle objects alive. Removing a one-time target allows locally unreferenced
 objects to be pruned, but never removes packages already published to Gitea.
 
-Optional transfer of CPython runtimes or package-manager binaries is a separate concern
-and will not be implied by adding an application target. `airgap-sync` does not install
-or manage production environments.
+Portable CPython transfer is a separate `cpython-distributions` target and is never
+implied by adding an application target. It uses a rolling local bundle and additive
+Gitea Generic Package publication. Package-manager binaries are separate ordinary
+Python applications. `airgap-sync` transfers these artifacts but does not install or
+manage production environments.
 
-The normative contract, supported envelope, transition state, and acceptance criteria
-are defined in [Python Support](python.md) and
-[ADR 0010](decisions/0010-gitea-pypi-as-python-consumer-interface.md).
+The normative contracts and supported envelopes are defined in
+[Python Support](python.md),
+[ADR 0010](decisions/0010-gitea-pypi-as-python-consumer-interface.md), and
+[ADR 0011](decisions/0011-cpython-distribution-transfer.md).
 
 ## Collection Fixed Point
 

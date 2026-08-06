@@ -5,11 +5,14 @@ Date: 2026-07-27
 ## Status
 
 Accepted, amended by [ADR 0008](0008-automatic-workspace-migrations.md) and
-[ADR 0010](0010-gitea-pypi-as-python-consumer-interface.md).
+[ADR 0010](0010-gitea-pypi-as-python-consumer-interface.md), then superseded for
+`python-runtime` by [ADR 0011](0011-cpython-distribution-transfer.md).
 
 ADR 0008 supersedes decision 1 below: schema-v1 files are now migrated automatically
-when opened. ADR 0010 replaces the former lock-first application consumer contract;
-decisions retaining lower-level legacy target types and their resolver remain active.
+when opened. ADR 0010 replaces the former lock-first application consumer contract.
+ADR 0011 explicitly removes the unused `python-runtime` experiment before 1.0 and
+replaces it with the independent `cpython-distributions` target. The `pypi` and
+`python-wheel` legacy-seeding decisions remain active.
 
 ## Context
 

@@ -4,7 +4,9 @@ Date: 2026-08-05
 
 ## Status
 
-Accepted and implemented for the normal Python application path.
+Accepted and implemented for the normal Python application path. The separate CPython
+transfer decision reserved here is implemented by
+[ADR 0011](0011-cpython-distribution-transfer.md).
 
 This decision replaces the normal Python workflow from the removed ADRs 0005, 0006,
 and 0009. Git history retains those earlier lock-first and application-plan decisions.
@@ -68,9 +70,9 @@ explicit.
 - Existing index, metadata, wheel-validation, download, deduplication, and Gitea
   publication machinery remains useful.
 - Generated plans and locks remain internal evidence and optional diagnostics.
-- Legacy `python.artifactTransfer` fields remain readable but do not affect normal
-  application planning. Normal workspaces use minimum-cover collection and transfer no
-  CPython or consumer package-manager executable.
+- Normal workspaces use minimum-cover application collection and transfer no CPython
+  or consumer package-manager executable through application plans. ADR 0011 removes
+  `python.artifactTransfer` and introduces independent CPython distribution targets.
 - Supporting more platforms or Python versions expands an explicit compatibility
   envelope and must expose its incremental size.
 - A shared additive Gitea owner needs no destination snapshot or single-writer policy.

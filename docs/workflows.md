@@ -48,6 +48,9 @@ airgap-sync target add npm typescript@latest
 airgap-sync target add python-app orjson --coverage desktop-x64 \
   --python-version 3.10 --python-version 3.11 \
   --python-version 3.12 --python-version 3.13
+airgap-sync target add cpython-distributions --from-minor 3.10 \
+  --platform windows-x86_64 --platform linux-glibc-x86_64 \
+  --latest 1 --window-days 365
 airgap-sync target list
 ```
 
@@ -91,10 +94,9 @@ before the menu or command continues. The original file is retained as
 `airgap-sync migrate --dry-run` only when a non-writing preview is useful.
 
 New workspaces use schema v2 and store Python application intent separately from named
-coverage policies. `python.planner` identifies the collector's internal resolver.
-Older workspaces may still contain `python.artifactTransfer` and `uvVersions`; those
-fields are retained for compatibility and ignored by normal application planning. The
-target contract never asks operators to enumerate consumer package-manager versions.
+coverage policies. `python.planner` identifies the collector's internal resolver. The
+target contract never asks operators to enumerate consumer package-manager versions;
+consumer tools are separate applications and CPython uses its own distribution target.
 
 `download` resolves every selected application across the requested platform/Python
 envelope and follows each dependency tree down to its leaves. The ready condition is
@@ -102,8 +104,8 @@ stronger than producing a lock: ordinary clients must be able to install from an
 populated only with the bundle's artifacts. Shared wheels are stored once. The separate
 `plan` command remains useful for review, size estimates, and explicit refresh.
 
-Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, exact
-`python-wheel`, and `python-runtime` inputs remain supported through the 0.x line.
+Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, and exact
+`python-wheel` inputs remain supported through the 0.x line.
 Their exact environments and approximate resolver opt-ins are Advanced/Legacy, not
 normal application settings.
 

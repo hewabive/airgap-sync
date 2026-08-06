@@ -4,9 +4,10 @@ The CLI keeps download and publish phases separate so the online and offline pha
 auditable.
 
 The preferred user workflow is workspace-based: initialize a directory on removable
-media, add Git/npm/Python application targets once, run `download` online, and run
-`publish` offline. Python consumers install normally from the resulting Gitea PyPI
-index. See [Python Support](python.md) for the target contract and compatibility boundary.
+media, add Git/npm/Python application or CPython distribution targets once, run
+`download` online, and run `publish` offline. Python consumers install normally from
+the resulting Gitea PyPI index. See [Python Support](python.md) for the target contract
+and compatibility boundary.
 
 ## init
 
@@ -42,6 +43,12 @@ airgap-sync target add python-app orjson \
 airgap-sync target add python-app APP \
   --coverage desktop-x64 \
   --extra FEATURE
+airgap-sync target add cpython-distributions \
+  --from-minor 3.10 \
+  --platform windows-x86_64 \
+  --platform linux-glibc-x86_64 \
+  --latest 3 \
+  --window-days 365
 
 # Advanced/legacy package seeding:
 airgap-sync target add pypi 'requests==2.32.4' \
@@ -50,9 +57,6 @@ airgap-sync target add python-wheel \
   'https://downloads.example.test/app-1.0.0-cp313-abi3-manylinux_2_34_x86_64.whl' \
   --sha256 <64-hex-digest> \
   --python-resolution-mode approximate
-airgap-sync target add python-runtime 3.12.13 \
-  'https://github.com/astral-sh/python-build-standalone/releases/download/<build>/<archive>.tar.gz' \
-  --sha256 <64-hex-digest>
 airgap-sync target list
 airgap-sync target set-python-resolution 1 approximate
 airgap-sync target set-python-resolution 1 inherit
@@ -96,6 +100,13 @@ environment. Git, PyPI, and exact root-wheel targets may set
 `--python-resolution-mode locked-only|approximate`. With no target override they inherit
 the workspace default. `target set-python-resolution <index> inherit` removes an
 existing override. These controls are under Advanced/Legacy in the interactive menu.
+
+`cpython-distributions` is independent of `python-app`. It follows stable CPython 3
+minors from `--from-minor` through the newest stable minor visible in
+`python-build-standalone`, retaining the latest `--latest` patches independently for
+each platform. For each patch it includes the newest provider build plus rebuilds
+published in the last `--window-days` exact 24-hour days. The defaults are 3.10, all
+currently supported platforms, one patch, and 365 days.
 
 ## menu
 
@@ -157,11 +168,11 @@ advanced entry point for resolving in advance, forcing an update, or supplying a
 `--cutoff`. Current builds acquire a pinned collector-native `uv`, resolve each target
 platform with wheels-only policy, and store evidence under
 `.airgap-sync/python-plans/`. The resolver pin belongs to collection and says nothing
-about consumer `uv` versions. Planning must evolve to validate ordinary resolution
-against a temporary index populated only from the collected bundle.
+about consumer `uv` versions. Collection validates ordinary resolution against a
+temporary index populated only from the collected bundle.
 
-Large HTTP artifacts use one resumable download model, including the pinned `uv`, npm
-tarballs, Python wheels, CPython runtimes, and application artifacts. A slow transfer
+Large HTTP artifacts use one resumable download model, including the pinned collector
+`uv`, npm tarballs, Python wheels, and CPython distributions. A slow transfer
 may continue for as long as it keeps making progress; an attempt is retried when the
 server does not respond or the body receives no data for one minute. Partial files are
 resumed across retries and command restarts when the server supports byte ranges.
@@ -233,14 +244,15 @@ For every selected `python-app` target, `download` creates missing planning evid
 replans evidence made stale by target, coverage-policy, or workspace-local policy
 changes. Wheels are stored once by content hash even when multiple applications or
 environment cells reference them. Plans and locks are retained as collector evidence;
-they are not the normal consumer interface. Legacy configurations can still describe
-optional runtime artifacts, but normal application targets do not transfer them.
+they are not the normal consumer interface. Application targets do not transfer
+CPython or package-manager executables. Configure CPython through
+`cpython-distributions`; configure a consumer tool such as `uv`, when needed, as its
+own ordinary Python application.
 
-Existing schema-v2 workspaces may contain `python.artifactTransfer.cpython`,
-`python.artifactTransfer.uv`, and `python.artifactTransfer.uvVersions`. They are retained
-for configuration compatibility while runtime transfer is separated from application
-repository coverage. Consumer `uv` versions do not create separate dependency closures
-and should not be added merely to support ordinary installation from Gitea PyPI.
+Every download prints the last successful full-download watermark. If it is older than
+a selected CPython build window, interactive use offers to stop and non-interactive use
+requires `--allow-window-gap`. Failed, dry-run, and `--target` downloads do not advance
+the watermark.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
@@ -284,14 +296,6 @@ written to `python-seed-manifest.json`. Because dependency selection still uses 
 no-backtracking resolver, this target requires the same explicit approximate opt-in.
 Set it on the wheel target when other targets should remain lock-only.
 
-`target add python-runtime` is a legacy escape hatch that transfers a
-python-build-standalone archive into
-`python-runtime-mirror/<build>/<archive>` and writes a checksum manifest. Point
-Arriero's site-wide managed Python mirror setting at that bundle directory. The source
-URL must contain `/releases/download/` because uv's `--mirror` contract preserves the
-path after that segment. Runtime transfer is being separated from normal `python-app`
-repository coverage; do not interpret this target as a package dependency.
-
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
 in `dist-tags.json`; publish derives them from the newest version already included in
 the bundle for each package name. `--latest-policy source` also resolves and downloads
@@ -329,8 +333,9 @@ default no-progress timeout is 60000.
 `--retry-delays-ms 1000,5000,15000,60000`.
 
 `--prune` removes stale local bundle objects after a successful fixed-point download.
-It deletes npm tarballs, unreferenced content-addressed Python artifacts, obsolete
-application plans, and Git mirrors not referenced by the new indexes. It is skipped
+It deletes npm tarballs, unreferenced content-addressed Python artifacts and CPython
+distributions, obsolete application plans, and Git mirrors not referenced by the new
+indexes. It is skipped
 when the download is incomplete and partial target downloads never prune shared
 objects. This only cleans the transfer bundle; it does not delete packages from
 Verdaccio or repositories from Gitea.
@@ -359,10 +364,11 @@ airgap-sync bundle prune ./airgap-bundle
 
 Removes stale objects from the local transfer bundle: unreferenced `packages/*.tgz`,
 `python-packages/*.whl`, Python application artifacts under `python/artifacts/`,
-obsolete application plans under `python/applications/`, and
-`git-mirrors/**/*.git`. Empty content-addressed Python artifact directories are removed
-too. The command refuses to run unless the latest `collect-report.json` records a
-successful non-dry-run fixed-point download. Dry runs write
+portable CPython archives under `python/distributions/artifacts/`, obsolete application
+plans under `python/applications/`, and `git-mirrors/**/*.git`. Empty
+content-addressed artifact directories are removed too. The command refuses to run
+unless the latest `collect-report.json` records a successful non-dry-run fixed-point
+download. Dry runs write
 `prune-dry-run-report.json`; real runs write `prune-report.json`.
 
 A full workspace `download` synchronizes the Python application index even when no
@@ -614,11 +620,15 @@ import reports. If `python-seed-manifest.json` exists, it also streams bundled w
 to Gitea's PyPI endpoint without requiring Python, pip, or twine. Gitea PyPI is the
 Python consumer interface. When `python.publication.publishEvidence` is explicitly
 enabled, current bundles may additionally publish plans, locks, prerequisite reports,
-configuration templates, and optional runtime/tool artifacts to Gitea Generic
-Packages. Those objects are evidence or separate optional transfers; consumers must
-not need them to install from PyPI.
+and configuration templates to Gitea Generic Packages. Those objects are evidence;
+consumers must not need them to install from PyPI.
 Existing immutable generic objects are skipped only after their downloaded content
 matches the local SHA-256.
+
+When `python/distributions/index.json` exists, `publish` independently uploads its
+portable CPython archives as Gitea Generic Packages. Matching remote files are skipped,
+conflicting content is an error, and no remote version is deleted. This publication is
+independent of application evidence settings and does not influence later local prune.
 
 The same Gitea token authenticates Git, PyPI, and Generic Package operations. Publish
 resolves `python.publication`, creates missing organization owners, and only then

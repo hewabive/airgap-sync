@@ -3,8 +3,7 @@
 An airgap bundle is a directory that can be transferred to the target environment.
 The Python portion below documents the current pre-1.0 on-disk format. Plans and locks
 are collector evidence, not requirements for a machine installing from Gitea PyPI.
-Legacy bundles can still contain consumer templates and runtime artifacts. The
-repository contract is defined in [Python Support](python.md).
+The repository contract is defined in [Python Support](python.md).
 
 ```text
 airgap-bundle/
@@ -23,7 +22,11 @@ airgap-bundle/
         lock/
     artifacts/
       wheels/<sha256>/<filename>.whl
-      optional/
+    distributions/
+      index.json
+      fetch-report.json
+      publish-report.json
+      artifacts/<sha256>/<filename>.tar.gz
     publications/
       <publication-id>/
         publication-manifest.json
@@ -170,9 +173,8 @@ Artifacts are content-addressed by SHA-256. Every reference names exact compatib
 cells (platform family, Python minor, and Linux glibc floor where applicable), so one
 universal or `abi3` wheel can cover several cells without being copied. The selected
 set is the minimum practical byte cover of the dependency trees resolved for those
-cells. Legacy bundles can also contain optional CPython, `uv`, and license archives;
-runtime/tool transfer does not change the normal application closure. The summary
-reports application/artifact counts and total unique bytes.
+cells. CPython distributions and consumer package managers are not application-plan
+artifacts. The summary reports application/artifact counts and total unique bytes.
 
 An interrupted download may leave verified content-addressed files, but the index and
 application document set are replaced only after the whole requested run succeeds.
@@ -188,14 +190,40 @@ not covered by the active index are always SHA-256 verified before use. Run
 
 The application index schema is version 3. Schema-v1 and schema-v2 application bundles
 must be downloaded once with the current version before publication; existing
-content-addressed wheels and optional artifacts are reused.
+content-addressed wheels are reused. Bundles containing the removed runtime-transfer
+artifact kinds must likewise be refreshed before publication.
+
+## python/distributions/index.json
+
+Records the active rolling set selected by `cpython-distributions` targets. Each entry
+contains the exact CPython version, provider build, publication time, platform,
+variant, source URL, size, SHA-256, and content-addressed local path. Target references
+determine which objects remain live when a successful full download prunes the bundle.
+
+Selection is recomputed from provider metadata on every applicable download. Patch
+depth is evaluated per platform, provider builds are retained according to the target's
+day window, and the newest matching build is always included. Availability is
+progressive: an artifact published for one platform is activated without waiting for
+the other configured platforms.
+
+The index is replaced atomically only after all selected files have been acquired and
+verified. Partial target downloads merge their selected references with unselected
+targets. `fetch-report.json` records selection and acquisition results;
+`publish-report.json` records the latest closed-side publication attempt.
+
+Closed-side publication uses additive Gitea Generic Package coordinates
+`python-build-standalone/<provider-build>/<filename>`. Exact remote content is skipped,
+conflicting content is rejected, and remote objects are never deleted. Publication
+state is not an input to later collection or pruning.
 
 ## python/publications/\<publication-id\>/publication-manifest.json
 
 Created during closed-network publish after Gitea authentication and owner resolution.
 It records the normalized Gitea URL, resolved PyPI and optional Generic owners, source
 plan IDs, source-document paths and digests, concrete package coordinates, and
-materialized optional evidence-document paths and digests.
+materialized evidence-document paths and digests. CPython distribution publication is
+reported separately under `python/distributions/` and is not part of an application
+publication manifest.
 
 `publicationId` is deterministic over the destination and exact transferable source
 documents. Tokens, authenticated login, publication-run timestamps, and upload results

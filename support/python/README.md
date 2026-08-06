@@ -13,27 +13,10 @@ accepted only after its size and SHA-256 match. Its version is an internal
 implementation choice; it does not select or constrain the consumer's pip, uv, Poetry,
 or PDM version.
 
-Versioned `uv-tool-manifest-*.json` files currently also describe optional consumer
-binaries. This is transitional. Package repository coverage must not be duplicated for
-different consumer `uv` versions, and package-manager binary transfer should be modeled
-separately if it remains supported.
-
 `uv` is distributed under `Apache-2.0 OR MIT`. License URLs and hashes are pinned in
-the manifest. A bundle that redistributes a `uv` executable must include the downloaded,
-hash-verified license text beside it.
-
-## Runtime catalogs
-
-`runtime-catalog*.json` pins optional CPython archives for Windows x86-64 and glibc
-Linux x86-64. The current catalog names retain associations with reviewed `uv` releases
-because that is what the implementation consumes today; this association is not a
-Python dependency-resolution requirement.
-
-These archives are transfer artifacts only. `airgap-sync` does not install or manage
-Python on consumer machines. Managed CPython may become its own target type; until that
-decision is made, runtime catalogs and default runtime transfer are transitional and
-must stay separate from the claim that a Gitea PyPI repository covers CPython
-3.10–3.13.
+the manifest. It is used on the online collector and is not copied into consumer
+application bundles. Consumer package-manager versions are ordinary Python
+applications, not collector implementation inputs.
 
 ## Probes
 
@@ -65,12 +48,11 @@ that evidence stale after a workspace-local edit or expiry. See
 Current application planning writes evidence under `.airgap-sync/python-plans/`, and
 `download` writes `python/application-index.json`, content-addressed wheels under
 `python/artifacts/wheels/<sha256>/`, per-platform `pylock.toml`, and generated locks.
-The existing publisher also materializes consumer templates and may publish evidence
-or runtime artifacts to Gitea Generic Packages.
+The publisher may also materialize application evidence in Gitea Generic Packages.
 
 These records support migration and auditing, but they are not the intended consumer
-interface. The target implementation publishes a minimum wheel set to Gitea PyPI and
+interface. The implementation publishes a minimum wheel set to Gitea PyPI and
 validates normal dependency-resolving pip and uv installs against an index populated
-only from that bundle. Plans, locks, templates, and optional runtime archives may
-change format or move to a separate target without changing how consumers install
-applications.
+only from that bundle. Plans, locks, and templates may change format without changing
+how consumers install applications. CPython distributions use the independent
+`cpython-distributions` target and `python/distributions/` bundle records.

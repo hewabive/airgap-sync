@@ -4,8 +4,8 @@ This document defines the intended Python product contract. It is the canonical 
 for Python scope, coverage, collection, publication, and consumer behavior.
 
 The normal application path implements this contract. Plans and resolver locks remain
-internal evidence. Legacy raw-PyPI and runtime-transfer fields are still readable, but
-they do not define normal application coverage.
+internal evidence. CPython distribution transfer is an independent target and does not
+define normal application repository coverage.
 
 ## Goal
 
@@ -178,9 +178,9 @@ Transferring CPython or a package-manager executable is a separate concern from
 populating a Python package repository.
 
 The normal Python application target does not ask for consumer `uv` versions and does
-not duplicate package closures for different `uv` releases. If managed CPython transfer
-is retained, it should become an explicit target or independently configurable transfer
-feature with its own compatibility and size reporting.
+not duplicate package closures for different `uv` releases. Managed CPython uses the
+explicit `cpython-distributions` target. Consumer package-manager executables such as
+`uv` are ordinary Python applications when they need to be transferred.
 
 Consumers may use a compatible Python already present on the machine or a runtime
 provisioned by other infrastructure. Runtime availability is not inferred from the
@@ -226,8 +226,9 @@ The application path now:
 - prunes inactive workspace plans and locally unreferenced bundle artifacts after a
   successful full pruned download.
 
-Legacy raw PyPI, exact-wheel, runtime, requirements, and lockfile inputs remain readable
-through the 0.x compatibility period. Existing `python.artifactTransfer` fields are
-preserved when encountered but are ignored by normal application planning. A dedicated
-CPython/tool target model, broader indexes/platforms, and a full multi-platform Gitea
-integration matrix remain future work.
+Legacy raw PyPI, exact-wheel, requirements, and lockfile inputs remain available for
+advanced workflows. The legacy `python-runtime` target, `python.artifactTransfer`, and
+application-plan runtime/tool artifacts have been removed. `cpython-distributions`
+selects stable Python minors, patches, platforms, and provider builds independently and
+publishes them additively to Gitea Generic Packages. Broader indexes/platforms and a
+full multi-platform Gitea integration matrix remain future work.
