@@ -274,33 +274,6 @@ function applicationFiles(
   return files;
 }
 
-function optionalArtifactFiles(
-  index: PythonApplicationBundleIndex,
-  manifest: PythonPublicationManifest
-): GiteaGenericPackageFile[] {
-  return index.artifacts.flatMap((artifact) => {
-    if (artifact.kind === 'wheel') {
-      return [];
-    }
-    const publication = manifest.artifacts.find(
-      (candidate) => candidate.artifactId === artifact.id
-    );
-    if (publication?.file !== artifact.file) {
-      throw new Error(`Python publication manifest does not match artifact ${artifact.id}`);
-    }
-    return [
-      {
-        expectedSha256: artifact.sha256,
-        file: artifact.file,
-        filename: validateGiteaGenericCoordinate(artifact.filename, 'filename'),
-        owner: validateGiteaGenericCoordinate(publication.genericPackage.owner, 'owner'),
-        package: validateGiteaGenericCoordinate(publication.genericPackage.package, 'package name'),
-        version: validateGiteaGenericCoordinate(publication.genericPackage.version, 'version'),
-      },
-    ];
-  });
-}
-
 function groupFilesByPackage(files: GiteaGenericPackageFile[]): IndexedGenericFile[][] {
   const groups = new Map<string, IndexedGenericFile[]>();
   for (const [index, file] of files.entries()) {
@@ -363,10 +336,7 @@ export async function publishPythonGenericArtifacts(
   }
   let files: GiteaGenericPackageFile[];
   try {
-    files = [
-      ...applicationFiles(index, options.publicationManifest),
-      ...optionalArtifactFiles(index, options.publicationManifest),
-    ].sort(
+    files = applicationFiles(index, options.publicationManifest).sort(
       (left, right) =>
         left.owner.localeCompare(right.owner) ||
         left.package.localeCompare(right.package) ||

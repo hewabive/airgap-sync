@@ -104,26 +104,7 @@ async function bundleFixture(): Promise<PythonApplicationBundleIndex> {
         targetId: 'demo--windows',
       },
     ],
-    artifacts: [
-      {
-        file: 'python/artifacts/optional/runtimes/cccc/runtime.tar.gz',
-        filename: 'cpython-3.11.15+20260718-x86_64-pc-windows-msvc-install_only_stripped.tar.gz',
-        id: `${'c'.repeat(64)}:cpython.tar.gz`,
-        kind: 'cpython',
-        references: [
-          {
-            cells: ['windows-x86_64--py311'],
-            platforms: ['windows-x86_64'],
-            targetId: 'demo--windows',
-          },
-        ],
-        sha256: 'c'.repeat(64),
-        size: 123,
-        sourceUrl:
-          'https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.11.15%2B20260718-x86_64-pc-windows-msvc-install_only_stripped.tar.gz',
-        version: '3.11.15',
-      },
-    ],
+    artifacts: [],
     createdAt: '2026-07-28T00:00:00.000Z',
     schemaVersion: 3,
     summary: { applications: 1, artifacts: 0, totalBytes: 0 },
@@ -131,30 +112,6 @@ async function bundleFixture(): Promise<PythonApplicationBundleIndex> {
 }
 
 describe('Python publication manifest', () => {
-  it('rejects CPython artifacts that cannot be exposed through the uv mirror layout', async () => {
-    const index = await bundleFixture();
-    index.artifacts[0]!.sourceUrl = 'https://example.test/cpython.tar.gz';
-    const profile = resolvePythonPublicationProfile(
-      normalizePythonPublicationProfile({
-        owner: {
-          kind: 'organization',
-          name: 'airgap-packages',
-          strategy: 'fixed-owner',
-        },
-        visibility: 'public',
-      }),
-      'admin'
-    );
-
-    await expect(
-      materializePythonPublication('http://gitea.local', {
-        bundleDir,
-        index,
-        profile,
-      })
-    ).rejects.toThrow('python-build-standalone release path');
-  });
-
   it('materializes deterministic destination documents without changing plan identity', async () => {
     const index = await bundleFixture();
     const firstProfile = resolvePythonPublicationProfile(
@@ -196,15 +153,7 @@ describe('Python publication manifest', () => {
       ])
     );
     expect(first.schemaVersion).toBe(2);
-    expect(first.artifacts).toEqual([
-      expect.objectContaining({
-        genericPackage: {
-          owner: 'airgap-packages',
-          package: 'python-build-standalone',
-          version: '20260718',
-        },
-      }),
-    ]);
+    expect(first.artifacts).toEqual([]);
     expect(first.applications[0]?.genericPackage.version).toContain(
       `pub.${first.publicationId.slice(0, 12)}`
     );

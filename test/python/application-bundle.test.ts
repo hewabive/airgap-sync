@@ -86,7 +86,6 @@ function createPlan(options: {
       version: '0.11.16',
     },
     runtimeContract: {
-      uvVersions: ['0.11.16'],
       platforms: [
         {
           implementation: 'CPython',
@@ -240,7 +239,7 @@ describe('Python application bundle', () => {
       );
 
       await expect(readPythonApplicationBundleIndex(bundleDir)).rejects.toThrow(
-        'schemaVersion 1/2 is obsolete; run airgap-sync download again'
+        'schemaVersion 1/2 or runtime-transfer artifacts are obsolete'
       );
     }
   );

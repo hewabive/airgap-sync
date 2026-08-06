@@ -56,10 +56,6 @@ import { resolvePython } from './python/resolver.js';
 import { fetchPythonBundle } from './python/fetch.js';
 import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
 import { preparePythonRootWheels, RootWheelPythonIndex } from './python/root-wheels.js';
-import {
-  transferPythonRuntimeArtifacts,
-  type PythonRuntimeArtifactInput,
-} from './python/runtime-artifacts.js';
 import type { PythonResolutionMode } from './python/resolution-policy.js';
 
 export interface CollectBundleOptions {
@@ -81,7 +77,6 @@ export interface CollectBundleOptions {
   outputDir: string;
   initialPythonRequirements?: PythonRequirementInput[];
   initialPythonRootWheels?: PythonRootWheelInput[];
-  initialPythonRuntimes?: PythonRuntimeArtifactInput[];
   pythonIndex?: PythonIndexClient;
   pythonResolutionMode?: PythonResolutionMode;
   pythonSourceIndex?: string;
@@ -493,13 +488,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const pythonEnabled = Boolean(
     options.pythonIndex && options.pythonSourceIndex && options.pythonTargetEnvironments?.length
   );
-  await transferPythonRuntimeArtifacts({
-    bundleDir: outputDir,
-    dryRun,
-    generatedAt,
-    inputs: options.initialPythonRuntimes ?? [],
-    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-  });
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
   const metadataCache = await readRegistryMetadataCache(outputDir);
   const stableRequiredBy = new Set<string>();

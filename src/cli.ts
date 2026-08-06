@@ -30,7 +30,6 @@ import {
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
   createWorkspacePythonRootWheels,
-  createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   defaultPythonPublicationProfile,
   defaultWorkspaceGiteaUrl,
@@ -871,9 +870,7 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
         ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
         : target.type === 'python-wheel'
           ? `python-wheel ${target.url}#sha256=${target.sha256}`
-          : target.type === 'python-runtime'
-            ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
-            : `${target.type} ${target.spec}`;
+          : `${target.type} ${target.spec}`;
   const pythonResolutionMode =
     target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
       ? target.pythonResolutionMode
@@ -1814,11 +1811,17 @@ function formatBundleInfo(info: BundleInfo): string {
     `Source registry: ${info.sourceRegistry}`,
     `Packages: ${String(info.packageCount)} versions, ${String(info.packageNameCount)} names`,
     `Dist-tags: ${String(info.tagCount)}`,
+    `CPython distributions: ${String(info.cpythonDistributions.artifactCount)} artifacts, ${String(info.cpythonDistributions.artifactBytes)} bytes; ${info.cpythonDistributions.pythonVersions.join(', ') || 'none'}; ${info.cpythonDistributions.platforms.join(', ') || 'no platforms'}`,
     `Python applications: ${String(info.pythonApplications.applications.length)}, ${String(info.pythonApplications.artifactCount)} shared artifacts, ${String(info.pythonApplications.artifactBytes)} bytes`,
     `Missing tarballs: ${String(info.missingTarballs.length)}`,
     `Validation: ${info.valid ? 'ok' : `${String(info.validationIssues.length)} issues`}`,
     formatReportStatus('Fetch report', info.fetchReport),
     formatReportStatus('Publish report', info.publishReport),
+    formatReportStatus('CPython distribution fetch report', info.cpythonDistributions.fetchReport),
+    formatReportStatus(
+      'CPython distribution publish report',
+      info.cpythonDistributions.publishReport
+    ),
     formatReportStatus('Python application fetch report', info.pythonApplications.fetchReport),
     formatReportStatus('Python application publish report', info.pythonApplications.publishReport),
   ];
@@ -2547,9 +2550,6 @@ async function configurePythonApplicationPublication(
   const nextConfig: WorkspaceConfig = {
     ...config,
     python: {
-      ...(config.python?.artifactTransfer
-        ? { artifactTransfer: config.python.artifactTransfer }
-        : {}),
       ...(config.python?.legacySeed ? { legacySeed: config.python.legacySeed } : {}),
       planner: config.python?.planner ?? {
         engine: 'uv',
@@ -3959,33 +3959,6 @@ targetAddCommand
   );
 
 targetAddCommand
-  .command('python-runtime')
-  .description('Add a portable uv CPython runtime archive')
-  .argument('<python-version>', 'Full Python version, e.g. 3.12.13')
-  .argument('<url>', 'python-build-standalone release archive URL')
-  .requiredOption('--sha256 <digest>', 'Expected archive SHA-256')
-  .argument('[workspace]', 'Workspace directory', '.')
-  .action(
-    async (pythonVersion: string, url: string, workspace: string, options: { sha256: string }) => {
-      try {
-        const target = {
-          pythonVersion,
-          sha256: options.sha256,
-          type: 'python-runtime' as const,
-          url,
-        };
-        const result = await addWorkspaceTarget(workspace, target);
-        console.log(
-          `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
-        );
-      } catch (error) {
-        console.error(`Error: ${(error as Error).message}`);
-        process.exitCode = 1;
-      }
-    }
-  );
-
-targetAddCommand
   .command('npm')
   .description('Add an npm package spec target')
   .argument('<spec>', 'Package spec, e.g. eslint@latest')
@@ -4283,7 +4256,6 @@ program
         const gitTargets = createWorkspaceGitSources(activeConfig);
         const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
         const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
-        const pythonRuntimes = createWorkspacePythonRuntimeArtifacts(activeConfig);
         const cpythonTargets = activeConfig.targets.filter(
           (target) => target.type === 'cpython-distributions'
         );
@@ -4370,7 +4342,6 @@ program
           initialRequirements: parsedTargets.requirements,
           initialPythonRequirements: pythonRequirements,
           initialPythonRootWheels: pythonRootWheels,
-          initialPythonRuntimes: pythonRuntimes,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
           rangeResolutionPolicy,

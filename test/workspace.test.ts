@@ -8,7 +8,6 @@ import {
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
   createWorkspacePythonRootWheels,
-  createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   initWorkspace,
   migrateWorkspaceConfig,
@@ -484,35 +483,6 @@ describe('workspace config', () => {
     });
   });
 
-  it('normalizes portable Python runtime targets', async () => {
-    await fs.writeJson(
-      path.join(tempDir, 'airgap-sync.json'),
-      {
-        output: './airgap-bundle',
-        schemaVersion: 1,
-        sourceRegistry: 'https://registry.npmjs.org',
-        targets: [
-          {
-            pythonVersion: '3.12.13',
-            sha256: 'b'.repeat(64),
-            type: 'python-runtime',
-            url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython.tar.gz',
-          },
-        ],
-      },
-      { spaces: 2 }
-    );
-
-    const config = await readWorkspaceConfig(tempDir);
-    expect(createWorkspacePythonRuntimeArtifacts(config)).toEqual([
-      {
-        pythonVersion: '3.12.13',
-        sha256: 'b'.repeat(64),
-        url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython.tar.gz',
-      },
-    ]);
-  });
-
   it('requires target environments for PyPI targets', async () => {
     await initWorkspace({ workspaceDir: tempDir });
     await expect(
@@ -845,11 +815,6 @@ describe('workspace config', () => {
         },
       ],
       python: {
-        artifactTransfer: {
-          cpython: true,
-          uv: true,
-          uvVersions: ['0.11.16', '0.12.1'],
-        },
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -881,6 +846,7 @@ describe('workspace config', () => {
         },
       ],
     });
+    expect(config.python).not.toHaveProperty('artifactTransfer');
 
     await writeWorkspaceConfig(tempDir, config);
     expect(await readWorkspaceConfig(tempDir)).toEqual(config);
@@ -943,12 +909,6 @@ describe('workspace config', () => {
         sha256: 'a'.repeat(64),
         type: 'python-wheel',
         url: 'https://example.test/packages/demo-1.0.0-py3-none-any.whl',
-      },
-      {
-        pythonVersion: '3.11.9',
-        sha256: 'b'.repeat(64),
-        type: 'python-runtime',
-        url: 'https://example.test/runtimes/cpython-3.11.9.tar.gz',
       }
     );
 

@@ -101,7 +101,7 @@ async function writePythonApplicationBundle(): Promise<void> {
     },
     platforms: [],
     resolver: { engine: 'uv', policyVersion: 1, version: '0.11.16' },
-    runtimeContract: { platforms: [], uvVersions: ['0.11.16'] },
+    runtimeContract: { platforms: [] },
     schemaVersion: 2,
     wheels: [],
   });

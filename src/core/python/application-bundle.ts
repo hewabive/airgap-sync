@@ -14,7 +14,6 @@ import {
   pythonApplicationPlanPath,
   pythonApplicationTargetId,
   pythonCompatibilityCellId,
-  pythonOptionalArtifactsDirectory,
   pythonWheelArtifactsDirectory,
 } from './application-paths.js';
 import type { ActivePythonApplicationPlan } from './active-plan-store.js';
@@ -22,7 +21,6 @@ import {
   createPythonEnvironmentPlan,
   serializePythonEnvironmentPlan,
   type PythonEnvironmentPlan,
-  type PythonPlanTransferArtifact,
   type PythonPlanWheel,
 } from './environment-plan.js';
 import {
@@ -51,7 +49,7 @@ import {
   type PythonConsumerLock,
 } from './consumer-contract.js';
 
-export type PythonApplicationArtifactKind = 'cpython' | 'license' | 'uv' | 'wheel';
+export type PythonApplicationArtifactKind = 'wheel';
 
 export interface PythonApplicationArtifactReference {
   cells: string[];
@@ -205,19 +203,6 @@ function wheelArtifactFile(wheel: PythonPlanWheel): string {
   return path.posix.join(pythonWheelArtifactsDirectory, wheel.sha256, safeFilename(wheel.filename));
 }
 
-function optionalArtifactFile(artifact: PythonPlanTransferArtifact): string {
-  const kindDirectory =
-    artifact.kind === 'cpython'
-      ? 'runtimes'
-      : path.posix.join('tools', artifact.kind === 'uv' ? 'uv' : 'licenses');
-  return path.posix.join(
-    pythonOptionalArtifactsDirectory,
-    kindDirectory,
-    artifact.sha256,
-    safeFilename(artifact.filename)
-  );
-}
-
 async function hashFile(
   filePath: string,
   onProgress?: (bytes: number) => void
@@ -303,9 +288,6 @@ async function reuseLegacyWheel(
   targetPath: string,
   onProgress?: (bytes: number) => void
 ): Promise<boolean> {
-  if (artifact.kind !== 'wheel') {
-    return false;
-  }
   const legacyPath = path.join(bundleDir, 'python-packages', artifact.filename);
   if (!(await fs.pathExists(legacyPath))) {
     return false;
@@ -408,30 +390,6 @@ function collectPlannedArtifacts(
         }
       );
     }
-    for (const runtime of activePlan.plan.runtimeArtifacts ?? []) {
-      const id = artifactId(runtime.sha256, runtime.filename);
-      addArtifact(
-        artifacts,
-        {
-          file: optionalArtifactFile(runtime),
-          filename: runtime.filename,
-          id,
-          kind: runtime.kind,
-          sha256: runtime.sha256,
-          ...(runtime.size !== undefined ? { expectedSize: runtime.size } : {}),
-          sourceUrl: runtime.sourceUrl,
-          version: runtime.version,
-        },
-        {
-          cells: activePlan.plan.platforms
-            .filter((platform) => runtime.platforms.includes(platform.platformFamilyId))
-            .map(planCell)
-            .sort(),
-          platforms: [...runtime.platforms],
-          targetId,
-        }
-      );
-    }
   }
   return artifacts;
 }
@@ -445,20 +403,25 @@ async function readCurrentIndex(
     return undefined;
   }
   const index = await fs.readJson<PythonApplicationBundleIndex>(filePath);
+  const hasObsoleteRuntimeArtifacts =
+    Array.isArray(index.artifacts) &&
+    index.artifacts.some((artifact) => (artifact as { kind?: unknown }).kind !== 'wheel');
   if (
     (index as { schemaVersion?: unknown }).schemaVersion !== 3 ||
     !Array.isArray(index.applications) ||
-    !Array.isArray(index.artifacts)
+    !Array.isArray(index.artifacts) ||
+    hasObsoleteRuntimeArtifacts
   ) {
     if (
       (index as { schemaVersion?: unknown }).schemaVersion === 1 ||
-      (index as { schemaVersion?: unknown }).schemaVersion === 2
+      (index as { schemaVersion?: unknown }).schemaVersion === 2 ||
+      hasObsoleteRuntimeArtifacts
     ) {
       if (replaceLegacy) {
         return undefined;
       }
       throw new Error(
-        'Python application bundle schemaVersion 1/2 is obsolete; run airgap-sync download again'
+        'Python application bundle schemaVersion 1/2 or runtime-transfer artifacts are obsolete; run airgap-sync download again'
       );
     }
     throw new Error(`${pythonApplicationIndexPath} is invalid`);
@@ -656,7 +619,7 @@ async function createPythonSeedCompatibilityManifest(
       packages.set(`${pkg.name}\0${pkg.version}`, { ...pkg, files: legacyFiles });
     }
   }
-  for (const artifact of index.artifacts.filter((candidate) => candidate.kind === 'wheel')) {
+  for (const artifact of index.artifacts) {
     if (!artifact.package) {
       throw new Error(`Python wheel artifact has no package identity: ${artifact.id}`);
     }
@@ -1312,16 +1275,14 @@ export async function verifyPythonApplicationBundle(
       if (actual.size !== artifact.size) {
         errors.push(`Python application artifact size mismatch: ${artifact.file}`);
       }
-      if (artifact.kind === 'wheel') {
-        const metadata = parseCoreMetadata(await readWheelMetadata(artifactPath));
-        artifactMetadata.set(artifact.id, metadata);
-        if (
-          !artifact.package ||
-          normalizePackageName(metadata.name) !== normalizePackageName(artifact.package) ||
-          compareVersions(metadata.version, artifact.version) !== 0
-        ) {
-          errors.push(`Python application wheel metadata identity mismatch: ${artifact.file}`);
-        }
+      const metadata = parseCoreMetadata(await readWheelMetadata(artifactPath));
+      artifactMetadata.set(artifact.id, metadata);
+      if (
+        !artifact.package ||
+        normalizePackageName(metadata.name) !== normalizePackageName(artifact.package) ||
+        compareVersions(metadata.version, artifact.version) !== 0
+      ) {
+        errors.push(`Python application wheel metadata identity mismatch: ${artifact.file}`);
       }
     } catch (error) {
       errors.push(
@@ -1376,7 +1337,6 @@ export async function verifyPythonApplicationBundle(
         }
         const wheels = index.artifacts.filter(
           (artifact) =>
-            artifact.kind === 'wheel' &&
             normalizePackageName(artifact.package ?? '') === normalizePackageName(pkg.name) &&
             artifact.version === pkg.version &&
             pkg.wheels.includes(artifact.filename) &&

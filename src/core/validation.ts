@@ -1,10 +1,6 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import type { BundleManifest, DistTagsManifest } from '../types.js';
-import {
-  verifyPythonRuntimeManifest,
-  type PythonRuntimeManifest,
-} from './python/runtime-artifacts.js';
 
 export type BundleValidationSeverity = 'error';
 
@@ -149,24 +145,6 @@ export async function validateBundle(
   }
 
   issues.push(...(await validateTarballs(bundleDir, manifest)));
-  const runtimeManifestPath = path.join(bundleDir, 'python-runtime-manifest.json');
-  if (await fs.pathExists(runtimeManifestPath)) {
-    try {
-      const runtimeManifest = await fs.readJson<PythonRuntimeManifest>(runtimeManifestPath);
-      const runtimeErrors = await verifyPythonRuntimeManifest(bundleDir, runtimeManifest);
-      issues.push(
-        ...runtimeErrors.map((message) => issue('invalid-python-runtime-artifact', message))
-      );
-    } catch (error) {
-      issues.push(
-        issue(
-          'invalid-python-runtime-manifest',
-          `Unable to validate python-runtime-manifest.json: ${(error as Error).message}`
-        )
-      );
-    }
-  }
-
   return {
     issues,
     valid: issues.length === 0,

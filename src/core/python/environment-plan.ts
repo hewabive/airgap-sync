@@ -39,23 +39,7 @@ export interface PythonEnvironmentPlanPresentation {
   warnings?: string[];
 }
 
-export interface PythonPlanTransferArtifact {
-  filename: string;
-  kind: 'cpython' | 'license' | 'uv';
-  license: {
-    spdx: string;
-    url: string;
-  };
-  platforms: string[];
-  requiredByUvVersions?: string[];
-  sha256: string;
-  size?: number;
-  sourceUrl: string;
-  version: string;
-}
-
 export interface PythonRuntimeContract {
-  uvVersions?: string[];
   platforms: {
     implementation: 'CPython';
     platformFamilyId: string;
@@ -95,7 +79,6 @@ export interface PythonEnvironmentPlan {
     policyVersion: number;
     version: string;
   };
-  runtimeArtifacts?: PythonPlanTransferArtifact[];
   runtimeContract?: PythonRuntimeContract;
   schemaVersion: 2;
   verification?: {
@@ -122,7 +105,6 @@ export function pythonEnvironmentPlanSemanticContent(
     ...(plan.preferredPythonMinor ? { preferredPythonMinor: plan.preferredPythonMinor } : {}),
     ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
-    ...(plan.runtimeArtifacts ? { runtimeArtifacts: plan.runtimeArtifacts } : {}),
     ...(plan.runtimeContract ? { runtimeContract: plan.runtimeContract } : {}),
     schemaVersion: plan.schemaVersion,
     ...(plan.verification ? { verification: plan.verification } : {}),
@@ -145,8 +127,15 @@ export function createPythonEnvironmentPlan(
   if ('publication' in plan) {
     throw new Error('Python environment plan must not contain publication coordinates');
   }
-  if (plan.runtimeArtifacts?.some((artifact) => 'publication' in (artifact as object)) === true) {
-    throw new Error('Python runtime artifacts must not contain publication coordinates');
+  const legacyPlan = plan as PythonEnvironmentPlanInput & {
+    runtimeArtifacts?: unknown;
+    runtimeContract?: PythonRuntimeContract & { uvVersions?: unknown };
+  };
+  if (
+    legacyPlan.runtimeArtifacts !== undefined ||
+    legacyPlan.runtimeContract?.uvVersions !== undefined
+  ) {
+    throw new Error('Python runtime transfer fields are obsolete; replan the application');
   }
   const planId = pythonEnvironmentPlanId(plan);
   if (plan.planId !== undefined && plan.planId !== planId) {

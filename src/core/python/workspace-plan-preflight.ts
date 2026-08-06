@@ -68,9 +68,7 @@ function planIsCurrent(
     semanticDigest(activePlan.plan.intent) === semanticDigest(expected.intent) &&
     activePlan.plan.coverage.digest ===
       platformCoveragePolicyDigest(expected.resolved.coveragePolicy) &&
-    activePlan.plan.recipe?.digest === expected.recipeDigest &&
-    (activePlan.plan.runtimeArtifacts?.length ?? 0) === 0 &&
-    activePlan.plan.runtimeContract?.uvVersions === undefined
+    activePlan.plan.recipe?.digest === expected.recipeDigest
   );
 }
 

@@ -164,27 +164,6 @@ describe('workspace Python application plan preflight', () => {
     expect(result.targets[0]?.activePlan.plan.intent.application.extras).toEqual(['server']);
   });
 
-  it('ignores legacy consumer uv settings when checking an application plan', async () => {
-    const target = config.targets[0] as WorkspacePythonApplicationTarget;
-    const stored = activePlanFor(config, target);
-    config.python!.artifactTransfer = {
-      cpython: false,
-      uv: true,
-      uvVersions: ['0.12.1'],
-    };
-
-    const result = await ensureWorkspacePythonApplicationPlans({
-      config,
-      planTargets: () => Promise.reject(new Error('planner must not run')),
-      readActivePlan: () => Promise.resolve(stored),
-      readRecipe: () => Promise.resolve(undefined),
-      workspaceDir,
-    });
-
-    expect(result.plannedTargetIndexes).toEqual([]);
-    expect(result.targets[0]?.activePlan.plan.runtimeContract?.uvVersions).toBeUndefined();
-  });
-
   it('keeps a current plan when publication coordinates changed', async () => {
     const target = config.targets[0] as WorkspacePythonApplicationTarget;
     const stored = activePlanFor(config, target);

@@ -3,10 +3,7 @@ import path from 'node:path';
 import { semanticDigest } from '../canonical-json.js';
 import * as fs from '../fs.js';
 import { normalizeBaseUrl } from '../git-targets.js';
-import type {
-  PythonApplicationBundleArtifact,
-  PythonApplicationBundleIndex,
-} from './application-bundle.js';
+import type { PythonApplicationBundleIndex } from './application-bundle.js';
 import { createPythonConsumerBundleDocuments } from './consumer-contract.js';
 import type { PythonEnvironmentPlan } from './environment-plan.js';
 import type { ResolvedPythonPublicationProfile } from './publication-targets.js';
@@ -78,47 +75,6 @@ function safeBundleFile(bundleDir: string, relativeFile: string): string {
   return absolute;
 }
 
-function cpythonRelease(artifact: PythonApplicationBundleArtifact): string {
-  const marker = '/releases/download/';
-  const url = new URL(artifact.sourceUrl);
-  const markerIndex = url.pathname.indexOf(marker);
-  const suffix = markerIndex < 0 ? [] : url.pathname.slice(markerIndex + marker.length).split('/');
-  if (suffix.length !== 2) {
-    throw new Error(
-      `CPython artifact source does not have a python-build-standalone release path: ${artifact.id}`
-    );
-  }
-  const release = decodeURIComponent(suffix[0]!);
-  const filename = decodeURIComponent(suffix[1]!);
-  if (!release || !/^[A-Za-z0-9._+-]+$/u.test(release) || filename !== artifact.filename) {
-    throw new Error(
-      `CPython artifact source is not compatible with a uv Python mirror: ${artifact.id}`
-    );
-  }
-  return release;
-}
-
-function artifactPackage(artifact: PythonApplicationBundleArtifact): string {
-  if (artifact.kind === 'cpython') {
-    return 'python-build-standalone';
-  }
-  if (artifact.kind === 'uv') {
-    const platform = artifact.references.flatMap((reference) => reference.platforms)[0];
-    if (!platform) {
-      throw new Error(`uv artifact has no platform identity: ${artifact.id}`);
-    }
-    return `uv-${platform}`;
-  }
-  if (artifact.kind === 'license') {
-    return 'uv-license';
-  }
-  throw new Error(`Wheel artifact does not use Generic Packages: ${artifact.id}`);
-}
-
-function artifactVersion(artifact: PythonApplicationBundleArtifact): string {
-  return artifact.kind === 'cpython' ? cpythonRelease(artifact) : artifact.version;
-}
-
 function publicationSemanticContent(
   index: PythonApplicationBundleIndex,
   giteaBaseUrl: string,
@@ -131,15 +87,7 @@ function publicationSemanticContent(
 ): unknown {
   return {
     applications,
-    artifacts: index.artifacts
-      .filter((artifact) => artifact.kind !== 'wheel')
-      .map((artifact) => ({
-        artifactId: artifact.id,
-        kind: artifact.kind,
-        package: artifactPackage(artifact),
-        version: artifactVersion(artifact),
-      }))
-      .sort((left, right) => left.artifactId.localeCompare(right.artifactId)),
+    artifacts: [],
     giteaBaseUrl,
     owners: {
       generic: profile.genericOwner,
@@ -250,21 +198,9 @@ export async function materializePythonPublication(
       targetId: application.targetId,
     });
   }
-  const artifacts = options.index.artifacts
-    .filter((artifact) => artifact.kind !== 'wheel')
-    .map((artifact) => ({
-      artifactId: artifact.id,
-      file: artifact.file,
-      genericPackage: {
-        owner: options.profile.genericOwner.name,
-        package: artifactPackage(artifact),
-        version: artifactVersion(artifact),
-      },
-    }))
-    .sort((left, right) => left.artifactId.localeCompare(right.artifactId));
   const manifest: PythonPublicationManifest = {
     applications: applications.sort((left, right) => left.targetId.localeCompare(right.targetId)),
-    artifacts,
+    artifacts: [],
     giteaBaseUrl: baseUrl,
     owners: {
       generic: options.profile.genericOwner,

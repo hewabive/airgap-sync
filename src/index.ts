@@ -94,17 +94,6 @@ export {
   createPythonPrerequisiteReport,
 } from './core/python/runtime-contract.js';
 export {
-  managedPythonRuntimeCatalog,
-  managedPythonRuntimeCatalogs,
-  normalizeManagedPythonRuntimeCatalog,
-  selectManagedPythonRuntimeAsset,
-  selectManagedPythonRuntimeCatalogs,
-} from './core/python/runtime-catalog.js';
-export {
-  transferPythonPlanArtifacts,
-  verifyPythonPlanArtifactManifest,
-} from './core/python/plan-artifact-transfer.js';
-export {
   classifyUvResolutionFailure,
   createUvCompileInvocation,
   defaultUvCommandRunner,
@@ -112,13 +101,7 @@ export {
   UvResolutionError,
   uvPlatformTarget,
 } from './core/python/uv-adapter.js';
-export {
-  acquireUv,
-  uvCollectorAssetKey,
-  uvConsumerToolManifests,
-  uvToolManifest,
-  uvToolManifestForConsumer,
-} from './core/python/uv-tool.js';
+export { acquireUv, uvCollectorAssetKey, uvToolManifest } from './core/python/uv-tool.js';
 export {
   builtInDistributionHintCatalog,
   normalizeDistributionHintCatalog,
@@ -261,7 +244,6 @@ export {
   createWorkspaceGitSources,
   createWorkspacePythonRequirements,
   createWorkspacePythonRootWheels,
-  createWorkspacePythonRuntimeArtifacts,
   createWorkspaceSnapshot,
   defaultWorkspaceGiteaUrl,
   defaultWorkspaceOutputDir,
@@ -281,7 +263,6 @@ export {
   workspaceConfigPath,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
-  workspaceConfigPythonRuntimeTransferBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceConfigV1BackupPath,
   workspaceLegacyPythonSettings,
@@ -405,7 +386,6 @@ export type {
   WorkspacePythonApplicationTarget,
   WorkspacePythonConfig,
   WorkspacePythonLegacySeedConfig,
-  WorkspacePythonRuntimeTarget,
   WorkspaceSecrets,
   WorkspaceSnapshot,
   WorkspaceTarget,
@@ -437,16 +417,6 @@ export type {
   AddPythonRuntimeContractOptions,
   PythonPrerequisiteReport,
 } from './core/python/runtime-contract.js';
-export type {
-  ManagedPythonRuntimeAsset,
-  ManagedPythonRuntimeCatalog,
-  ManagedPythonRuntimeCatalogSelection,
-} from './core/python/runtime-catalog.js';
-export type {
-  PythonPlanArtifactManifest,
-  PythonPlanArtifactManifestEntry,
-  TransferPythonPlanArtifactsOptions,
-} from './core/python/plan-artifact-transfer.js';
 export type {
   PythonApplicationResolver,
   UvCommandInvocation,
@@ -516,7 +486,6 @@ export type {
   PythonEnvironmentPlanRecipe,
   PythonLockedPackagePlan,
   PythonPlanWheel,
-  PythonPlanTransferArtifact,
   PythonPlatformPlan,
   PythonRuntimeContract,
 } from './core/python/environment-plan.js';

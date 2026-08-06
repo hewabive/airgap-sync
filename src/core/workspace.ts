@@ -17,7 +17,6 @@ import {
 import { parseRequirement } from './python/requirements.js';
 import type { PythonRequirementInput } from './python/input-types.js';
 import type { PythonRootWheelInput } from './python/input-types.js';
-import type { PythonRuntimeArtifactInput } from './python/runtime-artifacts.js';
 import { isPythonResolutionMode, type PythonResolutionMode } from './python/resolution-policy.js';
 import {
   normalizeInlinePlatformCoveragePolicy,
@@ -53,7 +52,6 @@ export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
 export const workspaceConfigPythonPublicationBackupFileName = `${workspaceConfigFileName}.before-0002-python-publication.backup`;
 export const workspaceConfigPythonPublicationProfileBackupFileName = `${workspaceConfigFileName}.before-0003-python-publication-profile.backup`;
-export const workspaceConfigPythonRuntimeTransferBackupFileName = `${workspaceConfigFileName}.before-0004-python-runtime-transfer.backup`;
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
@@ -85,13 +83,6 @@ export interface WorkspacePythonWheelTarget {
   pythonResolutionMode?: PythonResolutionMode;
   sha256: string;
   type: 'python-wheel';
-  url: string;
-}
-
-export interface WorkspacePythonRuntimeTarget {
-  pythonVersion: string;
-  sha256: string;
-  type: 'python-runtime';
   url: string;
 }
 
@@ -132,8 +123,7 @@ export type WorkspaceTarget =
   | WorkspaceNpmTarget
   | WorkspacePypiTarget
   | WorkspacePythonApplicationTarget
-  | WorkspacePythonWheelTarget
-  | WorkspacePythonRuntimeTarget;
+  | WorkspacePythonWheelTarget;
 export type WorkspacePromptBoolean = boolean | 'ask';
 
 export interface WorkspaceDefaults {
@@ -162,11 +152,6 @@ export interface WorkspacePythonLegacySeedConfig {
 
 export interface WorkspacePythonConfig {
   applicationArtifactOwner?: string;
-  artifactTransfer?: {
-    cpython: boolean;
-    uv: boolean;
-    uvVersions: string[];
-  };
   legacySeed?: WorkspacePythonLegacySeedConfig;
   planner: {
     engine: 'uv';
@@ -242,13 +227,6 @@ interface WorkspacePythonWheelTargetSnapshot {
   url: string;
 }
 
-interface WorkspacePythonRuntimeTargetSnapshot {
-  pythonVersion: string;
-  sha256: string;
-  type: 'python-runtime';
-  url: string;
-}
-
 interface WorkspaceCpythonDistributionsTargetSnapshot extends WorkspaceCpythonDistributionsTarget {}
 
 interface WorkspacePythonApplicationTargetSnapshot extends WorkspacePythonApplicationTarget {}
@@ -259,8 +237,7 @@ export type WorkspaceTargetSnapshot =
   | WorkspaceNpmTargetSnapshot
   | WorkspacePypiTargetSnapshot
   | WorkspacePythonApplicationTargetSnapshot
-  | WorkspacePythonWheelTargetSnapshot
-  | WorkspacePythonRuntimeTargetSnapshot;
+  | WorkspacePythonWheelTargetSnapshot;
 
 export interface WorkspaceSnapshot {
   createdAt: string;
@@ -727,31 +704,6 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     };
   }
 
-  if (value.type === 'python-runtime') {
-    if (typeof value.url !== 'string' || !value.url.trim()) {
-      throw new Error('python-runtime target must include a non-empty url');
-    }
-    const url = new URL(value.url.trim());
-    if (!['file:', 'http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-      throw new Error('python-runtime target URL must be credential-free file, HTTP, or HTTPS');
-    }
-    if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(value.sha256.trim())) {
-      throw new Error('python-runtime target must include a 64-character SHA-256');
-    }
-    if (
-      typeof value.pythonVersion !== 'string' ||
-      !/^\d+\.\d+\.\d+$/.test(value.pythonVersion.trim())
-    ) {
-      throw new Error('python-runtime target requires a full X.Y.Z pythonVersion');
-    }
-    return {
-      pythonVersion: value.pythonVersion.trim(),
-      sha256: value.sha256.trim().toLowerCase(),
-      type: 'python-runtime',
-      url: url.toString(),
-    };
-  }
-
   throw new Error(`Unsupported workspace target type: ${value.type}`);
 }
 
@@ -944,31 +896,6 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
     value.publication !== undefined
       ? normalizePythonPublicationProfile(value.publication)
       : undefined;
-  let artifactTransfer: WorkspacePythonConfig['artifactTransfer'];
-  if (value.artifactTransfer !== undefined) {
-    if (!isRecord(value.artifactTransfer)) {
-      throw new Error('python.artifactTransfer must be an object');
-    }
-    artifactTransfer = {
-      cpython: value.artifactTransfer.cpython === true,
-      uv: value.artifactTransfer.uv === true,
-      uvVersions:
-        value.artifactTransfer.uvVersions === undefined
-          ? [workspacePythonPlannerVersion]
-          : Array.isArray(value.artifactTransfer.uvVersions) &&
-              value.artifactTransfer.uvVersions.length > 0 &&
-              value.artifactTransfer.uvVersions.every(
-                (version): version is string =>
-                  typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version.trim())
-              )
-            ? [...new Set(value.artifactTransfer.uvVersions.map((version) => version.trim()))]
-            : (() => {
-                throw new Error(
-                  'python.artifactTransfer.uvVersions must contain one or more X.Y.Z versions'
-                );
-              })(),
-    };
-  }
   const planner = isRecord(value.planner) ? value.planner : {};
   if (planner.engine !== undefined && planner.engine !== 'uv') {
     throw new Error('python.planner.engine must be uv');
@@ -1001,7 +928,6 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
 
   return {
     ...(applicationArtifactOwner ? { applicationArtifactOwner } : {}),
-    ...(artifactTransfer ? { artifactTransfer } : {}),
     ...(legacySeed ? { legacySeed } : {}),
     planner: {
       engine: 'uv',
@@ -1234,9 +1160,6 @@ export function withWorkspaceLegacyPythonSettings(
   return {
     ...config,
     python: {
-      ...(config.python?.artifactTransfer
-        ? { artifactTransfer: config.python.artifactTransfer }
-        : {}),
       legacySeed: {
         resolutionMode: settings.resolutionMode,
         ...(settings.targetEnvironments ? { targetEnvironments: settings.targetEnvironments } : {}),
@@ -1422,9 +1345,6 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   return normalizeWorkspaceConfig({
     ...normalized,
     python: {
-      ...(normalized.python?.artifactTransfer
-        ? { artifactTransfer: normalized.python.artifactTransfer }
-        : {}),
       ...(normalized.python?.legacySeed ? { legacySeed: normalized.python.legacySeed } : {}),
       planner: normalized.python!.planner,
       publication: defaultPythonPublicationProfile(),
@@ -1566,7 +1486,7 @@ function targetKey(target: WorkspaceTarget): string {
               python: target.python,
             }),
           ].join('\0')
-        : target.type === 'python-wheel' || target.type === 'python-runtime'
+        : target.type === 'python-wheel'
           ? [target.type, target.url, target.sha256].join('\0')
           : [target.type, target.spec].join('\0');
 }
@@ -1774,22 +1694,6 @@ export function createWorkspacePythonRootWheels(config: WorkspaceConfig): Python
   );
 }
 
-export function createWorkspacePythonRuntimeArtifacts(
-  config: WorkspaceConfig
-): PythonRuntimeArtifactInput[] {
-  return config.targets.flatMap((target) =>
-    target.type === 'python-runtime'
-      ? [
-          {
-            pythonVersion: target.pythonVersion,
-            sha256: target.sha256,
-            url: target.url,
-          },
-        ]
-      : []
-  );
-}
-
 export function createWorkspaceSnapshot(
   options: CreateWorkspaceSnapshotOptions
 ): WorkspaceSnapshot {
@@ -1858,15 +1762,6 @@ export function createWorkspaceSnapshot(
           ...(target.pythonResolutionMode
             ? { pythonResolutionMode: target.pythonResolutionMode }
             : {}),
-          sha256: target.sha256,
-          type: target.type,
-          url: target.url,
-        };
-      }
-
-      if (target.type === 'python-runtime') {
-        return {
-          pythonVersion: target.pythonVersion,
           sha256: target.sha256,
           type: target.type,
           url: target.url,

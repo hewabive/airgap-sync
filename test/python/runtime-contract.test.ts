@@ -7,13 +7,6 @@ import {
   createPythonEnvironmentPlan,
   type PythonEnvironmentPlan,
 } from '../../src/core/python/environment-plan.js';
-import {
-  managedPythonRuntimeCatalog,
-  managedPythonRuntimeCatalogs,
-  normalizeManagedPythonRuntimeCatalog,
-  selectManagedPythonRuntimeAsset,
-  selectManagedPythonRuntimeCatalogs,
-} from '../../src/core/python/runtime-catalog.js';
 import { normalizePlatformCoveragePolicy } from '../../src/core/python/coverage-policy.js';
 
 function plan(): PythonEnvironmentPlan {
@@ -100,44 +93,6 @@ function plan(): PythonEnvironmentPlan {
 }
 
 describe('Python runtime contract', () => {
-  it('loads exact managed runtime assets from the reviewed catalog', () => {
-    const uv0121Catalog = managedPythonRuntimeCatalogs.find((catalog) =>
-      catalog.compatibleUvVersions.includes('0.12.1')
-    )!;
-    expect(normalizeManagedPythonRuntimeCatalog(managedPythonRuntimeCatalog)).toEqual(
-      managedPythonRuntimeCatalog
-    );
-    expect(selectManagedPythonRuntimeAsset('3.11', 'windows-x86_64')).toMatchObject({
-      pythonVersion: '3.11.15',
-      sha256: 'a48c2dbe832319f61aa8557c9900caec70f7fed0cbee391a4c9ff9f98b50222d',
-    });
-    expect(managedPythonRuntimeCatalog.compatibleUvVersions).toContain('0.11.16');
-    expect(selectManagedPythonRuntimeCatalogs(['0.11.16'])).toEqual([
-      {
-        catalog: managedPythonRuntimeCatalog,
-        uvVersions: ['0.11.16'],
-      },
-    ]);
-    expect(
-      selectManagedPythonRuntimeAsset('3.12', 'linux-glibc-x86_64', uv0121Catalog)
-    ).toMatchObject({
-      pythonVersion: '3.12.13',
-      sha256: '7ceaf4360f4b4ab44f31d8217cfdc70df8e12b61d9561b4900ee7af87176e50d',
-    });
-    expect(selectManagedPythonRuntimeCatalogs(['0.12.1'])).toEqual([
-      {
-        catalog: uv0121Catalog,
-        uvVersions: ['0.12.1'],
-      },
-    ]);
-    expect(() =>
-      selectManagedPythonRuntimeCatalogs(
-        ['0.11.16'],
-        [managedPythonRuntimeCatalog, managedPythonRuntimeCatalog]
-      )
-    ).toThrow('Several managed Python runtime catalogs');
-  });
-
   it('declares external provisioning and machine prerequisites', () => {
     const original = plan();
     const enriched = addPythonRuntimeContract(original, {
@@ -182,64 +137,12 @@ describe('Python runtime contract', () => {
     });
   });
 
-  it('records exact CPython, uv, and license artifact identities without a destination', () => {
-    const enriched = addPythonRuntimeContract(plan(), {
-      includeCpython: true,
-      includeUv: true,
-    });
-
-    expect(enriched.runtimeArtifacts).toHaveLength(6);
-    expect(enriched.runtimeArtifacts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'cpython',
-          platforms: ['linux-glibc-x86_64'],
-          requiredByUvVersions: ['0.11.16'],
-          version: '3.11.15',
-        }),
-        expect.objectContaining({
-          kind: 'uv',
-          platforms: ['windows-x86_64'],
-          version: '0.11.16',
-        }),
-        expect.objectContaining({
-          filename: 'uv-0.11.16-LICENSE-MIT',
-          kind: 'license',
-        }),
-      ])
-    );
-    expect(enriched.runtimeArtifacts?.every((artifact) => !('publication' in artifact))).toBe(true);
-    expect(enriched.runtimeContract?.uvVersions).toEqual(['0.11.16']);
-  });
-
-  it('enables transfer without knowing the future Generic Package owner', () => {
-    expect(
-      addPythonRuntimeContract(plan(), {
-        includeCpython: true,
-      }).runtimeArtifacts
-    ).toHaveLength(2);
-  });
-
-  it('unions runtime archives across several consumer uv catalogs', () => {
-    const enriched = addPythonRuntimeContract(plan(), {
-      includeCpython: true,
-      includeUv: true,
-      uvVersions: ['0.11.16', '0.12.1'],
-    });
-
-    expect(enriched.runtimeArtifacts).toHaveLength(12);
-    expect(enriched.runtimeArtifacts?.filter((artifact) => artifact.kind === 'cpython')).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ requiredByUvVersions: ['0.11.16'] }),
-        expect.objectContaining({ requiredByUvVersions: ['0.12.1'] }),
-      ])
-    );
-    expect(enriched.runtimeArtifacts?.filter((artifact) => artifact.kind === 'uv')).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ version: '0.11.16' }),
-        expect.objectContaining({ version: '0.12.1' }),
-      ])
-    );
-    expect(enriched.runtimeContract?.uvVersions).toEqual(['0.11.16', '0.12.1']);
+  it('rejects obsolete runtime transfer fields when reading stored plans', () => {
+    expect(() =>
+      createPythonEnvironmentPlan({
+        ...plan(),
+        runtimeArtifacts: [],
+      } as Parameters<typeof createPythonEnvironmentPlan>[0])
+    ).toThrow('runtime transfer fields are obsolete');
   });
 });

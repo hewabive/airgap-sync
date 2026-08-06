@@ -47,12 +47,7 @@ function packageVersions(plan: PythonEnvironmentPlan): Map<string, string> {
 }
 
 function artifactIdentities(plan: PythonEnvironmentPlan): Set<string> {
-  return new Set([
-    ...plan.wheels.map((wheel) => `wheel:${wheel.sha256}:${wheel.filename}`),
-    ...(plan.runtimeArtifacts ?? []).map(
-      (artifact) => `${artifact.kind}:${artifact.sha256}:${artifact.filename}`
-    ),
-  ]);
+  return new Set(plan.wheels.map((wheel) => `wheel:${wheel.sha256}:${wheel.filename}`));
 }
 
 function runtimeIdentities(plan: PythonEnvironmentPlan): string[] {

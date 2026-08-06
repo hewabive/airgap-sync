@@ -8,6 +8,15 @@ import {
   type PythonApplicationDownloadReport,
 } from './python/application-bundle.js';
 import type { PythonGenericPublishReport } from './python/generic-publisher.js';
+import {
+  cpythonDistributionFetchReportPath,
+  readCpythonDistributionBundleIndex,
+  type CpythonDistributionDownloadReport,
+} from './python/distribution-bundle.js';
+import {
+  cpythonDistributionPublishReportPath,
+  type CpythonDistributionPublishReport,
+} from './python/distribution-publisher.js';
 
 export interface BundleInfoPackage {
   file: string;
@@ -31,6 +40,14 @@ export interface BundleInfoReportStatus {
 export interface BundleInfo {
   bundle: string;
   createdAt: string;
+  cpythonDistributions: {
+    artifactBytes: number;
+    artifactCount: number;
+    fetchReport: BundleInfoReportStatus;
+    platforms: string[];
+    publishReport: BundleInfoReportStatus;
+    pythonVersions: string[];
+  };
   fetchReport: BundleInfoReportStatus;
   missingTarballs: string[];
   packageCount: number;
@@ -70,6 +87,8 @@ function reportStatus(
     | PublishReport
     | PythonApplicationDownloadReport
     | PythonGenericPublishReport
+    | CpythonDistributionDownloadReport
+    | CpythonDistributionPublishReport
     | undefined
 ): BundleInfoReportStatus {
   if (!report) {
@@ -132,16 +151,29 @@ export async function readBundleInfo(bundleDir: string): Promise<BundleInfo> {
     readOptionalJson<PublishReport>(path.join(bundleDir, 'publish-report.json')),
     missingTarballs(bundleDir, manifest),
   ]);
-  const [pythonApplicationIndex, pythonApplicationFetchReport, pythonApplicationPublishReport] =
-    await Promise.all([
-      readPythonApplicationBundleIndex(bundleDir),
-      readOptionalJson<PythonApplicationDownloadReport>(
-        path.join(bundleDir, 'python-application-fetch-report.json')
-      ),
-      readOptionalJson<PythonGenericPublishReport>(
-        path.join(bundleDir, 'python-application-publish-report.json')
-      ),
-    ]);
+  const [
+    pythonApplicationIndex,
+    pythonApplicationFetchReport,
+    pythonApplicationPublishReport,
+    cpythonDistributionIndex,
+    cpythonDistributionFetchReport,
+    cpythonDistributionPublishReport,
+  ] = await Promise.all([
+    readPythonApplicationBundleIndex(bundleDir),
+    readOptionalJson<PythonApplicationDownloadReport>(
+      path.join(bundleDir, 'python-application-fetch-report.json')
+    ),
+    readOptionalJson<PythonGenericPublishReport>(
+      path.join(bundleDir, 'python-application-publish-report.json')
+    ),
+    readCpythonDistributionBundleIndex(bundleDir),
+    readOptionalJson<CpythonDistributionDownloadReport>(
+      path.join(bundleDir, cpythonDistributionFetchReportPath)
+    ),
+    readOptionalJson<CpythonDistributionPublishReport>(
+      path.join(bundleDir, cpythonDistributionPublishReportPath)
+    ),
+  ]);
 
   const packageNames = new Set(manifest.packages.map((pkg) => pkg.name));
   const tags = tagsFromManifest(distTags);
@@ -150,6 +182,22 @@ export async function readBundleInfo(bundleDir: string): Promise<BundleInfo> {
   return {
     bundle: path.resolve(bundleDir),
     createdAt: manifest.createdAt,
+    cpythonDistributions: {
+      artifactBytes: cpythonDistributionIndex?.summary.bytes ?? 0,
+      artifactCount: cpythonDistributionIndex?.summary.artifacts ?? 0,
+      fetchReport: reportStatus(cpythonDistributionFetchReport),
+      platforms: [
+        ...new Set(
+          cpythonDistributionIndex?.artifacts.map((artifact) => artifact.platformFamilyId) ?? []
+        ),
+      ].sort(),
+      publishReport: reportStatus(cpythonDistributionPublishReport),
+      pythonVersions: [
+        ...new Set(
+          cpythonDistributionIndex?.artifacts.map((artifact) => artifact.pythonVersion) ?? []
+        ),
+      ].sort(),
+    },
     fetchReport: reportStatus(fetchReport),
     missingTarballs: missing,
     packageCount: manifest.packages.length,
