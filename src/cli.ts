@@ -108,6 +108,7 @@ import {
   workspaceConfigFileName,
   workspaceLegacyPythonSettings,
   workspacePythonPlannerVersion,
+  workspaceTargetEditableFields,
   withWorkspaceLegacyPythonSettings,
   provisionGiteaRepositories,
 } from './index.js';
@@ -2774,6 +2775,169 @@ function printMenu(): void {
   console.log('0. Exit');
 }
 
+function splitMenuValues(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function addCpythonDistributionsFromMenu(
+  workspaceDir: string,
+  rl: ReadlineInterface
+): Promise<void> {
+  const supportedPlatforms = listBuiltInPlatformFamilies()
+    .filter((platform) => platform.status === 'supported')
+    .map((platform) => platform.id);
+  const fromMinor = await ask(rl, 'Lowest CPython minor', '3.10');
+  const platforms = splitMenuValues(
+    await ask(rl, 'Platforms (comma-separated)', supportedPlatforms.join(', '))
+  );
+  const latest = parsePositiveInteger(
+    await ask(rl, 'Latest patch versions per minor and platform', '1')
+  );
+  const windowDays = parsePositiveInteger(await ask(rl, 'Provider build window in days', '365'));
+  await runSelfCommand(
+    [
+      'target',
+      'add',
+      'cpython-distributions',
+      workspaceDir,
+      '--from-minor',
+      fromMinor,
+      ...platforms.flatMap((platform) => ['--platform', platform]),
+      '--latest',
+      String(latest),
+      '--window-days',
+      String(windowDays),
+    ],
+    workspaceDir
+  );
+}
+
+async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
+  const config = await readMenuWorkspace(workspaceDir, rl);
+  console.log(formatTargetList(config.targets));
+  if (config.targets.length === 0) {
+    return;
+  }
+  const indexValue = await ask(rl, 'Target index to edit');
+  if (!indexValue) {
+    return;
+  }
+  const index = parsePositiveInteger(indexValue);
+  const target = config.targets[index - 1];
+  if (!target) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+  const editableFields = workspaceTargetEditableFields(target);
+  if (editableFields.length === 0) {
+    console.log(
+      `Target ${String(index)} (${target.type}) has no editable settings. Remove and add a new target to change its identity.`
+    );
+    return;
+  }
+  console.log(`Editing: ${formatTargetValue(target)}`);
+
+  switch (target.type) {
+    case 'cpython-distributions': {
+      const fromMinor = await ask(rl, 'Lowest CPython minor', target.series.from);
+      const platforms = splitMenuValues(
+        await ask(rl, 'Platforms (comma-separated)', target.platforms.join(', '))
+      );
+      const latest = parsePositiveInteger(
+        await ask(rl, 'Latest patch versions per minor and platform', String(target.patches.latest))
+      );
+      const windowDays = parsePositiveInteger(
+        await ask(rl, 'Provider build window in days', String(target.builds.windowDays))
+      );
+      await runSelfCommand(
+        [
+          'target',
+          'edit',
+          indexValue,
+          workspaceDir,
+          '--from-minor',
+          fromMinor,
+          ...platforms.flatMap((platform) => ['--platform', platform]),
+          '--latest',
+          String(latest),
+          '--window-days',
+          String(windowDays),
+        ],
+        workspaceDir
+      );
+      return;
+    }
+    case 'git': {
+      const branch = await ask(
+        rl,
+        'Branch (enter current/new value, or "-" to clear)',
+        target.branch ?? ''
+      );
+      const pythonResolutionMode = await askTargetPythonResolutionMode(
+        rl,
+        target.pythonResolutionMode ?? 'inherit'
+      );
+      await runSelfCommand(
+        [
+          'target',
+          'edit',
+          indexValue,
+          workspaceDir,
+          ...(branch === '-' ? ['--clear-branch'] : branch ? ['--branch', branch] : []),
+          '--python-resolution-mode',
+          pythonResolutionMode ?? 'inherit',
+        ],
+        workspaceDir
+      );
+      return;
+    }
+    case 'pypi':
+    case 'python-wheel': {
+      const pythonResolutionMode = await askTargetPythonResolutionMode(
+        rl,
+        target.pythonResolutionMode ?? 'inherit'
+      );
+      await runSelfCommand(
+        [
+          'target',
+          'edit',
+          indexValue,
+          workspaceDir,
+          '--python-resolution-mode',
+          pythonResolutionMode ?? 'inherit',
+        ],
+        workspaceDir
+      );
+      return;
+    }
+    case 'python-app': {
+      console.log('Leave the next answer empty to keep the current version selection.');
+      const versions = splitMenuValues(
+        await ask(rl, 'New application versions (comma-separated exact versions or latest)')
+      );
+      if (versions.length === 0) {
+        console.log('No target changes requested.');
+        return;
+      }
+      await runSelfCommand(
+        [
+          'target',
+          'edit',
+          indexValue,
+          workspaceDir,
+          ...versions.flatMap((version) => ['--include-version', version]),
+        ],
+        workspaceDir
+      );
+      return;
+    }
+    case 'npm':
+      console.log(`Target ${String(index)} (npm) has no editable settings.`);
+  }
+}
+
 async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface): Promise<void> {
   for (;;) {
     console.log('\nTargets');
@@ -2781,10 +2945,11 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('2. Add Git target');
     console.log('3. Add npm target');
     console.log('4. Add Python application');
-    console.log('5. Set Python application versions');
-    console.log('6. Remove target');
-    console.log('7. Download selected target');
-    console.log('8. Advanced / legacy Python targets');
+    console.log('5. Add CPython distributions');
+    console.log('6. Edit target');
+    console.log('7. Remove target');
+    console.log('8. Download selected target');
+    console.log('9. Advanced / legacy Python targets');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -2871,30 +3036,13 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '5': {
-        await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
-        const index = await ask(rl, 'Python application target index');
-        const applicationVersions = (
-          await ask(rl, 'Application versions (comma-separated exact versions or latest)', 'latest')
-        )
-          .split(',')
-          .map((version) => version.trim())
-          .filter(Boolean);
-        if (index) {
-          await runSelfCommand(
-            [
-              'target',
-              'set-python-app-versions',
-              index,
-              workspaceDir,
-              ...applicationVersions.flatMap((version) => ['--include-version', version]),
-            ],
-            workspaceDir
-          );
-        }
+      case '5':
+        await addCpythonDistributionsFromMenu(workspaceDir, rl);
         break;
-      }
-      case '6': {
+      case '6':
+        await editTargetFromMenu(workspaceDir, rl);
+        break;
+      case '7': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to remove');
         if (index) {
@@ -2902,7 +3050,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '7': {
+      case '8': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to download');
         if (index) {
@@ -2910,7 +3058,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '8':
+      case '9':
         await configureLegacyPythonTargetsMenu(workspaceDir, rl);
         break;
       default:
@@ -2926,7 +3074,6 @@ async function configureLegacyPythonTargetsMenu(
   for (;;) {
     console.log('\nAdvanced / legacy Python targets');
     console.log('1. Add raw PyPI requirement target');
-    console.log('2. Set legacy target resolution mode');
     console.log('0. Back');
     const choice = await ask(rl, 'Choose an action', '0');
     if (choice === '0') {
@@ -2957,37 +3104,6 @@ async function configureLegacyPythonTargetsMenu(
           workspaceDir
         );
       }
-      continue;
-    }
-    if (choice === '2') {
-      const config = await readMenuWorkspace(workspaceDir, rl);
-      console.log(formatTargetList(config.targets));
-      const indexValue = await ask(rl, 'Target index to configure');
-      if (!indexValue) {
-        continue;
-      }
-      const index = parsePositiveInteger(indexValue);
-      const target = config.targets[index - 1];
-      if (!target) {
-        throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
-      }
-      if (target.type !== 'git' && target.type !== 'pypi' && target.type !== 'python-wheel') {
-        throw new Error(`${target.type} targets do not use legacy Python resolution`);
-      }
-      const pythonResolutionMode = await askTargetPythonResolutionMode(
-        rl,
-        target.pythonResolutionMode ?? 'inherit'
-      );
-      await runSelfCommand(
-        [
-          'target',
-          'set-python-resolution',
-          indexValue,
-          pythonResolutionMode ?? 'inherit',
-          workspaceDir,
-        ],
-        workspaceDir
-      );
       continue;
     }
     console.log('Unknown menu item.');
