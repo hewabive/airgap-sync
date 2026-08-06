@@ -203,6 +203,13 @@ resumed across retries and command restarts when the server supports byte ranges
 `plan --retry-delays-ms` and `download --retry-delays-ms` override the default retry
 schedule.
 
+CPython provider discovery also uses that download retry schedule. GitHub release
+metadata is fetched in bounded pages because a `python-build-standalone` release can
+contain enough assets to make the maximum-size REST response time out. Temporary
+network errors and HTTP 408/409/425/429/5xx responses are retried, while GitHub
+`Retry-After` or exhausted-rate-limit reset times take precedence over a shorter local
+delay. Each retry and completed discovery page is printed before artifact download.
+
 `probe` is optional consumer diagnostics. It compares one machine to an existing plan
 and collects only plan-referenced OS, architecture, libc/Python, and explicitly
 requested capability facts.

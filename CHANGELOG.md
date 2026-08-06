@@ -2,6 +2,9 @@
 
 ## 0.1.0
 
+- Fixed CPython discovery failures caused by oversized GitHub release-list responses.
+  Provider metadata now uses bounded pages, retries transient HTTP/network failures,
+  honors server retry delays, and reports retry progress through `download`.
 - Added a common type-aware target editing API, `target edit <index>` command, and
   interactive editor. CPython rolling-policy fields can be changed in place; immutable
   target types report that they have no editable settings. The former Python-specific
