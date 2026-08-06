@@ -1,4 +1,5 @@
 import type { WorkspaceCpythonDistributionsTarget } from '../workspace.js';
+import { HttpStatusError, isRetryableFetchError, retry, type RetryEvent } from '../retry.js';
 import type { CpythonDistributionCandidate } from './distribution-selection.js';
 import type { BuiltInPlatformFamilyId } from './platform-family.js';
 
@@ -28,9 +29,31 @@ export interface DiscoverCpythonDistributionCandidatesOptions {
   githubApiBaseUrl?: string;
   maxPages?: number;
   onPage?: (event: { candidates: number; page: number; releases: number }) => void;
+  onRetry?: (event: CpythonDistributionDiscoveryRetryEvent) => void;
+  pageSize?: number;
   requestTimeoutMs?: number;
+  retryDelaysMs?: number[];
   targets: WorkspaceCpythonDistributionsTarget[];
 }
+
+export interface CpythonDistributionDiscoveryRetryEvent extends RetryEvent {
+  page?: number;
+  phase: 'checksums' | 'releases';
+  url: string;
+}
+
+interface ProviderFetchOptions {
+  failureMessage: string;
+  fetchImplementation: typeof globalThis.fetch;
+  onRetry?: (event: CpythonDistributionDiscoveryRetryEvent) => void;
+  page?: number;
+  phase: CpythonDistributionDiscoveryRetryEvent['phase'];
+  requestTimeoutMs: number;
+  retryDelaysMs?: number[];
+  url: string;
+}
+
+const defaultGithubReleasesPageSize = 10;
 
 const releaseAssetPattern =
   /^cpython-(\d+\.\d+\.\d+)\+(\d{8})-x86_64-(unknown-linux-gnu|pc-windows-msvc)-install_only_stripped\.tar\.gz$/u;
@@ -173,25 +196,93 @@ function parseChecksums(content: string): Map<string, string> {
   return checksums;
 }
 
-async function fetchText(
-  fetchImplementation: typeof globalThis.fetch,
-  url: string,
-  timeoutMs: number
-): Promise<string> {
-  const response = await fetchImplementation(url, {
-    headers: { Accept: 'application/octet-stream', 'User-Agent': 'airgap-sync' },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!response.ok) {
-    throw new Error(`Unable to fetch ${url}: HTTP ${String(response.status)}`);
+function retryAfterMilliseconds(response: Response, now = Date.now()): number | undefined {
+  const retryAfter = response.headers.get('retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.ceil(seconds * 1_000);
+    }
+    const timestamp = Date.parse(retryAfter);
+    if (Number.isFinite(timestamp)) {
+      return Math.max(0, timestamp - now);
+    }
   }
-  return response.text();
+  if (
+    (response.status === 403 || response.status === 429) &&
+    response.headers.get('x-ratelimit-remaining') === '0'
+  ) {
+    const resetSeconds = Number(response.headers.get('x-ratelimit-reset'));
+    if (Number.isFinite(resetSeconds) && resetSeconds >= 0) {
+      return Math.max(0, Math.ceil(resetSeconds * 1_000 - now));
+    }
+  }
+  return undefined;
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The original HTTP status is more useful than a body cleanup failure.
+  }
+}
+
+async function fetchProviderBody<T>(
+  options: ProviderFetchOptions,
+  accept: string,
+  read: (response: Response) => Promise<T>
+): Promise<T> {
+  return retry(
+    async () => {
+      const response = await options.fetchImplementation(options.url, {
+        headers: {
+          Accept: accept,
+          'User-Agent': 'airgap-sync',
+          ...(options.phase === 'releases' ? { 'X-GitHub-Api-Version': '2022-11-28' } : {}),
+        },
+        signal: AbortSignal.timeout(options.requestTimeoutMs),
+      });
+      if (!response.ok) {
+        const retryAfterMs = retryAfterMilliseconds(response);
+        await cancelResponseBody(response);
+        throw new HttpStatusError(
+          `${options.failureMessage}: HTTP ${String(response.status)}`,
+          response.status,
+          retryAfterMs
+        );
+      }
+      return read(response);
+    },
+    {
+      ...(options.retryDelaysMs ? { delaysMs: options.retryDelaysMs } : {}),
+      isRetryable: isRetryableFetchError,
+      onRetry: (event) => {
+        options.onRetry?.({
+          ...event,
+          ...(options.page !== undefined ? { page: options.page } : {}),
+          phase: options.phase,
+          url: options.url,
+        });
+      },
+    }
+  );
+}
+
+async function fetchText(options: ProviderFetchOptions): Promise<string> {
+  return fetchProviderBody(options, 'application/octet-stream', (response) => response.text());
+}
+
+async function fetchJson(options: ProviderFetchOptions): Promise<unknown> {
+  return fetchProviderBody(options, 'application/vnd.github+json', (response) => response.json());
 }
 
 async function fillMissingDigests(
   candidates: PendingCandidate[],
-  fetchImplementation: typeof globalThis.fetch,
-  timeoutMs: number
+  options: Pick<DiscoverCpythonDistributionCandidatesOptions, 'onRetry' | 'retryDelaysMs'> & {
+    fetchImplementation: typeof globalThis.fetch;
+    requestTimeoutMs: number;
+  }
 ): Promise<void> {
   const releases = new Map<string, PendingCandidate[]>();
   for (const candidate of candidates.filter((item) => !item.sha256)) {
@@ -206,7 +297,15 @@ async function fillMissingDigests(
       throw new Error(`python-build-standalone ${release.tag_name} has no SHA256SUMS asset`);
     }
     const checksums = parseChecksums(
-      await fetchText(fetchImplementation, checksumAsset.browser_download_url, timeoutMs)
+      await fetchText({
+        failureMessage: `Unable to fetch python-build-standalone ${release.tag_name} checksums`,
+        fetchImplementation: options.fetchImplementation,
+        ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+        phase: 'checksums',
+        requestTimeoutMs: options.requestTimeoutMs,
+        ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+        url: checksumAsset.browser_download_url,
+      })
     );
     for (const candidate of pending) {
       const sha256 = checksums.get(candidate.filename);
@@ -239,19 +338,26 @@ export async function discoverCpythonDistributionCandidates(
   const timeoutMs = options.requestTimeoutMs ?? 60_000;
   const candidates: PendingCandidate[] = [];
   const maxPages = options.maxPages ?? 20;
+  const pageSize = options.pageSize ?? defaultGithubReleasesPageSize;
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    throw new Error('CPython distribution GitHub pageSize must be between 1 and 100');
+  }
+  if (!Number.isSafeInteger(maxPages) || maxPages < 1) {
+    throw new Error('CPython distribution maxPages must be a positive integer');
+  }
 
   for (let page = 1; page <= maxPages; page++) {
-    const url = `${apiBaseUrl}/repos/astral-sh/python-build-standalone/releases?per_page=100&page=${String(page)}`;
-    const response = await fetchImplementation(url, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'airgap-sync' },
-      signal: AbortSignal.timeout(timeoutMs),
+    const url = `${apiBaseUrl}/repos/astral-sh/python-build-standalone/releases?per_page=${String(pageSize)}&page=${String(page)}`;
+    const value = await fetchJson({
+      failureMessage: 'Unable to list python-build-standalone releases',
+      fetchImplementation,
+      ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+      page,
+      phase: 'releases',
+      requestTimeoutMs: timeoutMs,
+      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+      url,
     });
-    if (!response.ok) {
-      throw new Error(
-        `Unable to list python-build-standalone releases: HTTP ${String(response.status)}`
-      );
-    }
-    const value: unknown = await response.json();
     if (!Array.isArray(value)) {
       throw new Error('Invalid python-build-standalone GitHub releases response');
     }
@@ -268,7 +374,7 @@ export async function discoverCpythonDistributionCandidates(
     ) {
       break;
     }
-    if (releases.length < 100) break;
+    if (releases.length < pageSize) break;
     if (page === maxPages) {
       throw new Error(
         `python-build-standalone release discovery exceeded ${String(maxPages)} pages`
@@ -276,7 +382,12 @@ export async function discoverCpythonDistributionCandidates(
     }
   }
 
-  await fillMissingDigests(candidates, fetchImplementation, timeoutMs);
+  await fillMissingDigests(candidates, {
+    fetchImplementation,
+    ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+    requestTimeoutMs: timeoutMs,
+    ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+  });
   const deduplicated = new Map<string, CpythonDistributionCandidate>();
   for (const candidate of candidates) {
     deduplicated.set(candidate.sourceUrl, {

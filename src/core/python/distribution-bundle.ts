@@ -15,7 +15,10 @@ import {
   type CpythonDistributionTargetSelection,
   type SelectedCpythonDistribution,
 } from './distribution-selection.js';
-import { discoverCpythonDistributionCandidates } from './distribution-provider.js';
+import {
+  discoverCpythonDistributionCandidates,
+  type CpythonDistributionDiscoveryRetryEvent,
+} from './distribution-provider.js';
 
 export const cpythonDistributionsDirectory = 'python/distributions';
 export const cpythonDistributionArtifactsDirectory = `${cpythonDistributionsDirectory}/artifacts`;
@@ -74,6 +77,7 @@ export interface DownloadCpythonDistributionBundleOptions {
     totalBytes: number;
   }) => void;
   onDiscoveryPage?: (event: { candidates: number; page: number; releases: number }) => void;
+  onDiscoveryRetry?: (event: CpythonDistributionDiscoveryRetryEvent) => void;
   onRetry?: (artifact: SelectedCpythonDistribution, event: ResumableDownloadRetryEvent) => void;
   partial?: boolean;
   requestTimeoutMs?: number;
@@ -384,7 +388,9 @@ export async function downloadCpythonDistributionBundle(
       ...(options.fetch ? { fetch: options.fetch } : {}),
       generatedAt,
       ...(options.onDiscoveryPage ? { onPage: options.onDiscoveryPage } : {}),
+      ...(options.onDiscoveryRetry ? { onRetry: options.onDiscoveryRetry } : {}),
       ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       targets: options.targets,
     }));
   const selection = selectCpythonDistributions({

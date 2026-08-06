@@ -15,22 +15,44 @@ function target(): WorkspaceCpythonDistributionsTarget {
   };
 }
 
-function release(asset: Record<string, unknown>): Record<string, unknown> {
+function release(
+  asset: Record<string, unknown>,
+  options: { publishedAt?: string; tag?: string } = {}
+): Record<string, unknown> {
   return {
     assets: [asset],
     draft: false,
     prerelease: false,
-    published_at: '2026-08-05T12:00:00.000Z',
-    tag_name: '20260805',
+    published_at: options.publishedAt ?? '2026-08-05T12:00:00.000Z',
+    tag_name: options.tag ?? '20260805',
   };
+}
+
+function releaseWithDigest(
+  pythonVersion: string,
+  tag: string,
+  publishedAt: string
+): Record<string, unknown> {
+  const filename = `cpython-${pythonVersion}+${tag}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz`;
+  return release(
+    {
+      browser_download_url: `https://github.example/releases/${tag}/${filename}`,
+      digest: `sha256:${tag.padEnd(64, 'a')}`,
+      name: filename,
+      size: 34_184_519,
+    },
+    { publishedAt, tag }
+  );
 }
 
 describe('python-build-standalone discovery', () => {
   it('maps stable install-only assets and uses GitHub SHA-256 digests', async () => {
     const filename =
       'cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
-    const fetch: typeof globalThis.fetch = () =>
-      Promise.resolve(
+    const urls: string[] = [];
+    const fetch: typeof globalThis.fetch = (input) => {
+      urls.push(input instanceof Request ? input.url : input.toString());
+      return Promise.resolve(
         new Response(
           JSON.stringify([
             release({
@@ -43,6 +65,7 @@ describe('python-build-standalone discovery', () => {
           { headers: { 'content-type': 'application/json' } }
         )
       );
+    };
 
     const candidates = await discoverCpythonDistributionCandidates({
       fetch,
@@ -59,6 +82,99 @@ describe('python-build-standalone discovery', () => {
         sha256: 'a'.repeat(64),
         size: 34_184_519,
       }),
+    ]);
+    expect(urls).toEqual([
+      'https://api.github.com/repos/astral-sh/python-build-standalone/releases?per_page=10&page=1',
+    ]);
+  });
+
+  it('retries transient GitHub failures and reports retry progress', async () => {
+    let attempts = 0;
+    const retries: { attempt: number; delayMs: number; page?: number; phase: string }[] = [];
+    const fetch: typeof globalThis.fetch = () => {
+      attempts++;
+      return Promise.resolve(
+        attempts === 1
+          ? new Response('temporary gateway failure', { status: 504 })
+          : new Response(
+              JSON.stringify([releaseWithDigest('3.12.13', '20260805', '2026-08-05T12:00:00.000Z')])
+            )
+      );
+    };
+
+    const candidates = await discoverCpythonDistributionCandidates({
+      fetch,
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      onRetry: (event) => {
+        retries.push({
+          attempt: event.attempt,
+          delayMs: event.delayMs,
+          ...(event.page !== undefined ? { page: event.page } : {}),
+          phase: event.phase,
+        });
+      },
+      retryDelaysMs: [0],
+      targets: [target()],
+    });
+
+    expect(attempts).toBe(2);
+    expect(retries).toEqual([{ attempt: 1, delayMs: 0, page: 1, phase: 'releases' }]);
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('fails after the configured transient retry budget is exhausted', async () => {
+    let attempts = 0;
+    const fetch: typeof globalThis.fetch = () => {
+      attempts++;
+      return Promise.resolve(new Response('temporary gateway failure', { status: 504 }));
+    };
+
+    await expect(
+      discoverCpythonDistributionCandidates({
+        fetch,
+        generatedAt: '2026-08-06T00:00:00.000Z',
+        retryDelaysMs: [0, 0],
+        targets: [target()],
+      })
+    ).rejects.toThrow('Unable to list python-build-standalone releases: HTTP 504');
+    expect(attempts).toBe(3);
+  });
+
+  it('paginates with the configured small page size and stops on a short page', async () => {
+    const urls: string[] = [];
+    const fetch: typeof globalThis.fetch = (input) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      urls.push(url);
+      const page = new URL(url).searchParams.get('page');
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            page === '1'
+              ? [
+                  releaseWithDigest('3.13.5', '20260805', '2026-08-05T12:00:00.000Z'),
+                  releaseWithDigest('3.12.13', '20260801', '2026-08-01T12:00:00.000Z'),
+                ]
+              : [releaseWithDigest('3.11.9', '20240101', '2024-01-01T12:00:00.000Z')]
+          )
+        )
+      );
+    };
+
+    const candidates = await discoverCpythonDistributionCandidates({
+      fetch,
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      pageSize: 2,
+      targets: [target()],
+    });
+
+    expect(urls).toEqual([
+      'https://api.github.com/repos/astral-sh/python-build-standalone/releases?per_page=2&page=1',
+      'https://api.github.com/repos/astral-sh/python-build-standalone/releases?per_page=2&page=2',
+    ]);
+    expect(candidates.map((candidate) => candidate.pythonVersion)).toEqual([
+      '3.13.5',
+      '3.12.13',
+      '3.11.9',
     ]);
   });
 

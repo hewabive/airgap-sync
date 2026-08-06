@@ -60,11 +60,13 @@ function isRetryableHttpStatus(status: number): boolean {
 }
 
 export class HttpStatusError extends Error {
+  readonly retryAfterMs: number | undefined;
   readonly status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfterMs?: number) {
     super(message);
     this.name = 'HttpStatusError';
+    this.retryAfterMs = retryAfterMs;
     this.status = status;
   }
 }
@@ -93,10 +95,14 @@ export async function retry<T>(
     try {
       return await operation();
     } catch (error) {
-      const delayMs = delaysMs[attempt - 1];
-      if (delayMs === undefined || !isRetryable(error)) {
+      const configuredDelayMs = delaysMs[attempt - 1];
+      if (configuredDelayMs === undefined || !isRetryable(error)) {
         throw error;
       }
+      const delayMs =
+        error instanceof HttpStatusError && error.retryAfterMs !== undefined
+          ? Math.max(configuredDelayMs, error.retryAfterMs)
+          : configuredDelayMs;
 
       options.onRetry?.({
         attempt,

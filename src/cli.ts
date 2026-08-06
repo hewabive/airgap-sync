@@ -4585,6 +4585,13 @@ program
                 `[download] CPython discovery page ${String(event.page)}: ${String(event.candidates)} matching artifacts`
               );
             },
+            onDiscoveryRetry: (event) => {
+              const reason =
+                event.error instanceof Error ? event.error.message : String(event.error);
+              console.error(
+                `[download] CPython discovery ${event.phase}${event.page === undefined ? '' : ` page ${String(event.page)}`} attempt ${String(event.attempt)} failed: ${reason}; retrying with attempt ${String(event.nextAttempt)} in ${String(event.delayMs)}ms`
+              );
+            },
             partial: targetSelection !== undefined,
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             targets: cpythonTargets,
