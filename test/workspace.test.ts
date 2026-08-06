@@ -144,6 +144,31 @@ describe('workspace config', () => {
     ]);
   });
 
+  it('normalizes a rolling CPython distribution target', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+
+    const added = await addWorkspaceTarget(tempDir, {
+      builds: { windowDays: 365 },
+      patches: { latest: 3 },
+      platforms: ['windows-x86_64', 'linux-glibc-x86_64', 'windows-x86_64'],
+      provider: 'python-build-standalone',
+      series: { from: '3.10', major: 3, through: 'latest-stable' },
+      type: 'cpython-distributions',
+    });
+
+    expect(added.added).toBe(true);
+    expect((await readWorkspaceConfig(tempDir)).targets).toEqual([
+      {
+        builds: { windowDays: 365 },
+        patches: { latest: 3 },
+        platforms: ['linux-glibc-x86_64', 'windows-x86_64'],
+        provider: 'python-build-standalone',
+        series: { from: '3.10', major: 3, through: 'latest-stable' },
+        type: 'cpython-distributions',
+      },
+    ]);
+  });
+
   it('expands legacy automatic Python coverage to the initial supported minor matrix', async () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     const coverage = config.coveragePolicies?.[0]?.id;

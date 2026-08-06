@@ -19,6 +19,7 @@ import {
   compareMachineToPythonEnvironmentPlan,
   downloadPythonApplicationPlans,
   ensureWorkspacePythonApplicationPlans,
+  evaluateDownloadWindowGap,
   configureGitRewrites,
   createPythonEnvironmentPlan,
   createGitSourcesManifest,
@@ -117,6 +118,7 @@ import type {
   BundlePruneReport,
   CollectReport,
   CollectProgressEvent,
+  DownloadRunRecord,
   FetchSeedBundleResult,
   GitFetchProgressEvent,
   GitApplyProgressEvent,
@@ -221,6 +223,7 @@ interface VerifyInstallOptions {
 
 interface CollectOptions {
   allowApproximatePython?: boolean;
+  allowWindowGap?: boolean;
   concurrency: number;
   dryRun?: boolean;
   includeDev?: boolean;
@@ -266,6 +269,13 @@ interface TargetPythonApplicationOptions {
   pythonVersion?: string[];
   recipe?: string;
   version?: string;
+}
+
+interface TargetCpythonDistributionsOptions {
+  fromMinor: string;
+  latest: number;
+  platform: string[];
+  windowDays: number;
 }
 
 interface GitSourcesOptions {
@@ -736,11 +746,14 @@ async function pruneAfterSuccessfulDownload(
   return pruneReport;
 }
 
-async function reportDownloadWatermark(bundleDir: string, now = new Date()): Promise<void> {
+async function reportDownloadWatermark(
+  bundleDir: string,
+  now = new Date()
+): Promise<DownloadRunRecord | undefined> {
   const lastSuccessfulDownload = await readLastSuccessfulFullDownload(bundleDir);
   if (!lastSuccessfulDownload) {
     console.error('[download] last successful full download: none recorded');
-    return;
+    return undefined;
   }
   const elapsedMs = Math.max(
     0,
@@ -750,6 +763,60 @@ async function reportDownloadWatermark(bundleDir: string, now = new Date()): Pro
   console.error(
     `[download] last successful full download: ${lastSuccessfulDownload.completedAt} (${String(elapsedDays)} ${elapsedDays === 1 ? 'day' : 'days'} ago)`
   );
+  return lastSuccessfulDownload;
+}
+
+async function confirmCpythonWindowGap(options: {
+  allowWindowGap?: boolean;
+  config: WorkspaceConfig;
+  lastSuccessfulDownload: DownloadRunRecord | undefined;
+  now?: Date;
+  targetIndexes?: number[];
+}): Promise<void> {
+  if (!options.lastSuccessfulDownload) {
+    return;
+  }
+  const now = options.now ?? new Date();
+  const gaps = options.config.targets.flatMap((target, index) => {
+    if (target.type !== 'cpython-distributions') {
+      return [];
+    }
+    const gap = evaluateDownloadWindowGap(
+      options.lastSuccessfulDownload!,
+      target.builds.windowDays,
+      now
+    );
+    return gap.exceedsWindow ? [{ gap, index: options.targetIndexes?.[index] ?? index + 1 }] : [];
+  });
+  if (gaps.length === 0) {
+    return;
+  }
+  console.error(
+    `[download] WARNING: the interval since the last successful full download exceeds the CPython build window for ${gaps
+      .map(
+        ({ gap, index }) =>
+          `target ${String(index)} (${gap.elapsedDays.toFixed(1)} days elapsed, ${String(gap.windowDays)} configured)`
+      )
+      .join(', ')}.`
+  );
+  console.error(
+    `[download] Increase windowDays to at least ${String(Math.max(...gaps.map(({ gap }) => gap.requiredWindowDays)))} to transfer the gap before narrowing it again.`
+  );
+  if (options.allowWindowGap === true) {
+    console.error('[download] continuing because --allow-window-gap was provided');
+    return;
+  }
+  if (!process.stdin.isTTY || !process.stderr.isTTY) {
+    throw new Error('CPython build window gap requires --allow-window-gap to continue');
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    if (!(await askYesNo(rl, 'Continue and accept the CPython build window gap?', false))) {
+      throw new Error('Download stopped because the CPython build window has a gap');
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 function formatTargetList(targets: WorkspaceConfig['targets']): string {
@@ -767,13 +834,15 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
 
 function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
   const value =
-    target.type === 'git'
-      ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
-      : target.type === 'python-wheel'
-        ? `python-wheel ${target.url}#sha256=${target.sha256}`
-        : target.type === 'python-runtime'
-          ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
-          : `${target.type} ${target.spec}`;
+    target.type === 'cpython-distributions'
+      ? `cpython-distributions ${target.series.from}..${target.series.through}; latest ${String(target.patches.latest)}; ${String(target.builds.windowDays)} days; ${target.platforms.join(', ')}`
+      : target.type === 'git'
+        ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
+        : target.type === 'python-wheel'
+          ? `python-wheel ${target.url}#sha256=${target.sha256}`
+          : target.type === 'python-runtime'
+            ? `python-runtime ${target.pythonVersion} ${target.url}#sha256=${target.sha256}`
+            : `${target.type} ${target.spec}`;
   const pythonResolutionMode =
     target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
       ? target.pythonResolutionMode
@@ -3744,6 +3813,55 @@ targetAddCommand
   });
 
 targetAddCommand
+  .command('cpython-distributions')
+  .description('Add a rolling set of portable CPython distributions')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .option('--from-minor <version>', 'Lowest CPython minor, e.g. 3.10', '3.10')
+  .option(
+    '--platform <id>',
+    'Platform family; repeatable, defaults to every supported platform',
+    collectStrings,
+    []
+  )
+  .option(
+    '--latest <count>',
+    'Latest patch versions retained per minor and platform',
+    parsePositiveInteger,
+    1
+  )
+  .option(
+    '--window-days <days>',
+    'Provider build history retained as fixed 24-hour days',
+    parsePositiveInteger,
+    365
+  )
+  .action(async (workspace: string, options: TargetCpythonDistributionsOptions) => {
+    try {
+      const platforms =
+        options.platform.length > 0
+          ? options.platform
+          : listBuiltInPlatformFamilies()
+              .filter((platform) => platform.status === 'supported')
+              .map((platform) => platform.id);
+      const target = {
+        builds: { windowDays: options.windowDays },
+        patches: { latest: options.latest },
+        platforms: platforms as ('linux-glibc-x86_64' | 'windows-x86_64')[],
+        provider: 'python-build-standalone',
+        series: { from: options.fromMinor, major: 3, through: 'latest-stable' },
+        type: 'cpython-distributions',
+      } as const;
+      const result = await addWorkspaceTarget(workspace, target);
+      console.log(
+        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetAddCommand
   .command('pypi')
   .description('Add a legacy raw Python package requirement target')
   .argument('<spec>', 'PEP 508 requirement, e.g. requests[socks]>=2.31')
@@ -4043,6 +4161,10 @@ program
     'Opt in to simplified no-backtracking resolution for unlocked Python requirements'
   )
   .option(
+    '--allow-window-gap',
+    'Continue when the last successful full download is older than a configured artifact window'
+  )
+  .option(
     '--latest-policy <policy>',
     'Latest dist-tag policy: bundled or source',
     parseLatestPolicy
@@ -4099,7 +4221,15 @@ program
         const activeConfig = targetSelection?.config ?? config;
         const legacyPython = workspaceLegacyPythonSettings(activeConfig);
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
-        await reportDownloadWatermark(outputDir);
+        const lastSuccessfulDownload = await reportDownloadWatermark(outputDir);
+        await confirmCpythonWindowGap({
+          ...(options.allowWindowGap === undefined
+            ? {}
+            : { allowWindowGap: options.allowWindowGap }),
+          config: activeConfig,
+          lastSuccessfulDownload,
+          ...(targetSelection ? { targetIndexes: targetSelection.selectedIndexes } : {}),
+        });
         if (targetSelection) {
           console.error(
             `[download] selected targets: ${targetSelection.selectedIndexes.join(', ')}`

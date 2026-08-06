@@ -42,6 +42,10 @@ import {
   normalizePythonPublicationProfile,
   type PythonPublicationProfile,
 } from './python/publication-targets.js';
+import {
+  isBuiltInPlatformFamilyId,
+  type BuiltInPlatformFamilyId,
+} from './python/platform-family.js';
 
 export type { PythonResolutionMode } from './python/resolution-policy.js';
 
@@ -91,6 +95,23 @@ export interface WorkspacePythonRuntimeTarget {
   url: string;
 }
 
+export interface WorkspaceCpythonDistributionsTarget {
+  builds: {
+    windowDays: number;
+  };
+  patches: {
+    latest: number;
+  };
+  platforms: BuiltInPlatformFamilyId[];
+  provider: 'python-build-standalone';
+  series: {
+    from: string;
+    major: 3;
+    through: 'latest-stable';
+  };
+  type: 'cpython-distributions';
+}
+
 export interface WorkspacePythonApplicationTarget {
   application: {
     extras: string[];
@@ -106,6 +127,7 @@ export interface WorkspacePythonApplicationTarget {
 }
 
 export type WorkspaceTarget =
+  | WorkspaceCpythonDistributionsTarget
   | WorkspaceGitTarget
   | WorkspaceNpmTarget
   | WorkspacePypiTarget
@@ -227,9 +249,12 @@ interface WorkspacePythonRuntimeTargetSnapshot {
   url: string;
 }
 
+interface WorkspaceCpythonDistributionsTargetSnapshot extends WorkspaceCpythonDistributionsTarget {}
+
 interface WorkspacePythonApplicationTargetSnapshot extends WorkspacePythonApplicationTarget {}
 
 export type WorkspaceTargetSnapshot =
+  | WorkspaceCpythonDistributionsTargetSnapshot
   | WorkspaceGitTargetSnapshot
   | WorkspaceNpmTargetSnapshot
   | WorkspacePypiTargetSnapshot
@@ -623,6 +648,59 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     return normalizePythonApplicationTarget(value);
   }
 
+  if (value.type === 'cpython-distributions') {
+    const platforms = Array.isArray(value.platforms) ? [...new Set(value.platforms)] : [];
+    if (
+      platforms.length === 0 ||
+      !platforms.every(
+        (platform): platform is BuiltInPlatformFamilyId =>
+          typeof platform === 'string' && isBuiltInPlatformFamilyId(platform)
+      )
+    ) {
+      throw new Error('cpython-distributions platforms must contain supported platform family ids');
+    }
+    if (value.provider !== 'python-build-standalone') {
+      throw new Error('cpython-distributions provider must be python-build-standalone');
+    }
+    if (
+      !isRecord(value.series) ||
+      value.series.major !== 3 ||
+      typeof value.series.from !== 'string' ||
+      !/^3\.\d+$/u.test(value.series.from.trim()) ||
+      value.series.through !== 'latest-stable'
+    ) {
+      throw new Error(
+        'cpython-distributions series must use major 3, a 3.X lower bound, and latest-stable'
+      );
+    }
+    if (
+      !isRecord(value.patches) ||
+      !Number.isSafeInteger(value.patches.latest) ||
+      (value.patches.latest as number) <= 0
+    ) {
+      throw new Error('cpython-distributions patches.latest must be a positive integer');
+    }
+    if (
+      !isRecord(value.builds) ||
+      !Number.isSafeInteger(value.builds.windowDays) ||
+      (value.builds.windowDays as number) <= 0
+    ) {
+      throw new Error('cpython-distributions builds.windowDays must be a positive integer');
+    }
+    return {
+      builds: { windowDays: value.builds.windowDays as number },
+      patches: { latest: value.patches.latest as number },
+      platforms: platforms.sort(),
+      provider: 'python-build-standalone',
+      series: {
+        from: value.series.from.trim(),
+        major: 3,
+        through: 'latest-stable',
+      },
+      type: 'cpython-distributions',
+    };
+  }
+
   if (value.type === 'python-wheel') {
     if (typeof value.url !== 'string' || !value.url.trim()) {
       throw new Error('python-wheel target must include a non-empty url');
@@ -950,8 +1028,15 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   const targets = Array.isArray(value.targets)
     ? value.targets.map((target) => normalizeWorkspaceTarget(target))
     : [];
-  if (schemaVersion === 1 && targets.some((target) => target.type === 'python-app')) {
-    throw new Error('python-app targets require workspace schemaVersion 2');
+  if (
+    schemaVersion === 1 &&
+    targets.some(
+      (target) => target.type === 'python-app' || target.type === 'cpython-distributions'
+    )
+  ) {
+    throw new Error(
+      'python-app and cpython-distributions targets require workspace schemaVersion 2'
+    );
   }
   const coveragePolicyIds = new Set(coveragePolicies.map((policy) => policy.id));
   const pythonApplicationSelections = new Set<string>();
@@ -1467,21 +1552,23 @@ export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<Wo
 }
 
 function targetKey(target: WorkspaceTarget): string {
-  return target.type === 'git'
-    ? ['git', target.url, target.branch ?? ''].join('\0')
-    : target.type === 'python-app'
-      ? [
-          target.type,
-          target.spec,
-          semanticDigest({
-            application: target.application,
-            coverage: target.coverage,
-            python: target.python,
-          }),
-        ].join('\0')
-      : target.type === 'python-wheel' || target.type === 'python-runtime'
-        ? [target.type, target.url, target.sha256].join('\0')
-        : [target.type, target.spec].join('\0');
+  return target.type === 'cpython-distributions'
+    ? [target.type, semanticDigest(target)].join('\0')
+    : target.type === 'git'
+      ? ['git', target.url, target.branch ?? ''].join('\0')
+      : target.type === 'python-app'
+        ? [
+            target.type,
+            target.spec,
+            semanticDigest({
+              application: target.application,
+              coverage: target.coverage,
+              python: target.python,
+            }),
+          ].join('\0')
+        : target.type === 'python-wheel' || target.type === 'python-runtime'
+          ? [target.type, target.url, target.sha256].join('\0')
+          : [target.type, target.spec].join('\0');
 }
 
 export async function addWorkspaceTarget(
@@ -1738,6 +1825,17 @@ export function createWorkspaceSnapshot(
     schemaVersion: options.config.schemaVersion,
     sourceRegistry: options.config.sourceRegistry,
     targets: options.config.targets.map((target) => {
+      if (target.type === 'cpython-distributions') {
+        return {
+          builds: target.builds,
+          patches: target.patches,
+          platforms: target.platforms,
+          provider: target.provider,
+          series: target.series,
+          type: target.type,
+        };
+      }
+
       if (target.type === 'npm') {
         return {
           spec: target.spec,

@@ -124,6 +124,11 @@ export {
   normalizeDistributionHintCatalog,
 } from './core/python/distribution-hints.js';
 export {
+  cpythonDistributionArtifactId,
+  cpythonDistributionTargetId,
+  selectCpythonDistributions,
+} from './core/python/distribution-selection.js';
+export {
   compareCompatibilityVersions,
   explainPlatformCoveragePolicy,
 } from './core/python/coverage-explain.js';
@@ -368,6 +373,7 @@ export type {
   WorkspaceConfig,
   WorkspaceConfigMigrationResult,
   WorkspaceDefaults,
+  WorkspaceCpythonDistributionsTarget,
   WorkspaceGitTarget,
   WorkspaceLegacyPythonSettings,
   WorkspaceNpmTarget,
@@ -384,6 +390,12 @@ export type {
   WorkspaceTargetSnapshot,
   SelectWorkspaceTargetsResult,
 } from './core/workspace.js';
+export type {
+  CpythonDistributionCandidate,
+  CpythonDistributionSelection,
+  CpythonDistributionTargetSelection,
+  SelectedCpythonDistribution,
+} from './core/python/distribution-selection.js';
 export {
   pythonApplicationIntentForVersionSelector,
   setWorkspacePythonApplicationVersionSelection,
