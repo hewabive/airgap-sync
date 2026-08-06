@@ -129,6 +129,22 @@ export {
   selectCpythonDistributions,
 } from './core/python/distribution-selection.js';
 export {
+  cpythonDistributionArtifactsDirectory,
+  cpythonDistributionFetchReportPath,
+  cpythonDistributionIndexPath,
+  cpythonDistributionsDirectory,
+  downloadCpythonDistributionBundle,
+  normalizeCpythonDistributionBundleIndex,
+  readCpythonDistributionBundleIndex,
+  verifyCpythonDistributionBundle,
+} from './core/python/distribution-bundle.js';
+export type {
+  CpythonDistributionBundleArtifact,
+  CpythonDistributionDownloadAction,
+  CpythonDistributionDownloadStatus,
+} from './core/python/distribution-bundle.js';
+export { discoverCpythonDistributionCandidates } from './core/python/distribution-provider.js';
+export {
   compareCompatibilityVersions,
   explainPlatformCoveragePolicy,
 } from './core/python/coverage-explain.js';

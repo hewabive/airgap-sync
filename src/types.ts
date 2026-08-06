@@ -1,5 +1,6 @@
 import type { PythonFetchReport } from './core/python/bundle.js';
 import type { PythonApplicationDownloadReport } from './core/python/application-bundle.js';
+import type { CpythonDistributionDownloadReport } from './core/python/distribution-bundle.js';
 import type { PythonGenericPublishReport } from './core/python/generic-publisher.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
 import type { PythonResolutionMode } from './core/python/resolution-policy.js';
@@ -127,6 +128,7 @@ export interface CollectReport {
   outputDir: string;
   python?: PythonFetchReport;
   pythonApplications?: PythonApplicationDownloadReport;
+  cpythonDistributions?: CpythonDistributionDownloadReport;
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
   root: string;
@@ -483,6 +485,7 @@ export interface ApplyBundleReport {
 }
 
 export type BundlePruneObjectType =
+  | 'cpython-distribution'
   | 'git-mirror'
   | 'npm-package'
   | 'python-application-artifact'
@@ -511,6 +514,7 @@ export interface BundlePruneReport {
   dryRun: boolean;
   errors: BundlePruneActionResult[];
   generatedAt: string;
+  cpythonDistributions?: BundlePruneObjectSummary;
   gitMirrors: BundlePruneObjectSummary;
   npmPackages: BundlePruneObjectSummary;
   pythonApplicationArtifactDirectories?: BundlePruneObjectSummary;

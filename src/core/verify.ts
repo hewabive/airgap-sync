@@ -26,6 +26,12 @@ import {
 import { pythonApplicationIndexPath } from './python/application-paths.js';
 import { readGitSourceManifestRequirements } from './git-manifests.js';
 import { isPackageManagerRequirement } from './package-managers.js';
+import {
+  cpythonDistributionFetchReportPath,
+  cpythonDistributionIndexPath,
+  verifyCpythonDistributionBundle,
+  type CpythonDistributionDownloadReport,
+} from './python/distribution-bundle.js';
 
 export interface VerifyBundleOptions {
   bundleDir: string;
@@ -463,6 +469,76 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
         'python-applications',
         'error',
         `${pythonApplicationIndexPath} is missing for configured Python applications`
+      )
+    );
+  }
+
+  const hasCpythonDistributionIndex = await fs.pathExists(
+    path.join(bundleDir, cpythonDistributionIndexPath)
+  );
+  if (hasCpythonDistributionIndex) {
+    try {
+      const errors = await verifyCpythonDistributionBundle(bundleDir);
+      checks.push(
+        errors.length === 0
+          ? check('cpython-distributions', 'ok', 'CPython distribution artifacts are valid')
+          : check(
+              'cpython-distributions',
+              'error',
+              `${String(errors.length)} CPython distribution bundle errors`,
+              { errors }
+            )
+      );
+      try {
+        const distributionFetchReport = await readOptionalJson<CpythonDistributionDownloadReport>(
+          path.join(bundleDir, cpythonDistributionFetchReportPath)
+        );
+        checks.push(
+          !distributionFetchReport
+            ? check(
+                'cpython-distribution-fetch-report',
+                'warning',
+                `${cpythonDistributionFetchReportPath} is missing`
+              )
+            : distributionFetchReport.errors.length > 0
+              ? check(
+                  'cpython-distribution-fetch-report',
+                  'error',
+                  `${String(distributionFetchReport.errors.length)} CPython distribution fetch errors`,
+                  { errors: distributionFetchReport.errors }
+                )
+              : check(
+                  'cpython-distribution-fetch-report',
+                  'ok',
+                  'CPython distribution fetch report has no errors'
+                )
+        );
+      } catch (error) {
+        checks.push(
+          check(
+            'cpython-distribution-fetch-report',
+            'error',
+            `${cpythonDistributionFetchReportPath} is unreadable`,
+            { error: (error as Error).message }
+          )
+        );
+      }
+    } catch (error) {
+      checks.push(
+        check('cpython-distributions', 'error', `${cpythonDistributionIndexPath} is unreadable`, {
+          error: (error as Error).message,
+        })
+      );
+    }
+  } else if (
+    workspaceSnapshot?.targets.some((target) => target.type === 'cpython-distributions') ||
+    (await fs.pathExists(path.join(bundleDir, cpythonDistributionFetchReportPath)))
+  ) {
+    checks.push(
+      check(
+        'cpython-distributions',
+        'error',
+        `${cpythonDistributionIndexPath} is missing for configured CPython distributions`
       )
     );
   }

@@ -3,6 +3,10 @@ import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pruneBundle } from '../src/core/prune.js';
+import {
+  cpythonDistributionArtifactId,
+  cpythonDistributionTargetId,
+} from '../src/core/python/distribution-selection.js';
 import type { BundleManifest, CollectReport, GitSourcesManifest } from '../src/types.js';
 
 let bundleDir: string;
@@ -377,6 +381,81 @@ describe('pruneBundle', () => {
       false
     );
     await expect(fs.pathExists(path.join(bundleDir, orphanedPlan))).resolves.toBe(false);
+  });
+
+  it('removes CPython distributions as soon as they leave the active index', async () => {
+    await writeBundleFiles();
+    const keptSha = 'd'.repeat(64);
+    const staleSha = 'e'.repeat(64);
+    const keptFile = `python/distributions/artifacts/${keptSha}/kept.tar.gz`;
+    const staleFile = `python/distributions/artifacts/${staleSha}/stale.tar.gz`;
+    await fs.ensureDir(path.join(bundleDir, path.dirname(keptFile)));
+    await fs.ensureDir(path.join(bundleDir, path.dirname(staleFile)));
+    await fs.writeFile(path.join(bundleDir, keptFile), 'kept');
+    await fs.writeFile(path.join(bundleDir, staleFile), 'stale');
+    const target = {
+      builds: { windowDays: 30 },
+      patches: { latest: 1 },
+      platforms: ['linux-glibc-x86_64'] as ['linux-glibc-x86_64'],
+      provider: 'python-build-standalone' as const,
+      series: { from: '3.12', major: 3 as const, through: 'latest-stable' as const },
+      type: 'cpython-distributions' as const,
+    };
+    const artifact = {
+      filename: 'kept.tar.gz',
+      platformFamilyId: 'linux-glibc-x86_64' as const,
+      provider: 'python-build-standalone' as const,
+      providerBuild: '20260805',
+      providerPublishedAt: '2026-08-05T00:00:00.000Z',
+      pythonVersion: '3.12.13',
+      sha256: keptSha,
+      size: 4,
+      sourceUrl: 'https://github.example/kept.tar.gz',
+    };
+    const artifactId = cpythonDistributionArtifactId(artifact);
+    const targetId = cpythonDistributionTargetId(target);
+    await fs.writeJson(
+      path.join(bundleDir, 'python/distributions/index.json'),
+      {
+        artifacts: [
+          {
+            file: keptFile,
+            filename: 'kept.tar.gz',
+            id: artifactId,
+            platformFamilyId: 'linux-glibc-x86_64',
+            provider: 'python-build-standalone',
+            providerBuild: '20260805',
+            providerPublishedAt: '2026-08-05T00:00:00.000Z',
+            pythonVersion: '3.12.13',
+            references: [targetId],
+            sha256: keptSha,
+            size: 4,
+            sourceUrl: 'https://github.example/kept.tar.gz',
+          },
+        ],
+        createdAt: generatedAt,
+        schemaVersion: 1,
+        summary: { artifacts: 1, bytes: 4, targets: 1 },
+        targets: [{ artifactIds: [artifactId], target, targetId }],
+      },
+      { spaces: 2 }
+    );
+
+    const report = await pruneBundle({ bundleDir });
+
+    expect(report.cpythonDistributions).toEqual({
+      kept: 1,
+      removed: 1,
+      stale: 1,
+      total: 2,
+    });
+    expect(report.actions).toContainEqual({
+      path: staleFile,
+      status: 'removed',
+      type: 'cpython-distribution',
+    });
+    await expect(fs.pathExists(path.join(bundleDir, keptFile))).resolves.toBe(true);
+    await expect(fs.pathExists(path.join(bundleDir, staleFile))).resolves.toBe(false);
   });
 
   it('refuses to prune after an incomplete download', async () => {

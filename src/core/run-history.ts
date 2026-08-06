@@ -15,8 +15,13 @@ import {
   type PythonApplicationBundleIndex,
 } from './python/application-bundle.js';
 import { pythonApplicationIndexPath } from './python/application-paths.js';
+import {
+  readCpythonDistributionBundleIndex,
+  type CpythonDistributionBundleIndex,
+} from './python/distribution-bundle.js';
 
 export interface BundleStateSnapshot {
+  cpythonDistributionIndex?: CpythonDistributionBundleIndex;
   distTags?: DistTagsManifest;
   manifest?: BundleManifest;
   packageFiles: Set<string>;
@@ -178,6 +183,7 @@ export function downloadReportSucceeded(report: CollectReport): boolean {
     report.fetch.errors.length === 0 &&
     (report.python?.errors.length ?? 0) === 0 &&
     (report.pythonApplications?.errors.length ?? 0) === 0 &&
+    (report.cpythonDistributions?.errors.length ?? 0) === 0 &&
     report.gitSources.skipped.length === 0 &&
     report.gitFetch.errors.length === 0 &&
     report.gitManifestScanErrors.length === 0 &&
@@ -511,18 +517,21 @@ function createResolutionChanges(
 }
 
 export async function captureBundleState(bundleDir: string): Promise<BundleStateSnapshot> {
-  const [manifest, distTags, packageFiles, pythonApplicationIndex] = await Promise.all([
-    readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
-    readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
-    readPackageFiles(bundleDir),
-    readPythonApplicationBundleIndex(bundleDir, { obsolete: 'ignore' }),
-  ]);
+  const [manifest, distTags, packageFiles, pythonApplicationIndex, cpythonDistributionIndex] =
+    await Promise.all([
+      readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
+      readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
+      readPackageFiles(bundleDir),
+      readPythonApplicationBundleIndex(bundleDir, { obsolete: 'ignore' }),
+      readCpythonDistributionBundleIndex(bundleDir),
+    ]);
   const pythonApplicationDocuments = await readPythonApplicationDocuments(
     bundleDir,
     pythonApplicationIndex
   );
 
   return {
+    ...(cpythonDistributionIndex ? { cpythonDistributionIndex } : {}),
     ...(distTags ? { distTags } : {}),
     ...(manifest ? { manifest } : {}),
     packageFiles,
@@ -577,6 +586,13 @@ export async function writeDownloadRunHistory(
       { spaces: 2 }
     );
   }
+  if (options.before.cpythonDistributionIndex) {
+    await fs.writeJson(
+      path.join(targetDir, 'python-distributions-index.before.json'),
+      options.before.cpythonDistributionIndex,
+      { spaces: 2 }
+    );
+  }
   await Promise.all(
     options.before.pythonApplicationDocuments.map((document) =>
       fs.writeFileAtomic(
@@ -627,6 +643,14 @@ export async function writeDownloadRunHistory(
     copyIfExists(
       path.join(options.bundleDir, 'python-application-fetch-report.json'),
       path.join(targetDir, 'python-application-fetch-report.json')
+    ),
+    copyIfExists(
+      path.join(options.bundleDir, 'python/distributions/index.json'),
+      path.join(targetDir, 'python-distributions-index.after.json')
+    ),
+    copyIfExists(
+      path.join(options.bundleDir, 'python/distributions/fetch-report.json'),
+      path.join(targetDir, 'python-distributions-fetch-report.json')
     ),
   ];
 

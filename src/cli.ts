@@ -17,7 +17,9 @@ import {
   clearWorkspaceGiteaToken,
   collectBundle,
   compareMachineToPythonEnvironmentPlan,
+  cpythonDistributionIndexPath,
   downloadPythonApplicationPlans,
+  downloadCpythonDistributionBundle,
   ensureWorkspacePythonApplicationPlans,
   evaluateDownloadWindowGap,
   configureGitRewrites,
@@ -482,6 +484,7 @@ function collectShouldFail(report: {
   maxIterationsReached: boolean;
   python?: { errors: unknown[] };
   pythonApplications?: { errors: unknown[] };
+  cpythonDistributions?: { errors: unknown[] };
   repositoryUpdate: { errors: unknown[] };
 }): boolean {
   return (
@@ -489,6 +492,7 @@ function collectShouldFail(report: {
     report.fetch.errors.length > 0 ||
     (report.python?.errors.length ?? 0) > 0 ||
     (report.pythonApplications?.errors.length ?? 0) > 0 ||
+    (report.cpythonDistributions?.errors.length ?? 0) > 0 ||
     report.gitSources.skipped.length > 0 ||
     report.gitFetch.errors.length > 0 ||
     report.gitManifestScanErrors.length > 0 ||
@@ -519,11 +523,13 @@ function formatDownloadSummary(report: CollectReport): string {
   const npmErrors = report.fetch.errors.length;
   const pythonErrors = report.python?.errors.length ?? 0;
   const pythonApplicationErrors = report.pythonApplications?.errors.length ?? 0;
+  const cpythonDistributionErrors = report.cpythonDistributions?.errors.length ?? 0;
   const gitErrors =
     report.repositoryUpdate.errors.length +
     report.gitFetch.errors.length +
     report.gitManifestScanErrors.length;
-  const totalErrors = npmErrors + gitErrors + pythonErrors + pythonApplicationErrors;
+  const totalErrors =
+    npmErrors + gitErrors + pythonErrors + pythonApplicationErrors + cpythonDistributionErrors;
   const status = failed
     ? red(
         `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
@@ -562,6 +568,11 @@ function formatDownloadSummary(report: CollectReport): string {
       ? `Python applications: ${String(report.pythonApplications.applications.length)} planned, ${String(report.pythonApplications.planned)} artifacts / ${String(report.pythonApplications.incrementalBytes)} incremental bytes, ${String(report.pythonApplications.errors.length)} errors.`
       : `Python applications: ${String(report.pythonApplications.applications.length)} bundled (${String(report.pythonApplications.downloaded)} artifacts downloaded, ${String(report.pythonApplications.reused)} reused from legacy storage, ${String(report.pythonApplications.existing)} already on disk, ${String(report.pythonApplications.totalBytes)} total bytes / ${String(report.pythonApplications.incrementalBytes)} incremental), ${String(report.pythonApplications.errors.length)} errors.`
     : undefined;
+  const cpythonDistributionsLine = report.cpythonDistributions
+    ? report.dryRun
+      ? `CPython distributions: ${String(report.cpythonDistributions.selected)} selected, ${String(report.cpythonDistributions.planned)} planned, ${String(report.cpythonDistributions.errors.length)} errors.`
+      : `CPython distributions: ${String(report.cpythonDistributions.selected)} selected (${String(report.cpythonDistributions.downloaded)} downloaded, ${String(report.cpythonDistributions.skipped)} already on disk), ${String(report.cpythonDistributions.errors.length)} errors.`
+    : undefined;
   const reportsWritten = report.dryRun ? 'no' : 'yes';
   const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
@@ -570,6 +581,7 @@ function formatDownloadSummary(report: CollectReport): string {
     gitLine,
     ...(pythonLine ? [pythonLine] : []),
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
+    ...(cpythonDistributionsLine ? [cpythonDistributionsLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
 
@@ -585,6 +597,13 @@ function formatDownloadSummary(report: CollectReport): string {
     lines.push(
       ...report.pythonApplications.errors.map((error) =>
         red(`Python application artifact error [${error.file}]: ${error.error ?? 'unknown error'}`)
+      )
+    );
+  }
+  if (report.cpythonDistributions?.errors.length) {
+    lines.push(
+      ...report.cpythonDistributions.errors.map((error) =>
+        red(`CPython distribution error [${error.file}]: ${error.error ?? 'unknown error'}`)
       )
     );
   }
@@ -724,6 +743,11 @@ function formatPruneSummary(report: BundlePruneReport): string {
     ...(report.pythonApplicationPlans
       ? [
           `Python application plans: ${String(report.pythonApplicationPlans.total)} total, ${String(report.pythonApplicationPlans.stale)} stale, ${String(report.pythonApplicationPlans.removed)} removed.`,
+        ]
+      : []),
+    ...(report.cpythonDistributions
+      ? [
+          `CPython distributions: ${String(report.cpythonDistributions.total)} total, ${String(report.cpythonDistributions.stale)} stale, ${String(report.cpythonDistributions.removed)} removed.`,
         ]
       : []),
     `Git mirrors: ${String(report.gitMirrors.total)} total, ${String(
@@ -4249,6 +4273,9 @@ program
         const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
         const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
         const pythonRuntimes = createWorkspacePythonRuntimeArtifacts(activeConfig);
+        const cpythonTargets = activeConfig.targets.filter(
+          (target) => target.type === 'cpython-distributions'
+        );
         const pythonApplicationPreflight = await ensureWorkspacePythonApplicationPlans({
           config,
           onPlanRequired: (requirements) => {
@@ -4365,9 +4392,29 @@ program
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             targets: pythonApplicationPlans,
           });
-          if (options.dryRun !== true) {
-            await writeCollectReport(outputDir, report);
-          }
+        }
+        if (
+          cpythonTargets.length > 0 ||
+          (targetSelection === undefined &&
+            (await fileExists(path.join(outputDir, cpythonDistributionIndexPath))))
+        ) {
+          report.cpythonDistributions = await downloadCpythonDistributionBundle({
+            bundleDir: outputDir,
+            concurrency: options.concurrency,
+            dryRun: options.dryRun === true,
+            generatedAt: report.generatedAt,
+            onDiscoveryPage: (event) => {
+              console.error(
+                `[download] CPython discovery page ${String(event.page)}: ${String(event.candidates)} matching artifacts`
+              );
+            },
+            partial: targetSelection !== undefined,
+            ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+            targets: cpythonTargets,
+          });
+        }
+        if (options.dryRun !== true) {
+          await writeCollectReport(outputDir, report);
         }
         const workspaceSnapshot = createWorkspaceSnapshot({
           config: {

@@ -20,6 +20,11 @@ import {
   pythonOptionalArtifactsDirectory,
   pythonWheelArtifactsDirectory,
 } from './python/application-paths.js';
+import {
+  cpythonDistributionArtifactsDirectory,
+  readCpythonDistributionBundleIndex,
+  type CpythonDistributionBundleIndex,
+} from './python/distribution-bundle.js';
 
 export interface PruneBundleOptions {
   bundleDir: string;
@@ -45,6 +50,7 @@ function successfulCollectReport(report: CollectReport): boolean {
     report.fetch.errors.length === 0 &&
     (report.python?.errors.length ?? 0) === 0 &&
     (report.pythonApplications?.errors.length ?? 0) === 0 &&
+    (report.cpythonDistributions?.errors.length ?? 0) === 0 &&
     report.gitSources.skipped.length === 0 &&
     report.gitFetch.errors.length === 0 &&
     report.gitManifestScanErrors.length === 0
@@ -271,6 +277,12 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   } catch (error) {
     throw new Error(`python/application-index.json is unreadable: ${(error as Error).message}`);
   }
+  let cpythonDistributionIndex: CpythonDistributionBundleIndex | undefined;
+  try {
+    cpythonDistributionIndex = await readCpythonDistributionBundleIndex(bundleDir);
+  } catch (error) {
+    throw new Error(`python/distributions/index.json is unreadable: ${(error as Error).message}`);
+  }
 
   if (!successfulCollectReport(collectReport)) {
     throw new Error('Refusing to prune: the last download did not complete successfully');
@@ -287,6 +299,10 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   const packageFiles = await listPackageFiles(bundleDir);
   const pythonPackageFiles = pythonManifest ? await listPythonPackageFiles(bundleDir) : [];
   const pythonApplicationArtifactFiles = await listFilesRecursively(bundleDir, 'python/artifacts');
+  const cpythonDistributionFiles = await listFilesRecursively(
+    bundleDir,
+    cpythonDistributionArtifactsDirectory
+  );
   const pythonApplicationArtifactDirectories =
     await listPythonApplicationArtifactDirectories(bundleDir);
   const pythonApplicationPlanDirectories = await listPythonApplicationPlanDirectories(bundleDir);
@@ -307,6 +323,14 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   );
   const stalePythonApplicationArtifacts = pythonApplicationArtifactFiles.filter(
     (file) => !livePythonApplicationArtifacts.has(file)
+  );
+  const liveCpythonDistributions = new Set(
+    cpythonDistributionIndex?.artifacts.map((artifact) =>
+      ensureRelativePath(artifact.file, 'CPython distribution artifact file')
+    ) ?? []
+  );
+  const staleCpythonDistributions = cpythonDistributionFiles.filter(
+    (file) => !liveCpythonDistributions.has(file)
   );
   const stalePythonApplicationArtifactDirectories = pythonApplicationArtifactDirectories.filter(
     (directory) =>
@@ -365,6 +389,23 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
         path: stalePythonPackage,
         status: 'error',
         type: 'python-package',
+      };
+      actions.push(action);
+      errors.push(action);
+    }
+  }
+
+  for (const staleDistribution of staleCpythonDistributions) {
+    try {
+      actions.push(
+        await removeStaleObject(bundleDir, 'cpython-distribution', staleDistribution, dryRun)
+      );
+    } catch (error) {
+      const action: BundlePruneActionResult = {
+        error: (error as Error).message,
+        path: staleDistribution,
+        status: 'error',
+        type: 'cpython-distribution',
       };
       actions.push(action);
       errors.push(action);
@@ -433,6 +474,14 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     dryRun,
     errors,
     generatedAt,
+    cpythonDistributions: summary(
+      cpythonDistributionFiles.length,
+      staleCpythonDistributions.length,
+      dryRun
+        ? 0
+        : staleCpythonDistributions.length -
+            errors.filter((error) => error.type === 'cpython-distribution').length
+    ),
     gitMirrors: summary(
       gitMirrors.length,
       staleGitMirrors.length,
