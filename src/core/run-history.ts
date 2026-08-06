@@ -30,11 +30,34 @@ export interface BundleStateSnapshot {
 export interface WriteDownloadRunHistoryOptions {
   before: BundleStateSnapshot;
   bundleDir: string;
+  completedAt?: string;
   pruneReport?: BundlePruneReport;
   rangeResolutionPolicy: RangeResolutionPolicy;
   report: CollectReport;
+  scope?: DownloadRunScope;
+  selectedTargetIndexes?: number[];
   tagResolutionPolicy: TagResolutionPolicy;
   workspaceSnapshot?: unknown;
+}
+
+export type DownloadRunScope = 'full' | 'partial';
+export type DownloadRunStatus = 'failed' | 'success';
+
+export interface DownloadRunRecord {
+  completedAt: string;
+  schemaVersion: 1;
+  scope: DownloadRunScope;
+  selectedTargetIndexes?: number[];
+  startedAt: string;
+  status: DownloadRunStatus;
+}
+
+export interface DownloadWindowGap {
+  elapsedDays: number;
+  elapsedMs: number;
+  exceedsWindow: boolean;
+  requiredWindowDays: number;
+  windowDays: number;
 }
 
 export interface WritePublishRunHistoryOptions {
@@ -93,6 +116,129 @@ interface PackageChangesReport {
 
 function runId(generatedAt: string): string {
   return generatedAt.replace(/[-:.]/gu, '').replace(/[^0-9TZ]/gu, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeIsoTimestamp(value: unknown, description: string): string {
+  if (typeof value !== 'string' || !value) {
+    throw new Error(`${description} must be an ISO timestamp`);
+  }
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== value) {
+    throw new Error(`${description} must be a normalized ISO timestamp`);
+  }
+  return value;
+}
+
+export function normalizeDownloadRunRecord(value: unknown): DownloadRunRecord {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    (value.scope !== 'full' && value.scope !== 'partial') ||
+    (value.status !== 'success' && value.status !== 'failed')
+  ) {
+    throw new Error('Invalid download run record');
+  }
+  let selectedTargetIndexes: number[] | undefined;
+  if (value.selectedTargetIndexes !== undefined) {
+    if (
+      !Array.isArray(value.selectedTargetIndexes) ||
+      value.selectedTargetIndexes.some(
+        (index) => !Number.isSafeInteger(index) || (index as number) <= 0
+      )
+    ) {
+      throw new Error('Download run selectedTargetIndexes must contain positive integers');
+    }
+    selectedTargetIndexes = [...new Set(value.selectedTargetIndexes as number[])].sort(
+      (left, right) => left - right
+    );
+  }
+  if (value.scope === 'full' && selectedTargetIndexes !== undefined) {
+    throw new Error('A full download run cannot select individual targets');
+  }
+  return {
+    completedAt: normalizeIsoTimestamp(value.completedAt, 'Download run completedAt'),
+    schemaVersion: 1,
+    scope: value.scope,
+    ...(selectedTargetIndexes ? { selectedTargetIndexes } : {}),
+    startedAt: normalizeIsoTimestamp(value.startedAt, 'Download run startedAt'),
+    status: value.status,
+  };
+}
+
+export function downloadReportSucceeded(report: CollectReport): boolean {
+  return (
+    !report.dryRun &&
+    report.wroteBundle &&
+    report.fixedPoint &&
+    report.repositoryUpdate.errors.length === 0 &&
+    report.fetch.errors.length === 0 &&
+    (report.python?.errors.length ?? 0) === 0 &&
+    (report.pythonApplications?.errors.length ?? 0) === 0 &&
+    report.gitSources.skipped.length === 0 &&
+    report.gitFetch.errors.length === 0 &&
+    report.gitManifestScanErrors.length === 0 &&
+    !report.maxIterationsReached
+  );
+}
+
+export async function readLastSuccessfulFullDownload(
+  bundleDir: string
+): Promise<DownloadRunRecord | undefined> {
+  const historyDir = path.join(bundleDir, 'runs', 'download');
+  let entries;
+  try {
+    entries = await fs.readdir(historyDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  for (const directory of directories) {
+    const recordPath = path.join(historyDir, directory, 'run.json');
+    if (!(await fs.pathExists(recordPath))) {
+      continue;
+    }
+    try {
+      const record = normalizeDownloadRunRecord(await fs.readJson(recordPath));
+      if (record.status === 'success' && record.scope === 'full') {
+        return record;
+      }
+    } catch {
+      // Malformed or interrupted history entries are not successful watermarks.
+    }
+  }
+  return undefined;
+}
+
+export function evaluateDownloadWindowGap(
+  lastSuccessfulDownload: DownloadRunRecord,
+  windowDays: number,
+  now = new Date()
+): DownloadWindowGap {
+  if (!Number.isSafeInteger(windowDays) || windowDays <= 0) {
+    throw new Error('Download windowDays must be a positive integer');
+  }
+  const elapsedMs = Math.max(
+    0,
+    now.getTime() - new Date(lastSuccessfulDownload.completedAt).getTime()
+  );
+  const dayMs = 24 * 60 * 60 * 1000;
+  return {
+    elapsedDays: elapsedMs / dayMs,
+    elapsedMs,
+    exceedsWindow: elapsedMs > windowDays * dayMs,
+    requiredWindowDays: Math.max(1, Math.ceil(elapsedMs / dayMs)),
+    windowDays,
+  };
 }
 
 async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
@@ -510,6 +656,17 @@ export async function writeDownloadRunHistory(
   );
   await fs.writeJson(path.join(targetDir, 'package-changes.json'), packageChanges, { spaces: 2 });
   await fs.writeJson(path.join(targetDir, 'resolution-changes.json'), changes, { spaces: 2 });
+  const record = normalizeDownloadRunRecord({
+    completedAt: options.completedAt ?? new Date().toISOString(),
+    schemaVersion: 1,
+    scope: options.scope ?? 'full',
+    ...(options.selectedTargetIndexes
+      ? { selectedTargetIndexes: options.selectedTargetIndexes }
+      : {}),
+    startedAt: options.report.generatedAt,
+    status: downloadReportSucceeded(options.report) ? 'success' : 'failed',
+  });
+  await fs.writeJson(path.join(targetDir, 'run.json'), record, { spaces: 2 });
 
   return targetDir;
 }

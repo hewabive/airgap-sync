@@ -2,7 +2,12 @@ import os from 'node:os';
 import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { captureBundleState, writeDownloadRunHistory } from '../src/index.js';
+import {
+  captureBundleState,
+  evaluateDownloadWindowGap,
+  readLastSuccessfulFullDownload,
+  writeDownloadRunHistory,
+} from '../src/index.js';
 import type {
   BundleManifest,
   BundlePruneReport,
@@ -181,6 +186,7 @@ describe('run history', () => {
     const historyDir = await writeDownloadRunHistory({
       before,
       bundleDir,
+      completedAt: '2026-05-25T00:01:30.000Z',
       pruneReport,
       rangeResolutionPolicy: 'reuse-stable',
       report,
@@ -190,6 +196,13 @@ describe('run history', () => {
     await expect(fs.pathExists(path.join(historyDir, 'seed-manifest.before.json'))).resolves.toBe(
       true
     );
+    await expect(fs.readJson(path.join(historyDir, 'run.json'))).resolves.toEqual({
+      completedAt: '2026-05-25T00:01:30.000Z',
+      schemaVersion: 1,
+      scope: 'full',
+      startedAt: '2026-05-25T00:01:00.000Z',
+      status: 'success',
+    });
     await expect(fs.pathExists(path.join(historyDir, 'seed-manifest.after.json'))).resolves.toBe(
       true
     );
@@ -295,5 +308,75 @@ describe('run history', () => {
     await expect(
       fs.readJson(path.join(historyDir, 'python-application-index.after.json'))
     ).resolves.toMatchObject({ schemaVersion: 1 });
+  });
+
+  it('finds the latest successful full download and ignores newer partial and failed runs', async () => {
+    const before = await captureBundleState(bundleDir);
+    await writeDownloadRunHistory({
+      before,
+      bundleDir,
+      completedAt: '2026-05-25T00:01:30.000Z',
+      rangeResolutionPolicy: 'reuse-stable',
+      report: collectReport(bundleDir, '2026-05-25T00:01:00.000Z'),
+      tagResolutionPolicy: 'reuse-stable',
+    });
+    await writeDownloadRunHistory({
+      before,
+      bundleDir,
+      completedAt: '2026-05-25T00:02:30.000Z',
+      rangeResolutionPolicy: 'reuse-stable',
+      report: collectReport(bundleDir, '2026-05-25T00:02:00.000Z'),
+      scope: 'partial',
+      selectedTargetIndexes: [3, 1, 3],
+      tagResolutionPolicy: 'reuse-stable',
+    });
+    const failed = collectReport(bundleDir, '2026-05-25T00:03:00.000Z');
+    failed.fetch.errors.push({
+      name: 'demo',
+      raw: 'demo@latest',
+      reason: 'offline',
+      specifier: 'latest',
+      type: 'tag',
+    });
+    await writeDownloadRunHistory({
+      before,
+      bundleDir,
+      completedAt: '2026-05-25T00:03:30.000Z',
+      rangeResolutionPolicy: 'reuse-stable',
+      report: failed,
+      tagResolutionPolicy: 'reuse-stable',
+    });
+
+    await expect(readLastSuccessfulFullDownload(bundleDir)).resolves.toEqual({
+      completedAt: '2026-05-25T00:01:30.000Z',
+      schemaVersion: 1,
+      scope: 'full',
+      startedAt: '2026-05-25T00:01:00.000Z',
+      status: 'success',
+    });
+  });
+
+  it('evaluates fixed-duration download windows', () => {
+    const record = {
+      completedAt: '2026-05-01T12:00:00.000Z',
+      schemaVersion: 1 as const,
+      scope: 'full' as const,
+      startedAt: '2026-05-01T11:00:00.000Z',
+      status: 'success' as const,
+    };
+
+    expect(
+      evaluateDownloadWindowGap(record, 30, new Date('2026-05-31T12:00:00.000Z'))
+    ).toMatchObject({
+      elapsedDays: 30,
+      exceedsWindow: false,
+      requiredWindowDays: 30,
+    });
+    expect(
+      evaluateDownloadWindowGap(record, 30, new Date('2026-05-31T12:00:00.001Z'))
+    ).toMatchObject({
+      exceedsWindow: true,
+      requiredWindowDays: 31,
+    });
   });
 });

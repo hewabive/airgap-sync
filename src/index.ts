@@ -189,8 +189,18 @@ export { fetchGitSources, runGitCommand } from './core/git-fetch.js';
 export { readStableTagResolutionIndex } from './core/tag-resolution.js';
 export {
   captureBundleState,
+  downloadReportSucceeded,
+  evaluateDownloadWindowGap,
+  normalizeDownloadRunRecord,
+  readLastSuccessfulFullDownload,
   writeDownloadRunHistory,
   writePublishRunHistory,
+} from './core/run-history.js';
+export type {
+  DownloadRunRecord,
+  DownloadRunScope,
+  DownloadRunStatus,
+  DownloadWindowGap,
 } from './core/run-history.js';
 export {
   createGitSourcesManifest,

@@ -67,6 +67,7 @@ import {
   readGitSourcesManifest,
   readManifestRequirements,
   readPythonApplicationBundleIndex,
+  readLastSuccessfulFullDownload,
   readBundleManifest,
   readDistTagsManifest,
   readRegistryMetadataCache,
@@ -733,6 +734,22 @@ async function pruneAfterSuccessfulDownload(
   const pruneReport = await pruneBundle({ bundleDir: report.outputDir });
   await writePruneReport(report.outputDir, pruneReport);
   return pruneReport;
+}
+
+async function reportDownloadWatermark(bundleDir: string, now = new Date()): Promise<void> {
+  const lastSuccessfulDownload = await readLastSuccessfulFullDownload(bundleDir);
+  if (!lastSuccessfulDownload) {
+    console.error('[download] last successful full download: none recorded');
+    return;
+  }
+  const elapsedMs = Math.max(
+    0,
+    now.getTime() - new Date(lastSuccessfulDownload.completedAt).getTime()
+  );
+  const elapsedDays = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
+  console.error(
+    `[download] last successful full download: ${lastSuccessfulDownload.completedAt} (${String(elapsedDays)} ${elapsedDays === 1 ? 'day' : 'days'} ago)`
+  );
 }
 
 function formatTargetList(targets: WorkspaceConfig['targets']): string {
@@ -4081,6 +4098,8 @@ program
             : undefined;
         const activeConfig = targetSelection?.config ?? config;
         const legacyPython = workspaceLegacyPythonSettings(activeConfig);
+        const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
+        await reportDownloadWatermark(outputDir);
         if (targetSelection) {
           console.error(
             `[download] selected targets: ${targetSelection.selectedIndexes.join(', ')}`
@@ -4138,7 +4157,6 @@ program
           ({ activePlan, selectionId, targetId }) => ({ activePlan, selectionId, targetId })
         );
         const registryUrl = options.registry ?? config.sourceRegistry;
-        const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const includeDev =
           options.includeDev === true ? true : config.defaults.download.includeDev === true;
         const includePeer =
@@ -4256,6 +4274,8 @@ program
             rangeResolutionPolicy,
             report,
             ...(pruneReport ? { pruneReport } : {}),
+            scope: targetSelection ? 'partial' : 'full',
+            ...(targetSelection ? { selectedTargetIndexes: targetSelection.selectedIndexes } : {}),
             tagResolutionPolicy,
             workspaceSnapshot,
           });
@@ -4288,6 +4308,7 @@ program
 
       const registryUrl = options.registry ?? defaultWorkspaceSourceRegistry;
       const outputDir = options.output ?? './airgap-bundle';
+      await reportDownloadWatermark(outputDir);
       const registry = new CachedRegistryClient(
         new HttpRegistryClient(registryUrl, {
           ...(options.registryTimeoutMs ? { timeoutMs: options.registryTimeoutMs } : {}),
