@@ -232,6 +232,13 @@ export {
   isBlockedPublishRegistry,
 } from './core/registry.js';
 export { createPublishPlan, publishBundle } from './core/publisher.js';
+export {
+  assertNpmSecurityGate,
+  defaultNpmSecurityPolicy,
+  OsvNpmAdvisoryClient,
+  scanNpmBundleSecurity,
+  writeNpmSecurityReport,
+} from './core/security.js';
 export { pruneBundle, writePruneReport } from './core/prune.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
@@ -278,7 +285,9 @@ export {
 export {
   dependencySpecsFromManifest,
   downloadResolvedPackage,
+  inspectPackageTarball,
   readPackageManifest,
+  TarballInspectionCache,
 } from './core/tarball.js';
 export {
   parseLockfileRequirementsFromContent,

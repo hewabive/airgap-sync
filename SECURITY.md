@@ -6,12 +6,27 @@ airgap-sync is a local operator tool, not a sandbox. It downloads npm packages a
 hash-verified Python wheels, clones Git repositories, publishes artifacts to explicitly
 configured target registries, and can push Git mirrors into Gitea.
 
-Treat transfer bundles and configured source repositories as trusted input. In
-particular, `airgap-sync verify install` runs real package-manager install
-commands for target projects. By default those installs may execute npm, pnpm, or
-Yarn lifecycle scripts from the project or its dependencies. Use
-`--ignore-scripts` when you only want to verify dependency resolution against the
-closed-network services.
+Downloaded npm tarballs are checked against registry SRI/SHA-1 metadata and recorded
+with SHA-256 in a schema-v2 bundle manifest. Download activation fails closed when OSV
+is unavailable, an exact version has a malware advisory, or static inspection finds a
+lifecycle script or non-registry dependency. A reviewed static exception is bound to
+the exact package name, version, and SHA-256. Ordinary vulnerability advisories remain
+visible warnings and still require operator review.
+
+Hashing and static manifest inspection share one streaming tarball read within a command.
+Results are cached only in memory for unchanged files and never survive the process, so
+an explicit later verify or publish operation reads and validates the transferred bytes
+again. This limits removable-media I/O without treating a previous run as current trust
+evidence.
+
+`airgap-sync verify install` runs real package-manager commands for target projects.
+It skips npm, pnpm, and Yarn lifecycle scripts by default. `--run-scripts` is an
+explicit opt-in and executes untrusted package code without an operating-system
+sandbox.
+
+These controls reduce npm supply-chain exposure; they do not prove that package code
+is benign. OSV may not yet know about a compromise, registry metadata can itself be
+compromised, and malicious code can run later when an application imports the package.
 
 Python application health checks run only during explicit install verification and
 inside its temporary environment, but a workspace recipe remains trusted executable

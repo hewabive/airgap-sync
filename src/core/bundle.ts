@@ -78,6 +78,10 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
     name: pkg.name,
     version: pkg.version,
     file: path.posix.join('packages', packageFileName(pkg.name, pkg.version)),
+    ...(pkg.dist.integrity ? { integrity: pkg.dist.integrity } : {}),
+    ...(pkg.publishedAt ? { publishedAt: pkg.publishedAt } : {}),
+    ...(pkg.sha256 ? { sha256: pkg.sha256 } : {}),
+    ...(pkg.dist.shasum ? { shasum: pkg.dist.shasum } : {}),
     tarball: pkg.dist.tarball,
     resolvedFrom: pkg.resolvedFrom ?? [
       {
@@ -97,7 +101,8 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
 
   return {
     manifest: {
-      schemaVersion: 1,
+      schemaVersion:
+        packages.length === 0 || packages.every((pkg) => pkg.sha256 !== undefined) ? 2 : 1,
       createdAt,
       sourceRegistry: options.sourceRegistry,
       packages,

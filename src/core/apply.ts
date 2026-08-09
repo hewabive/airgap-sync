@@ -64,6 +64,8 @@ import {
 import { mergeGiteaOwnerRequirements } from './gitea-owners.js';
 
 export interface ApplyBundleOptions {
+  /** Explicit compatibility escape hatch for schemaVersion 1 npm bundles. */
+  allowLegacyNpmBundle?: boolean;
   bundleDir: string;
   configureGitGlobal?: boolean;
   distTagConcurrency?: number;
@@ -380,6 +382,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
 
   options.onProgress?.({ phase: 'publish', status: 'start' });
   const publish = await publishBundle(manifest, distTags, {
+    ...(options.allowLegacyNpmBundle === true ? { allowLegacyBundle: true } : {}),
     bundleDir,
     ...(options.distTagConcurrency === undefined
       ? {}

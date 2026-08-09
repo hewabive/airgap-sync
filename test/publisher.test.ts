@@ -133,6 +133,16 @@ describe('createPublishPlan', () => {
 });
 
 describe('publishBundle', () => {
+  it('refuses a legacy bundle without an explicit compatibility override', async () => {
+    await expect(
+      publishBundle(manifest, distTags, {
+        bundleDir: './airgap-bundle',
+        dryRun: true,
+        registryUrl: 'http://localhost:4873',
+      })
+    ).rejects.toThrow('legacy bundle has no complete SHA-256 manifest');
+  });
+
   it('returns a dry-run report without executing npm commands', async () => {
     const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
     const progress: PublishProgressEvent[] = [];
@@ -142,6 +152,7 @@ describe('publishBundle', () => {
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
       const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
         bundleDir,
         dryRun: true,
         onProgress(event) {
@@ -229,6 +240,7 @@ describe('publishBundle', () => {
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
       const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
         bundleDir,
         onProgress(event) {
           progress.push(event);
@@ -318,6 +330,7 @@ describe('publishBundle', () => {
           tags: {},
         },
         {
+          allowLegacyBundle: true,
           bundleDir,
           onProgress(event) {
             progress.push(event);
@@ -397,6 +410,7 @@ describe('publishBundle', () => {
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
       const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
         bundleDir,
         registryUrl: 'http://localhost:4873',
         runNpm,
@@ -461,6 +475,7 @@ describe('publishBundle', () => {
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
       const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
         bundleDir,
         registryUrl: 'http://localhost:4873',
         runNpm,
@@ -513,6 +528,7 @@ describe('publishBundle', () => {
       await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
 
       const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
         bundleDir,
         registryUrl: 'http://localhost:4873',
         runNpm,

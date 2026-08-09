@@ -36,7 +36,8 @@ been tested with Verdaccio and Gitea:
 - interactive menu as the default entry point;
 - Git target mirroring with preserved owner/repository paths;
 - recursive package discovery from nested `package.json` files and supported lockfiles;
-- npm dependency resolution, tarball download, checksum validation, retries, and pruning;
+- npm dependency resolution, SRI/SHA-256 validation, release-age quarantine, OSV malware
+  checks, lifecycle/non-registry dependency inspection, retries, and pruning;
 - platform-aware Python application collection for Windows and glibc Linux x86-64,
   with explicit CPython 3.10–3.13 cells, minimum wheel coverage, inferred glibc
   boundaries, content-addressed storage, and Gitea PyPI publishing;
@@ -134,8 +135,7 @@ npm exec -- airgap-sync publish
 
 npm exec -- airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local \
-  --ignore-scripts
+  --gitea http://gitea.local
 ```
 
 After a global install, omit the `npm exec --` prefix.
@@ -284,6 +284,23 @@ bundle between machines. Git repository provisioning defaults to
 `defaults.publish.provisionGit: true`; set it to `false` when repositories are managed
 externally, or to `"ask"` to prompt on each interactive publish.
 
+The optional top-level `npmSecurity` object persists npm policy. Defaults are a
+three-day release quarantine and a 72-hour security-report lifetime:
+
+```json
+{
+  "npmSecurity": {
+    "allowPackages": [],
+    "maxReportAgeHours": 72,
+    "minReleaseAgeDays": 3
+  }
+}
+```
+
+Packages with lifecycle scripts or non-registry dependencies are blocked. A reviewed
+exception must pin the exact downloaded bytes as
+`name@version#sha256:<hex>` in `allowPackages`; a changed tarball no longer matches.
+
 `airgap-sync.secrets.json` is optional. A Gitea token entered during interactive
 first-time setup, or saved later from the menu, is stored there in plaintext on the
 removable media. Leave the initial token prompt empty to configure it later. When
@@ -307,6 +324,7 @@ airgap-bundle/python/distributions/     Rolling portable CPython distributions
 airgap-bundle/python/publications/      Closed-side publication manifests and reports
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
+airgap-bundle/security-report.json      OSV and static npm security evidence
 airgap-bundle/python-seed-manifest.json bundled Python files and target environments
 airgap-bundle/dist-tags.json            real dist-tag requirements
 airgap-bundle/git-sources.json          Git source metadata
@@ -319,7 +337,14 @@ See [Bundle Format](./docs/bundle-format.md) for the full layout.
 ## Verification
 
 `airgap-sync verify ./airgap-bundle` checks bundle consistency: manifests, referenced
-tarballs and wheels, package identity and hashes, reports, and Git metadata.
+tarballs and wheels, package identity and hashes, a fresh manifest-bound npm security
+report, reports, and Git metadata.
+
+Within one download or verify run, each unchanged npm tarball is streamed from disk once:
+SHA-256, registry integrity digests, and the embedded `package.json` are collected in the
+same pass and reused by later checks. The cache is memory-only and is invalidated from
+file metadata when a tarball changes. A separate `verify` or `publish` command starts a
+fresh full-content check at that trust boundary.
 
 `airgap-sync verify install ./airgap-bundle` runs real package-manager installs. For
 Python applications it exposes only bundled wheels through a temporary local Simple

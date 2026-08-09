@@ -2,6 +2,14 @@
 
 ## 0.1.0
 
+- Added fail-closed npm supply-chain controls: registry SRI/SHA-1 verification,
+  schema-v2 SHA-256 manifests, a configurable release-age quarantine, exact-version
+  OSV malware checks, lifecycle/non-registry dependency inspection with digest-pinned
+  approvals, fresh security evidence required by verify/publish, and script-free
+  install verification by default.
+- Combined npm hashing and manifest inspection into one streaming tarball pass and
+  reused unchanged results within each download or verify run, reducing removable-media
+  reads without persisting trust across commands.
 - Fixed CPython discovery failures caused by oversized GitHub release-list responses.
   Provider metadata now uses bounded pages, retries transient HTTP/network failures,
   honors server retry delays, and reports retry progress through `download`.

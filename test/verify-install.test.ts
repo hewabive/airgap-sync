@@ -125,7 +125,7 @@ describe('verifyInstall', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      args: ['ci'],
+      args: ['ci', '--ignore-scripts'],
       command: 'npm',
     });
     expect(typeof calls[0]?.env.GIT_CONFIG_GLOBAL).toBe('string');
@@ -137,14 +137,14 @@ describe('verifyInstall', () => {
     expect(report).toMatchObject({
       failed: 0,
       generatedAt: '2026-05-21T00:01:00.000Z',
-      ignoreScripts: false,
+      ignoreScripts: true,
       ok: true,
       passed: 1,
       skipped: 0,
       totalProjects: 1,
     });
     expect(report.projects[0]).toMatchObject({
-      command: ['npm', 'ci'],
+      command: ['npm', 'ci', '--ignore-scripts'],
       packageManager: 'npm',
       status: 'passed',
     });
@@ -171,7 +171,7 @@ describe('verifyInstall', () => {
     });
 
     expect(calls[0]).toMatchObject({
-      args: ['install', '--frozen-lockfile'],
+      args: ['install', '--frozen-lockfile', '--ignore-scripts'],
       command: 'pnpm',
     });
     expect(calls[0]?.env.npm_config_trust_lockfile).toBe('true');

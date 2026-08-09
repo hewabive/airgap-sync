@@ -1,6 +1,7 @@
 import path from 'node:path';
 import * as fs from './fs.js';
 import type { BundleManifest, DistTagsManifest } from '../types.js';
+import { inspectPackageTarball, type TarballInspectionCache } from './tarball.js';
 
 export type BundleValidationSeverity = 'error';
 
@@ -38,7 +39,8 @@ function isSafeBundleFile(file: string): boolean {
 
 async function validateTarballs(
   bundleDir: string,
-  manifest: BundleManifest
+  manifest: BundleManifest,
+  inspectionCache?: TarballInspectionCache
 ): Promise<BundleValidationIssue[]> {
   const issues: BundleValidationIssue[] = [];
 
@@ -55,6 +57,33 @@ async function validateTarballs(
 
     if (!(await fs.pathExists(path.join(bundleDir, pkg.file)))) {
       issues.push(issue('missing-tarball', `${packageId(pkg)} tarball is missing: ${pkg.file}`));
+      continue;
+    }
+
+    if (manifest.schemaVersion === 2) {
+      if (!pkg.sha256) {
+        issues.push(issue('missing-sha256', `${packageId(pkg)} has no SHA-256 digest`));
+        continue;
+      }
+      try {
+        const inspection = await inspectPackageTarball(
+          path.join(bundleDir, pkg.file),
+          pkg,
+          inspectionCache
+        );
+        if (inspection.manifest.name !== pkg.name || inspection.manifest.version !== pkg.version) {
+          issues.push(
+            issue(
+              'tarball-metadata-mismatch',
+              `${packageId(pkg)} tarball contains ${inspection.manifest.name}@${inspection.manifest.version}`
+            )
+          );
+        }
+      } catch (error) {
+        issues.push(
+          issue('registry-integrity-mismatch', `${packageId(pkg)}: ${(error as Error).message}`)
+        );
+      }
     }
   }
 
@@ -64,13 +93,14 @@ async function validateTarballs(
 export async function validateBundle(
   bundleDir: string,
   manifest: BundleManifest,
-  distTags: DistTagsManifest
+  distTags: DistTagsManifest,
+  options: { inspectionCache?: TarballInspectionCache } = {}
 ): Promise<BundleValidationResult> {
   const issues: BundleValidationIssue[] = [];
   const manifestSchemaVersion = (manifest as { schemaVersion: number }).schemaVersion;
   const distTagsSchemaVersion = (distTags as { schemaVersion: number }).schemaVersion;
 
-  if (manifestSchemaVersion !== 1) {
+  if (manifestSchemaVersion !== 1 && manifestSchemaVersion !== 2) {
     issues.push(
       issue('unsupported-seed-manifest-version', 'Unsupported seed-manifest schemaVersion')
     );
@@ -144,7 +174,7 @@ export async function validateBundle(
     }
   }
 
-  issues.push(...(await validateTarballs(bundleDir, manifest)));
+  issues.push(...(await validateTarballs(bundleDir, manifest, options.inspectionCache)));
   return {
     issues,
     valid: issues.length === 0,

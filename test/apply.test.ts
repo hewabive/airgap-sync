@@ -151,6 +151,7 @@ describe('applyBundle', () => {
 
   it('plans npm publish and tolerates bundles without Git sources', async () => {
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       dryRun: true,
       generatedAt: '2026-05-21T00:00:00.000Z',
@@ -217,6 +218,7 @@ describe('applyBundle', () => {
     });
 
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       dryRun: true,
       generatedAt: '2026-08-06T00:00:00.000Z',
@@ -278,6 +280,7 @@ describe('applyBundle', () => {
 
     const progress: ApplyProgressEvent[] = [];
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       dryRun: true,
       generatedAt: '2026-07-10T00:00:00.000Z',
@@ -325,6 +328,7 @@ describe('applyBundle', () => {
     await writePythonApplicationBundle();
 
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       dryRun: true,
       generatedAt: '2026-07-28T00:00:00.000Z',
@@ -365,6 +369,7 @@ describe('applyBundle', () => {
     await writePythonApplicationBundle();
 
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       generatedAt: '2026-07-28T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
@@ -399,6 +404,7 @@ describe('applyBundle', () => {
     const progress: ApplyProgressEvent[] = [];
 
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       configureGitGlobal: true,
       dryRun: true,
@@ -482,6 +488,7 @@ describe('applyBundle', () => {
     await fs.ensureDir(mirrorPath);
 
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       generatedAt: '2026-05-21T00:00:00.000Z',
       gitAuth: {
@@ -543,6 +550,7 @@ describe('applyBundle', () => {
     await fs.ensureDir(mirrorPath);
 
     const report = await applyBundle({
+      allowLegacyNpmBundle: true,
       bundleDir,
       generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://git.local',

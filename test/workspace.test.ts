@@ -461,6 +461,32 @@ describe('workspace config', () => {
     });
   });
 
+  it('normalizes persistent npm security policy', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    const configPath = path.join(tempDir, 'airgap-sync.json');
+    const config = await fs.readJson<Record<string, unknown>>(configPath);
+    await fs.writeJson(
+      configPath,
+      {
+        ...config,
+        npmSecurity: {
+          allowPackages: ['native-addon@1.0.0#sha256:abc123'],
+          maxReportAgeHours: 24,
+          minReleaseAgeDays: 7,
+        },
+      },
+      { spaces: 2 }
+    );
+
+    await expect(readWorkspaceConfig(tempDir)).resolves.toMatchObject({
+      npmSecurity: {
+        allowPackages: ['native-addon@1.0.0#sha256:abc123'],
+        maxReportAgeHours: 24,
+        minReleaseAgeDays: 7,
+      },
+    });
+  });
+
   it('normalizes Python settings and PyPI targets', async () => {
     await initWorkspace({ workspaceDir: tempDir });
     await fs.writeJson(

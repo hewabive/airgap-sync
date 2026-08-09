@@ -16,6 +16,7 @@ import type {
 import { encodePackageName, isBlockedPublishRegistry } from './registry.js';
 import * as fs from './fs.js';
 import { throwIfInvalidBundle, validateBundle } from './validation.js';
+import { assertNpmSecurityGate } from './security.js';
 
 const execFileAsync = promisify(execFile);
 const defaultDistTagConcurrency = 4;
@@ -34,6 +35,8 @@ export type NpmRunner = (
 ) => Promise<{ stdout: string; stderr?: string }>;
 
 export interface PublishBundleOptions {
+  /** Explicit compatibility escape hatch for schemaVersion 1 bundles. */
+  allowLegacyBundle?: boolean;
   bundleDir: string;
   distTagConcurrency?: number;
   dryRun?: boolean;
@@ -657,6 +660,9 @@ export async function publishBundle(
 
   const validateStart = performance.now();
   options.onProgress?.({ phase: 'validate', status: 'start' });
+  if (options.allowLegacyBundle !== true) {
+    await assertNpmSecurityGate(options.bundleDir, manifest);
+  }
   throwIfInvalidBundle(await validateBundle(options.bundleDir, manifest, distTags));
   options.onProgress?.({ phase: 'validate', status: 'done' });
   timings.validateMs = elapsedMs(validateStart);

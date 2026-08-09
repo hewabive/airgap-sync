@@ -257,6 +257,7 @@ airgap-sync download ./repos \
   --concurrency 8 \
   --registry-timeout-ms 120000 \
   --tarball-timeout-ms 300000 \
+  --min-release-age-days 3 \
   --prune \
   --output ./airgap-bundle
 ```
@@ -298,6 +299,21 @@ Failed downloads write diagnostic reports but do not replace the active
 `git-sources.json` or `workspace-snapshot.json`. Those files are activated only after
 the workspace download, including Python application artifact transfer, completes
 successfully.
+
+npm releases younger than `--min-release-age-days` are quarantined before selection;
+the default is three days and `0` disables the delay. Download verifies registry
+SRI/SHA-1, records SHA-256, queries OSV for every exact package/version, and inspects
+each tarball for lifecycle scripts and non-registry dependencies. Any malware finding,
+OSV failure, integrity mismatch, or unapproved static finding prevents activation.
+`security-report.failed.json` keeps failed evidence without replacing a previously
+active report. `--allow-package name@version#sha256:<hex>` is repeatable and approves
+static findings only for those exact bytes. `--max-security-report-age-hours` defaults
+to 72. Workspace defaults can be stored in top-level `npmSecurity`.
+
+Tarball hashing and `package.json` inspection use the same stream. An in-memory,
+file-fingerprint-scoped cache reuses that inspection across fixed-point iterations and
+the security scan, so an unchanged tarball is normally read once per download command,
+including when the bundle is on removable media. The cache is not persisted.
 
 With an explicit root argument, keeps the lower-level behavior and scans that directory
 directly.
@@ -432,6 +448,11 @@ Supported options:
 --manifest <path>         Read dependencies from a package.json or directory
 --include-dev             Include devDependencies from discovered manifests
 --include-peer            Traverse peerDependencies
+--min-release-age-days <days>
+                          Quarantine newer npm releases, default 3; 0 disables
+--max-security-report-age-hours <hours>
+                          Security report lifetime, default 72
+--allow-package <identity> Allow static findings for exact name/version/SHA-256
 --latest-policy <policy>  Latest dist-tag policy: bundled or source
 --tag-resolution-policy <policy>
                           Tag dependency policy: reuse-stable or refresh
@@ -479,8 +500,10 @@ Supported options:
 ```
 
 Current behavior publishes tarballs with a temporary tag, then restores the required
-tags from `dist-tags.json`. Before running npm publish commands, it validates that
-bundle manifests are internally consistent and every referenced tarball exists.
+tags from `dist-tags.json`. Before running npm publish commands, it requires a fresh
+passing `security-report.json` bound to the exact schema-v2 manifest, revalidates every
+tarball SHA-256/SRI, and validates internal manifest consistency. Legacy schema-v1
+bundles are refused.
 
 ## info
 
@@ -498,14 +521,17 @@ airgap-sync verify ./airgap-bundle
 airgap-sync verify ./airgap-bundle --json
 airgap-sync verify install ./airgap-bundle \
   --registry http://verdaccio.local:4873 \
-  --gitea http://gitea.local \
-  --ignore-scripts
+  --gitea http://gitea.local
 ```
 
 Checks the bundle without running package-manager installs. It validates bundle
 manifests, tarballs, Python wheel identities/hashes and environment coverage, verifies
 `workspace-snapshot.json`, checks Git mirror presence from `git-sources.json`, and
 checks `apply-report.json` when present. The command writes `verify-report.json`.
+
+All npm digest, readability, and identity checks in one `verify` invocation reuse one
+streaming inspection per unchanged tarball. A new invocation deliberately performs a
+new full read.
 
 Errors produce a non-zero exit code. Warnings, such as a missing `apply-report.json`
 before the offline import has run, are reported but do not fail the command.
@@ -529,9 +555,8 @@ for that verification process. This avoids false failures from pnpm v11's defaul
 `minimumReleaseAge` policy after packages have just been re-published into the local
 registry.
 
-By default `verify install` runs the same lifecycle scripts that a normal install
-would run. Add `--ignore-scripts` to check dependency resolution and Git/npm
-rewrites without running package scripts.
+By default `verify install` skips lifecycle scripts. Add `--run-scripts` only when the
+reviewed install-time behavior itself must be tested.
 
 Supported install detection:
 
@@ -541,8 +566,8 @@ package-lock.json   npm ci
 yarn.lock           yarn install --immutable
 ```
 
-With `--ignore-scripts`, npm and pnpm receive `--ignore-scripts`; Yarn receives
-`--mode=skip-builds`.
+By default npm and pnpm receive `--ignore-scripts`; Yarn receives
+`--mode=skip-builds`. `--run-scripts` removes those safeguards.
 
 Projects without a supported lockfile are skipped.
 

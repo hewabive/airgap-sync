@@ -199,6 +199,38 @@ describe('resolveRootRequirementFromMetadata', () => {
     expect(result.resolved?.resolvedVia).toBe('version');
   });
 
+  it('falls back from a fresh latest release during the release-age quarantine', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({}),
+      {
+        ...metadata,
+        time: {
+          '1.0.0': '2026-07-01T00:00:00.000Z',
+          '1.2.0': '2026-08-08T00:00:00.000Z',
+          '2.0.0-beta.1': '2026-07-01T00:00:00.000Z',
+        },
+      },
+      { minReleaseAgeDays: 3, now: new Date('2026-08-09T00:00:00.000Z') }
+    );
+
+    expect(result.resolved).toMatchObject({
+      publishedAt: '2026-07-01T00:00:00.000Z',
+      version: '1.0.0',
+    });
+    expect(result.tagRequirement?.version).toBe('1.0.0');
+  });
+
+  it('blocks a fresh exact version during the release-age quarantine', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({ raw: 'demo@1.2.0', specifier: '1.2.0', type: 'version' }),
+      { ...metadata, time: { '1.2.0': '2026-08-08T00:00:00.000Z' } },
+      { minReleaseAgeDays: 3, now: new Date('2026-08-09T00:00:00.000Z') }
+    );
+
+    expect(result.resolved).toBeUndefined();
+    expect(result.error?.reason).toContain('newer than the 3 day minimum age');
+  });
+
   it('preserves alias metadata while resolving the target package', () => {
     const result = resolveRootRequirementFromMetadata(
       requirement({

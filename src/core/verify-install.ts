@@ -746,6 +746,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
   const bundleDir = path.resolve(options.bundleDir);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const timeoutMs = options.timeoutMs ?? defaultInstallTimeoutMs;
+  const ignoreScripts = options.ignoreScripts !== false;
   const snapshot = await readWorkspaceSnapshot(bundleDir);
   const pythonManifest = (await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json')))
     ? await readPythonSeedManifest(bundleDir)
@@ -800,7 +801,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
         await verifyProjectInstall({
           checkoutPath: checkout.checkoutPath,
           env,
-          ignoreScripts: options.ignoreScripts === true,
+          ignoreScripts,
           runner,
           sourceId: target.sourceId,
           targetUrl: target.url,
@@ -873,7 +874,7 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
     bundle: bundleDir,
     generatedAt,
     giteaBaseUrl: options.giteaBaseUrl,
-    ignoreScripts: options.ignoreScripts === true,
+    ignoreScripts,
     projects,
     ...(pythonIndexUrl ? { pythonIndexUrl } : {}),
     registryUrl: options.registryUrl,

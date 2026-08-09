@@ -25,6 +25,7 @@ import {
   type DownloadedTarball,
   dependencySpecsFromManifest,
   downloadResolvedPackage,
+  TarballInspectionCache,
 } from './tarball.js';
 import { packageFileName } from './files.js';
 import {
@@ -38,12 +39,14 @@ export interface FetchSeedBundleOptions {
   concurrency?: number;
   download?: boolean;
   includePeer?: boolean;
+  inspectionCache?: TarballInspectionCache;
   latestPolicy?: LatestPolicy;
   onProgress?: (event: FetchProgressEvent) => void;
   outputDir: string;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   metadataCache?: RegistryMetadataCache;
+  minReleaseAgeDays?: number;
   retryDelaysMs?: number[];
   stableRequiredBy?: Set<string>;
   stableTagResolutions?: StableTagResolutionIndex;
@@ -264,6 +267,7 @@ function metadataFromResolvedPackage(
     ...(pkg.optionalDependencies ? { optionalDependencies: pkg.optionalDependencies } : {}),
     ...(pkg.peerDependencies ? { peerDependencies: pkg.peerDependencies } : {}),
     ...(pkg.peerDependenciesMeta ? { peerDependenciesMeta: pkg.peerDependenciesMeta } : {}),
+    ...(pkg.publishedAt ? { publishedAt: pkg.publishedAt } : {}),
   };
 }
 
@@ -290,6 +294,7 @@ export async function fetchSeedBundle(
   const rangeResolutionPolicy = options.rangeResolutionPolicy ?? 'reuse-stable';
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 8));
+  const inspectionCache = options.inspectionCache ?? new TarballInspectionCache();
   const stableTagRequirements = new Map<string, TagRequirement>();
   const stablePackageIds = options.stableTagResolutions?.packageIds ?? new Set<string>();
   const stableRequiredBy = new Set([...(options.stableRequiredBy ?? []), ...stablePackageIds]);
@@ -430,6 +435,10 @@ export async function fetchSeedBundle(
       return undefined;
     }
 
+    if ((options.minReleaseAgeDays ?? 0) > 0 && !metadata.publishedAt) {
+      return undefined;
+    }
+
     timings.metadataCacheHits = (timings.metadataCacheHits ?? 0) + 1;
     return {
       name: requirement.name,
@@ -443,6 +452,7 @@ export async function fetchSeedBundle(
       ...(metadata.peerDependenciesMeta
         ? { peerDependenciesMeta: metadata.peerDependenciesMeta }
         : {}),
+      ...(metadata.publishedAt ? { publishedAt: metadata.publishedAt } : {}),
       raw: requirement.raw,
       requiredBy: requirement.requiredBy,
       resolvedVia: 'version',
@@ -532,6 +542,7 @@ export async function fetchSeedBundle(
           options.outputDir,
           {
             existingPackageFiles,
+            inspectionCache,
             onProgress: ({ downloadedBytes, totalBytes }) => {
               options.onProgress?.({
                 bytes: downloadedBytes,
@@ -562,6 +573,7 @@ export async function fetchSeedBundle(
           }
         );
         timings.downloadMs += elapsedMs(downloadStart);
+        resolved.sha256 = fetched.sha256;
 
         if (fetched.skipped) {
           result.skipped++;
@@ -650,7 +662,11 @@ export async function fetchSeedBundle(
       }
 
       const resolveStart = performance.now();
-      const resolution = await resolveRootRequirements([requirement], options.registry);
+      const resolution = await resolveRootRequirements([requirement], options.registry, {
+        ...(options.minReleaseAgeDays === undefined
+          ? {}
+          : { minReleaseAgeDays: options.minReleaseAgeDays }),
+      });
       const resolveMs = elapsedMs(resolveStart);
       timings.resolveMs += resolveMs;
       timings.resolveWorkerMs = (timings.resolveWorkerMs ?? 0) + resolveMs;

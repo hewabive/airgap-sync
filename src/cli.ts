@@ -32,6 +32,7 @@ import {
   createWorkspacePythonRootWheels,
   createWorkspaceSnapshot,
   defaultPythonPublicationProfile,
+  defaultNpmSecurityPolicy,
   defaultWorkspaceGiteaUrl,
   defaultWorkspaceOutputDir,
   defaultWorkspaceSourceRegistry,
@@ -64,6 +65,8 @@ import {
   probeMachine,
   pruneInactivePythonApplicationPlans,
   publishBundle,
+  scanNpmBundleSecurity,
+  TarballInspectionCache,
   pruneBundle,
   readBundleInfo,
   readFetchReport,
@@ -97,6 +100,7 @@ import {
   writeGitFetchReport,
   writeGitSourcesManifest,
   writeRegistryMetadataCache,
+  writeNpmSecurityReport,
   writePublishReport,
   writePruneReport,
   writeWorkspaceSnapshot,
@@ -168,12 +172,15 @@ const defaultPythonPublishOwner = 'pypi';
 const defaultPythonSourceIndex = 'https://pypi.org/simple/';
 
 interface FetchOptions {
+  allowPackage?: string[];
   concurrency: number;
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
   latestPolicy?: LatestPolicy;
   manifest?: string;
+  maxSecurityReportAgeHours?: number;
+  minReleaseAgeDays?: number;
   output: string;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: string;
@@ -217,23 +224,26 @@ interface VerifyOptions {
 }
 
 interface VerifyInstallOptions {
-  ignoreScripts?: boolean;
   gitea: string;
   json?: boolean;
   keepTemp?: boolean;
   registry: string;
+  runScripts?: boolean;
   timeoutMs: number;
 }
 
 interface CollectOptions {
   allowApproximatePython?: boolean;
   allowWindowGap?: boolean;
+  allowPackage?: string[];
   concurrency: number;
   dryRun?: boolean;
   includeDev?: boolean;
   includePeer?: boolean;
   json?: boolean;
   latestPolicy?: LatestPolicy;
+  maxSecurityReportAgeHours?: number;
+  minReleaseAgeDays?: number;
   output?: string;
   prune?: boolean;
   rangeResolutionPolicy?: RangeResolutionPolicy;
@@ -324,6 +334,14 @@ function parsePositiveInteger(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error(`Expected a positive integer, got: ${value}`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Expected a non-negative integer, got: ${value}`);
   }
   return parsed;
 }
@@ -503,6 +521,7 @@ function collectShouldFail(report: {
   pythonApplications?: { errors: unknown[] };
   cpythonDistributions?: { errors: unknown[] };
   repositoryUpdate: { errors: unknown[] };
+  security?: { ok: boolean };
 }): boolean {
   return (
     report.repositoryUpdate.errors.length > 0 ||
@@ -513,7 +532,8 @@ function collectShouldFail(report: {
     report.gitSources.skipped.length > 0 ||
     report.gitFetch.errors.length > 0 ||
     report.gitManifestScanErrors.length > 0 ||
-    report.maxIterationsReached
+    report.maxIterationsReached ||
+    report.security?.ok === false
   );
 }
 
@@ -986,6 +1006,8 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
   return [
     `Bundle directory: ${config.output}`,
     `Source registry: ${config.sourceRegistry}`,
+    `npm release quarantine: ${String(config.npmSecurity?.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays)} days`,
+    `npm security report TTL: ${String(config.npmSecurity?.maxReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours)} hours`,
     `Target registry: ${config.targetRegistry ?? '(not set)'}`,
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
     ...pythonLines,
@@ -1354,6 +1376,7 @@ const collectPhaseLabels: Record<DownloadProgressEvent['phase'], string> = {
   'python-application-fetch': 'prepare Python application artifacts',
   'python-fetch': 'resolve/download Python',
   'repository-update': 'update repositories',
+  'security-scan': 'scan npm package security',
 };
 
 const applyPhaseLabels: Record<ApplyProgressPhase, string> = {
@@ -4360,6 +4383,21 @@ program
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
   .option(
+    '--min-release-age-days <days>',
+    'Quarantine npm releases newer than this many days (0 disables)',
+    parseNonNegativeInteger
+  )
+  .option(
+    '--max-security-report-age-hours <hours>',
+    'Maximum accepted age of an OSV security report',
+    parsePositiveInteger
+  )
+  .option(
+    '--allow-package <identity>',
+    'Allow static findings only for name@version#sha256:digest; repeatable',
+    collectOptionalStrings
+  )
+  .option(
     '--allow-approximate-python',
     'Opt in to simplified no-backtracking resolution for unlocked Python requirements'
   )
@@ -4501,6 +4539,20 @@ program
           options.rangeResolutionPolicy ?? config.defaults.download.rangeResolutionPolicy;
         const tagResolutionPolicy =
           options.tagResolutionPolicy ?? config.defaults.download.tagResolutionPolicy;
+        const npmSecurity = {
+          allowPackages:
+            options.allowPackage ??
+            activeConfig.npmSecurity?.allowPackages ??
+            defaultNpmSecurityPolicy.allowPackages,
+          maxReportAgeHours:
+            options.maxSecurityReportAgeHours ??
+            activeConfig.npmSecurity?.maxReportAgeHours ??
+            defaultNpmSecurityPolicy.maxReportAgeHours,
+          minReleaseAgeDays:
+            options.minReleaseAgeDays ??
+            activeConfig.npmSecurity?.minReleaseAgeDays ??
+            defaultNpmSecurityPolicy.minReleaseAgeDays,
+        };
         const prune =
           !targetSelection && (options.prune === true || config.defaults.download.prune === true);
         const allowApproximatePython = options.allowApproximatePython === true;
@@ -4539,6 +4591,7 @@ program
           initialPythonRootWheels: pythonRootWheels,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
+          minReleaseAgeDays: npmSecurity.minReleaseAgeDays,
           rangeResolutionPolicy,
           ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
           tagResolutionPolicy,
@@ -4553,6 +4606,11 @@ program
             : {}),
           registry,
           registryUrl,
+          security: {
+            policy: {
+              ...npmSecurity,
+            },
+          },
           ...(retainedGitSources ? { retainedGitSources } : {}),
         });
         if (pythonApplicationPlans.length > 0 || targetSelection === undefined) {
@@ -4677,12 +4735,19 @@ program
         })
       );
       const beforeState = options.dryRun === true ? undefined : await captureBundleState(outputDir);
+      const npmSecurity = {
+        allowPackages: options.allowPackage ?? defaultNpmSecurityPolicy.allowPackages,
+        maxReportAgeHours:
+          options.maxSecurityReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours,
+        minReleaseAgeDays: options.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays,
+      };
       const report = await collectBundle({
         dryRun: options.dryRun === true,
         concurrency: options.concurrency,
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
         latestPolicy: options.latestPolicy ?? 'bundled',
+        minReleaseAgeDays: npmSecurity.minReleaseAgeDays,
         rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
         ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
@@ -4691,6 +4756,11 @@ program
         outputDir,
         registry,
         registryUrl,
+        security: {
+          policy: {
+            ...npmSecurity,
+          },
+        },
         root,
       });
       const pruneReport =
@@ -4741,6 +4811,21 @@ program
   .option('--manifest <path>', 'Read root dependencies from a package.json')
   .option('--include-dev', 'Include root devDependencies')
   .option('--include-peer', 'Traverse peerDependencies')
+  .option(
+    '--min-release-age-days <days>',
+    'Quarantine npm releases newer than this many days (0 disables)',
+    parseNonNegativeInteger
+  )
+  .option(
+    '--max-security-report-age-hours <hours>',
+    'Maximum accepted age of an OSV security report',
+    parsePositiveInteger
+  )
+  .option(
+    '--allow-package <identity>',
+    'Allow static findings only for name@version#sha256:digest; repeatable',
+    collectOptionalStrings
+  )
   .option(
     '--latest-policy <policy>',
     'Latest dist-tag policy: bundled or source',
@@ -4796,6 +4881,12 @@ program
     const latestPolicy = options.latestPolicy ?? 'bundled';
     const rangeResolutionPolicy = options.rangeResolutionPolicy ?? 'reuse-stable';
     const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
+    const npmSecurity = {
+      allowPackages: options.allowPackage ?? defaultNpmSecurityPolicy.allowPackages,
+      maxReportAgeHours:
+        options.maxSecurityReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours,
+      minReleaseAgeDays: options.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays,
+    };
 
     if (requirements.length === 0) {
       console.error('Error: no supported package specs to resolve');
@@ -4812,13 +4903,16 @@ program
     );
     const stableTagResolutions = await readStableTagResolutionIndex(options.output);
     const metadataCache = await readRegistryMetadataCache(options.output);
+    const inspectionCache = new TarballInspectionCache();
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
         concurrency: options.concurrency,
         download: false,
         includePeer: options.includePeer === true,
+        inspectionCache,
         latestPolicy,
+        minReleaseAgeDays: npmSecurity.minReleaseAgeDays,
         outputDir: options.output,
         rangeResolutionPolicy,
         registry,
@@ -4841,7 +4935,9 @@ program
     const resolution = await fetchSeedBundle({
       concurrency: options.concurrency,
       includePeer: options.includePeer === true,
+      inspectionCache,
       latestPolicy,
+      minReleaseAgeDays: npmSecurity.minReleaseAgeDays,
       outputDir: options.output,
       rangeResolutionPolicy,
       registry,
@@ -4854,7 +4950,7 @@ program
       requirements,
       unsupported,
     });
-    const success = resolution.errors.length === 0;
+    let success = resolution.errors.length === 0;
 
     if (success) {
       const documents = createBundleDocuments({
@@ -4864,7 +4960,19 @@ program
         sourceRegistry: options.registry,
         tagRequirements: resolution.tagRequirements,
       });
-      await writeBundleDocuments(options.output, documents);
+      const security = await scanNpmBundleSecurity({
+        bundleDir: options.output,
+        manifest: documents.manifest,
+        inspectionCache,
+        policy: {
+          ...npmSecurity,
+        },
+      });
+      await writeNpmSecurityReport(options.output, security, { failed: !security.ok });
+      success = security.ok;
+      if (success) {
+        await writeBundleDocuments(options.output, documents);
+      }
       await writeFetchReport(
         options.output,
         createFetchReport({
@@ -4879,10 +4987,12 @@ program
           wouldDownloadPackages: resolution.wouldDownloadPackages,
         })
       );
-      await writeRegistryMetadataCache(options.output, metadataCache, {
-        createdAt: new Date().toISOString(),
-        sourceRegistry: options.registry,
-      });
+      if (success) {
+        await writeRegistryMetadataCache(options.output, metadataCache, {
+          createdAt: new Date().toISOString(),
+          sourceRegistry: options.registry,
+        });
+      }
 
       console.log(
         JSON.stringify(
@@ -4893,6 +5003,7 @@ program
             resolved: resolution.resolved.length,
             timings: resolution.timings,
             tagRequirements: resolution.tagRequirements.length,
+            security,
           },
           null,
           2
@@ -5013,7 +5124,10 @@ verifyCommand
   .requiredOption('-r, --registry <url>', 'Target npm registry URL')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
   .option('--timeout-ms <ms>', 'Install timeout per project', parsePositiveInteger, 10 * 60_000)
-  .option('--ignore-scripts', 'Skip npm/pnpm/yarn lifecycle scripts during install verification')
+  .option(
+    '--run-scripts',
+    'Explicitly allow npm/pnpm/yarn lifecycle scripts during install verification'
+  )
   .option('--keep-temp', 'Keep temporary project copies for debugging')
   .option('--json', 'Print the full JSON verification report')
   .action(async (bundle: string, options: VerifyInstallOptions) => {
@@ -5021,7 +5135,7 @@ verifyCommand
       const report = await verifyInstall({
         bundleDir: bundle,
         giteaBaseUrl: options.gitea,
-        ignoreScripts: options.ignoreScripts === true,
+        ignoreScripts: options.runScripts !== true,
         keepTemp: options.keepTemp === true,
         registryUrl: options.registry,
         timeoutMs: options.timeoutMs,

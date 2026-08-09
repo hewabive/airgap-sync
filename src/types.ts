@@ -133,6 +133,7 @@ export interface CollectReport {
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
   root: string;
+  security?: NpmSecurityReport;
   timings: CollectTimings;
   wroteBundle: boolean;
 }
@@ -301,12 +302,14 @@ export interface PackageVersionMetadata {
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  publishedAt?: string;
   version: string;
 }
 
 export interface PackageMetadata {
   'dist-tags'?: Record<string, string>;
   name: string;
+  time?: Record<string, string>;
   versions: Record<string, PackageVersionMetadata>;
 }
 
@@ -324,10 +327,12 @@ export interface ResolvedRootPackage extends PackageIdentity {
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  publishedAt?: string;
   raw: string;
   requiredBy: string;
   resolvedFrom?: ResolutionReason[];
   resolvedVia: Exclude<SupportedSpecType, 'alias'>;
+  sha256?: string;
   specifier: string;
   type: SupportedSpecType;
 }
@@ -348,6 +353,10 @@ export interface ResolveRootRequirementsResult {
 
 export interface ResolvedPackage extends PackageIdentity {
   file: string;
+  integrity?: string;
+  publishedAt?: string;
+  sha256?: string;
+  shasum?: string;
   tarball: string;
   resolvedFrom: ResolutionReason[];
 }
@@ -395,6 +404,7 @@ export interface PackageManifest {
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  scripts?: Record<string, string>;
   version: string;
 }
 
@@ -421,10 +431,51 @@ export interface ProjectPackageManifest {
 }
 
 export interface BundleManifest {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   createdAt: string;
   sourceRegistry: string;
   packages: ResolvedPackage[];
+}
+
+export interface NpmSecurityAdvisoryFinding extends PackageIdentity {
+  aliases: string[];
+  id: string;
+  modified?: string;
+  severity: 'error' | 'warning';
+  summary?: string;
+  type: 'malware' | 'vulnerability';
+}
+
+export interface NpmStaticSecurityFinding extends PackageIdentity {
+  allowed: boolean;
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+  sha256: string;
+  type: 'lifecycle-script' | 'non-registry-dependency';
+  value: string;
+}
+
+export interface NpmSecurityPolicy {
+  allowPackages: string[];
+  maxReportAgeHours: number;
+  minReleaseAgeDays: number;
+}
+
+export interface NpmSecurityReport {
+  advisories: NpmSecurityAdvisoryFinding[];
+  errors: string[];
+  generatedAt: string;
+  manifestSha256: string;
+  ok: boolean;
+  packageCount: number;
+  policy: NpmSecurityPolicy;
+  provider: {
+    name: 'OSV';
+    url: string;
+  };
+  schemaVersion: 1;
+  staticFindings: NpmStaticSecurityFinding[];
 }
 
 export interface TagRequirement extends PackageIdentity {

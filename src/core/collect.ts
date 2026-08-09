@@ -18,6 +18,7 @@ import type {
   TagResolutionPolicy,
   UnsupportedRootPackageRequirement,
 } from '../types.js';
+import type { NpmAdvisoryClient } from './security.js';
 import {
   createBundleDocuments,
   createFetchReport,
@@ -57,6 +58,9 @@ import { fetchPythonBundle } from './python/fetch.js';
 import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
 import { preparePythonRootWheels, RootWheelPythonIndex } from './python/root-wheels.js';
 import type { PythonResolutionMode } from './python/resolution-policy.js';
+import { scanNpmBundleSecurity, writeNpmSecurityReport } from './security.js';
+import type { NpmSecurityPolicy } from '../types.js';
+import { TarballInspectionCache } from './tarball.js';
 
 export interface CollectBundleOptions {
   allowApproximatePython?: boolean;
@@ -73,6 +77,7 @@ export interface CollectBundleOptions {
   initialUnsupported?: UnsupportedRootPackageRequirement[];
   latestPolicy?: LatestPolicy;
   maxIterations?: number;
+  minReleaseAgeDays?: number;
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
   initialPythonRequirements?: PythonRequirementInput[];
@@ -89,6 +94,10 @@ export interface CollectBundleOptions {
   root?: string;
   runGitCommand?: GitCommandRunner;
   runGitOutputCommand?: GitOutputCommandRunner;
+  security?: {
+    advisoryClient?: NpmAdvisoryClient;
+    policy?: Partial<NpmSecurityPolicy>;
+  };
   /** Leave git-sources.json unchanged so an outer workflow can activate it later. */
   deferGitSourcesActivation?: boolean;
   tagResolutionPolicy?: TagResolutionPolicy;
@@ -103,6 +112,7 @@ export type CollectProgressPhase =
   | 'git-fetch'
   | 'git-manifest-scan'
   | 'python-fetch'
+  | 'security-scan'
   | 'bundle-write';
 
 export type CollectProgressStatus = 'start' | 'progress' | 'done' | 'error';
@@ -491,6 +501,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
   const metadataCache = await readRegistryMetadataCache(outputDir);
   const stableRequiredBy = new Set<string>();
+  const inspectionCache = new TarballInspectionCache();
 
   const repositoryUpdateStart = performance.now();
   options.onProgress?.({
@@ -653,7 +664,11 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       download: !dryRun,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
+      inspectionCache,
       latestPolicy: options.latestPolicy ?? 'bundled',
+      ...(options.minReleaseAgeDays === undefined
+        ? {}
+        : { minReleaseAgeDays: options.minReleaseAgeDays }),
       rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
       ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       onProgress: (event: FetchProgressEvent) => {
@@ -921,7 +936,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     ...gitSources,
     sources: mergeRetainedGitSources(gitSources.sources, options.retainedGitSources),
   };
-  const wroteBundle =
+  let wroteBundle =
     !dryRun &&
     repositoryUpdate.errors.length === 0 &&
     reportFetch.errors.length === 0 &&
@@ -965,19 +980,51 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         latestPolicy: options.latestPolicy ?? 'bundled',
         tagRequirements: resolution.tagRequirements,
       });
-      await writeBundleDocuments(outputDir, documents);
+      if (options.security) {
+        options.onProgress?.({ phase: 'security-scan', status: 'start' });
+        const security = await scanNpmBundleSecurity({
+          ...(options.security.advisoryClient
+            ? { advisoryClient: options.security.advisoryClient }
+            : {}),
+          bundleDir: outputDir,
+          generatedAt,
+          manifest: documents.manifest,
+          inspectionCache,
+          ...(options.security.policy ? { policy: options.security.policy } : {}),
+        });
+        report.security = security;
+        await writeNpmSecurityReport(outputDir, security, { failed: !security.ok });
+        options.onProgress?.({
+          current: documents.manifest.packages.length,
+          phase: 'security-scan',
+          status: security.ok ? 'done' : 'error',
+          total: documents.manifest.packages.length,
+        });
+        if (!security.ok) {
+          wroteBundle = false;
+          report.wroteBundle = false;
+        }
+      }
+      if (wroteBundle) {
+        await writeBundleDocuments(outputDir, documents);
+      }
       if (pythonResult?.manifest) {
-        await writePythonSeedManifest(outputDir, pythonResult.manifest);
+        if (wroteBundle) {
+          await writePythonSeedManifest(outputDir, pythonResult.manifest);
+        }
       }
       timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
       options.onProgress?.({
         current: documents.manifest.packages.length,
         phase: 'bundle-write',
-        status: 'done',
+        status: wroteBundle ? 'done' : 'error',
       });
     }
 
-    if (wroteBundle || (reportFetch.timings.metadataCacheMemoryWrites ?? 0) > 0) {
+    if (
+      report.security?.ok !== false &&
+      (wroteBundle || (reportFetch.timings.metadataCacheMemoryWrites ?? 0) > 0)
+    ) {
       await writeRegistryMetadataCache(outputDir, metadataCache, {
         createdAt: generatedAt,
         sourceRegistry: options.registryUrl,

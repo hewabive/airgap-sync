@@ -5,6 +5,7 @@ import { createGitSourceFromUrl } from './git-sources.js';
 import type {
   GitSource,
   LatestPolicy,
+  NpmSecurityPolicy,
   RangeResolutionPolicy,
   TagResolutionPolicy,
 } from '../types.js';
@@ -203,6 +204,7 @@ export interface WorkspaceConfig {
   gitOwnerStrategy: GitOwnerStrategy;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
+  npmSecurity?: NpmSecurityPolicy;
   output: string;
   pythonPublishOwner?: string;
   pythonResolutionMode?: PythonResolutionMode;
@@ -884,6 +886,42 @@ function normalizeWorkspaceDefaults(value: unknown): WorkspaceDefaults {
   };
 }
 
+function normalizeNpmSecurityPolicy(value: unknown): NpmSecurityPolicy | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error('npmSecurity must be an object');
+  }
+  const allowPackages = value.allowPackages;
+  if (
+    allowPackages !== undefined &&
+    (!Array.isArray(allowPackages) ||
+      !allowPackages.every((item): item is string => typeof item === 'string'))
+  ) {
+    throw new Error('npmSecurity.allowPackages must be an array of strings');
+  }
+  const maxReportAgeHours = value.maxReportAgeHours ?? 72;
+  const minReleaseAgeDays = value.minReleaseAgeDays ?? 3;
+  if (
+    typeof maxReportAgeHours !== 'number' ||
+    !Number.isInteger(maxReportAgeHours) ||
+    maxReportAgeHours < 1
+  ) {
+    throw new Error('npmSecurity.maxReportAgeHours must be a positive integer');
+  }
+  if (
+    typeof minReleaseAgeDays !== 'number' ||
+    !Number.isInteger(minReleaseAgeDays) ||
+    minReleaseAgeDays < 0
+  ) {
+    throw new Error('npmSecurity.minReleaseAgeDays must be a non-negative integer');
+  }
+  return {
+    allowPackages: [...(allowPackages ?? [])],
+    maxReportAgeHours,
+    minReleaseAgeDays,
+  };
+}
+
 function normalizeCoveragePolicies(value: unknown): PlatformCoveragePolicy[] {
   if (value === undefined) {
     return [];
@@ -1050,6 +1088,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
     value.gitPublishOwnerKind === 'user' || value.gitPublishOwnerKind === 'organization'
       ? value.gitPublishOwnerKind
       : undefined;
+  const npmSecurity = normalizeNpmSecurityPolicy(value.npmSecurity);
   if (gitOwnerStrategy === 'fixed-owner' && (!gitPublishOwner || !gitPublishOwnerKind)) {
     throw new Error(
       'fixed-owner gitOwnerStrategy requires gitPublishOwner and gitPublishOwnerKind'
@@ -1069,6 +1108,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
     gitOwnerStrategy,
     ...(gitPublishOwner ? { gitPublishOwner } : {}),
     ...(gitPublishOwnerKind ? { gitPublishOwnerKind } : {}),
+    ...(npmSecurity ? { npmSecurity } : {}),
     output:
       typeof value.output === 'string' && value.output.trim().length > 0
         ? value.output.trim()

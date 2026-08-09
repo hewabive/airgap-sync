@@ -2,8 +2,9 @@ import path from 'node:path';
 import semver from 'semver';
 import * as fs from './fs.js';
 import { readBundleManifest, readDistTagsManifest, writeVerifyReport } from './bundle.js';
-import { readPackageManifest } from './tarball.js';
+import { inspectPackageTarball, TarballInspectionCache } from './tarball.js';
 import { validateBundle } from './validation.js';
+import { assertNpmSecurityGate } from './security.js';
 import type {
   ApplyBundleReport,
   BundleManifest,
@@ -34,6 +35,8 @@ import {
 } from './python/distribution-bundle.js';
 
 export interface VerifyBundleOptions {
+  /** Explicit compatibility escape hatch for schemaVersion 1 bundles. */
+  allowLegacyBundle?: boolean;
   bundleDir: string;
   generatedAt?: string;
   writeReport?: boolean;
@@ -235,7 +238,8 @@ async function verifyPackageManagerRequirements(
 
 async function verifyTarballIntegrity(
   bundleDir: string,
-  manifest: BundleManifest
+  manifest: BundleManifest,
+  inspectionCache: TarballInspectionCache
 ): Promise<VerifyCheck> {
   const corrupt: { error: string; file: string }[] = [];
   const mismatched: {
@@ -253,7 +257,8 @@ async function verifyTarballIntegrity(
     }
 
     try {
-      const packageManifest = await readPackageManifest(tarballPath);
+      const packageManifest = (await inspectPackageTarball(tarballPath, pkg, inspectionCache))
+        .manifest;
       if (packageManifest.name !== pkg.name || packageManifest.version !== pkg.version) {
         mismatched.push({
           actualName: packageManifest.name,
@@ -290,12 +295,13 @@ async function verifyTarballIntegrity(
 export async function verifyBundle(options: VerifyBundleOptions): Promise<VerifyReport> {
   const bundleDir = path.resolve(options.bundleDir);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const inspectionCache = new TarballInspectionCache();
   const checks: VerifyCheck[] = [];
   const { checks: manifestChecks, distTags, manifest } = await safeReadManifests(bundleDir);
   checks.push(...manifestChecks);
 
   if (manifest && distTags) {
-    const validation = await validateBundle(bundleDir, manifest, distTags);
+    const validation = await validateBundle(bundleDir, manifest, distTags, { inspectionCache });
     checks.push(
       validation.valid
         ? check(
@@ -323,7 +329,38 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
           )
     );
 
-    checks.push(await verifyTarballIntegrity(bundleDir, manifest));
+    checks.push(await verifyTarballIntegrity(bundleDir, manifest, inspectionCache));
+
+    if (options.allowLegacyBundle !== true) {
+      try {
+        const security = await assertNpmSecurityGate(bundleDir, manifest, {
+          now: new Date(generatedAt),
+        });
+        checks.push(
+          check(
+            'npm-security',
+            'ok',
+            `OSV/static security report passed for ${String(security.packageCount)} npm packages`
+          )
+        );
+        const warningFindings = [
+          ...security.advisories.filter((finding) => finding.severity === 'warning'),
+          ...security.staticFindings.filter((finding) => finding.severity === 'warning'),
+        ];
+        if (warningFindings.length > 0) {
+          checks.push(
+            check(
+              'npm-security-warnings',
+              'warning',
+              `${String(warningFindings.length)} non-blocking npm security findings require review`,
+              { findings: warningFindings }
+            )
+          );
+        }
+      } catch (error) {
+        checks.push(check('npm-security', 'error', (error as Error).message));
+      }
+    }
   }
 
   const fetchReport = await readOptionalJson<FetchReport>(

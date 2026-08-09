@@ -21,6 +21,9 @@ vi.mock('../src/core/tarball.js', () => ({
   dependencySpecsFromManifest: tarballMocks.dependencySpecsFromManifest,
   downloadResolvedPackage: tarballMocks.downloadResolvedPackage,
   readPackageManifest: tarballMocks.readPackageManifest,
+  TarballInspectionCache: class {
+    readonly hits = 0;
+  },
 }));
 
 const metadata: PackageMetadata = {

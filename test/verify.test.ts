@@ -310,6 +310,7 @@ describe('verifyBundle', () => {
     await writeValidBundle();
 
     const report = await verifyBundle({
+      allowLegacyBundle: true,
       bundleDir,
       generatedAt: '2026-05-21T00:03:00.000Z',
     });
@@ -332,7 +333,7 @@ describe('verifyBundle', () => {
     await writeValidBundle();
     await fs.writeJson(path.join(bundleDir, 'apply-report.json'), applyReport, { spaces: 2 });
 
-    const report = await verifyBundle({ bundleDir });
+    const report = await verifyBundle({ allowLegacyBundle: true, bundleDir });
 
     expect(report.ok).toBe(true);
     expect(report.summary).toMatchObject({
@@ -345,7 +346,7 @@ describe('verifyBundle', () => {
     await writeValidBundle();
     await fs.remove(path.join(bundleDir, 'workspace-snapshot.json'));
 
-    const report = await verifyBundle({ bundleDir });
+    const report = await verifyBundle({ allowLegacyBundle: true, bundleDir });
 
     expect(report.ok).toBe(true);
     expect(report.checks).toEqual(

@@ -21,6 +21,29 @@ interface VersionCandidate {
   version: string;
 }
 
+export interface ResolveRootRequirementsOptions {
+  minReleaseAgeDays?: number;
+  now?: Date;
+}
+
+function eligibleVersionNames(
+  metadata: PackageMetadata,
+  options: ResolveRootRequirementsOptions
+): string[] {
+  const minReleaseAgeDays = Math.max(0, options.minReleaseAgeDays ?? 0);
+  if (minReleaseAgeDays === 0) {
+    return Object.keys(metadata.versions);
+  }
+
+  const cutoff = (options.now ?? new Date()).getTime() - minReleaseAgeDays * 24 * 60 * 60 * 1000;
+  return Object.keys(metadata.versions).filter((version) => {
+    const publishedAt = metadata.time?.[version] ?? metadata.versions[version]?.publishedAt;
+    if (!publishedAt) return false;
+    const publishedTime = Date.parse(publishedAt);
+    return Number.isFinite(publishedTime) && publishedTime <= cutoff;
+  });
+}
+
 function newestCandidate(
   best: VersionCandidate | undefined,
   candidate: VersionCandidate
@@ -48,7 +71,8 @@ function newestCandidate(
 
 function chooseVersion(
   requirement: RootPackageRequirement,
-  metadata: PackageMetadata
+  metadata: PackageMetadata,
+  options: ResolveRootRequirementsOptions = {}
 ): {
   version?: string;
   reason?: string;
@@ -56,28 +80,51 @@ function chooseVersion(
   tag?: string;
 } {
   const resolvedVia = specTypeForResolution(requirement);
+  const eligibleVersions = eligibleVersionNames(metadata, options);
+  const eligibleVersionSet = new Set(eligibleVersions);
+  const minReleaseAgeDays = Math.max(0, options.minReleaseAgeDays ?? 0);
 
   if (resolvedVia === 'tag') {
-    const version = metadata['dist-tags']?.[requirement.specifier];
+    const taggedVersion = metadata['dist-tags']?.[requirement.specifier];
+    const version =
+      taggedVersion && eligibleVersionSet.has(taggedVersion)
+        ? taggedVersion
+        : requirement.specifier === 'latest'
+          ? (semver.maxSatisfying(eligibleVersions, '*') ?? undefined)
+          : undefined;
     return version
       ? { version, resolvedVia, tag: requirement.specifier }
-      : { reason: `Tag "${requirement.specifier}" does not exist`, resolvedVia };
+      : {
+          reason: taggedVersion
+            ? `Tag "${requirement.specifier}" points to a release newer than the ${String(minReleaseAgeDays)} day minimum age`
+            : `Tag "${requirement.specifier}" does not exist`,
+          resolvedVia,
+        };
   }
 
   if (resolvedVia === 'version') {
-    return metadata.versions[requirement.specifier]
+    return metadata.versions[requirement.specifier] && eligibleVersionSet.has(requirement.specifier)
       ? { version: requirement.specifier, resolvedVia }
-      : { reason: `Version "${requirement.specifier}" does not exist`, resolvedVia };
+      : {
+          reason: metadata.versions[requirement.specifier]
+            ? `Version "${requirement.specifier}" is newer than the ${String(minReleaseAgeDays)} day minimum age or has no publication timestamp`
+            : `Version "${requirement.specifier}" does not exist`,
+          resolvedVia,
+        };
   }
 
   const validRange = semver.validRange(requirement.specifier);
   if (validRange) {
     const latest = metadata['dist-tags']?.latest;
-    if (latest && semver.satisfies(latest, requirement.specifier)) {
+    if (
+      latest &&
+      eligibleVersionSet.has(latest) &&
+      semver.satisfies(latest, requirement.specifier)
+    ) {
       return { version: latest, resolvedVia };
     }
 
-    const version = semver.maxSatisfying(Object.keys(metadata.versions), requirement.specifier);
+    const version = semver.maxSatisfying(eligibleVersions, requirement.specifier);
     return version
       ? { version, resolvedVia }
       : { reason: `No version satisfies range "${requirement.specifier}"`, resolvedVia };
@@ -89,13 +136,15 @@ function chooseVersion(
     .filter(Boolean)
     .flatMap((part): VersionCandidate[] => {
       if (semver.validRange(part)) {
-        const version = semver.maxSatisfying(Object.keys(metadata.versions), part);
+        const version = semver.maxSatisfying(eligibleVersions, part);
         return version ? [{ version, resolvedVia }] : [];
       }
 
       const taggedVersion = metadata['dist-tags']?.[part];
       return taggedVersion
-        ? [{ version: taggedVersion, resolvedVia: 'tag' as const, tag: part }]
+        ? eligibleVersionSet.has(taggedVersion)
+          ? [{ version: taggedVersion, resolvedVia: 'tag' as const, tag: part }]
+          : []
         : [];
     });
 
@@ -108,9 +157,10 @@ function chooseVersion(
 
 export function resolveRootRequirementFromMetadata(
   requirement: RootPackageRequirement,
-  metadata: PackageMetadata
+  metadata: PackageMetadata,
+  options: ResolveRootRequirementsOptions = {}
 ): { resolved?: ResolvedRootPackage; error?: ResolutionError; tagRequirement?: TagRequirement } {
-  const selected = chooseVersion(requirement, metadata);
+  const selected = chooseVersion(requirement, metadata, options);
 
   if (!selected.version) {
     return {
@@ -151,6 +201,9 @@ export function resolveRootRequirementFromMetadata(
     ...(versionMetadata.peerDependenciesMeta
       ? { peerDependenciesMeta: versionMetadata.peerDependenciesMeta }
       : {}),
+    ...((metadata.time?.[selected.version] ?? versionMetadata.publishedAt)
+      ? { publishedAt: metadata.time?.[selected.version] ?? versionMetadata.publishedAt }
+      : {}),
     raw: requirement.raw,
     requiredBy: requirement.requiredBy,
     resolvedVia: selected.resolvedVia,
@@ -179,7 +232,8 @@ export function resolveRootRequirementFromMetadata(
 
 export async function resolveRootRequirements(
   requirements: RootPackageRequirement[],
-  registry: RegistryClient
+  registry: RegistryClient,
+  options: ResolveRootRequirementsOptions = {}
 ): Promise<ResolveRootRequirementsResult> {
   const resolved: ResolvedRootPackage[] = [];
   const errors: ResolutionError[] = [];
@@ -188,7 +242,7 @@ export async function resolveRootRequirements(
   for (const requirement of requirements) {
     try {
       const metadata = await registry.getPackageMetadata(requirement.name);
-      const result = resolveRootRequirementFromMetadata(requirement, metadata);
+      const result = resolveRootRequirementFromMetadata(requirement, metadata, options);
 
       if (result.error) {
         errors.push(result.error);

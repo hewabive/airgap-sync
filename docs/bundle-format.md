@@ -37,6 +37,7 @@ airgap-bundle/
             pip.conf.template
   seed-manifest.json
   dist-tags.json
+  security-report.json
   registry-metadata-cache.json
   workspace-snapshot.json
   fetch-report.json
@@ -72,7 +73,7 @@ lockfile entries, manifest dependencies, or stable reused range/tag requirements
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "createdAt": "2026-05-20T00:00:00.000Z",
   "sourceRegistry": "https://registry.npmjs.org",
   "packages": [
@@ -80,6 +81,10 @@ lockfile entries, manifest dependencies, or stable reused range/tag requirements
       "name": "foo",
       "version": "1.0.0",
       "file": "packages/foo-1.0.0.tgz",
+      "integrity": "sha512-...",
+      "sha256": "0123456789abcdef...",
+      "shasum": "0123456789abcdef...",
+      "publishedAt": "2026-05-01T00:00:00.000Z",
       "tarball": "https://registry.npmjs.org/foo/-/foo-1.0.0.tgz",
       "resolvedFrom": [
         {
@@ -93,6 +98,27 @@ lockfile entries, manifest dependencies, or stable reused range/tag requirements
   ]
 }
 ```
+
+Schema 2 requires a SHA-256 for every npm tarball. Registry SRI/SHA-1 and publication
+time are retained when supplied. Schema-1 manifests remain readable for diagnostics,
+but strict verification and npm publication refuse them because their bytes cannot be
+bound to security evidence.
+
+The runtime inspection cache is intentionally not part of the bundle. During one
+download or verify process, SHA-256, required registry digests, and the embedded
+`package.json` are produced by one streaming read and reused while the file fingerprint
+is unchanged. A later process re-reads the content, preserving the transfer and
+publication trust boundaries.
+
+## security-report.json
+
+Records the exact-version OSV query and static tarball inspection result. Its
+`manifestSha256` is the canonical SHA-256 of the complete `seed-manifest.json`; publish
+requires `ok: true`, an exact digest match, and a report no older than the policy TTL.
+Malware advisories, scanner errors, lifecycle scripts, and non-registry dependencies
+block the report. Ordinary vulnerability advisories are warnings. Static exceptions
+record an exact `name@version#sha256:<hex>` approval. A failed scan is written as
+`security-report.failed.json` so it cannot replace previously active evidence.
 
 ## dist-tags.json
 
