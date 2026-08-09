@@ -1,10 +1,8 @@
-import type { PythonFetchReport } from './core/python/bundle.js';
 import type { PythonApplicationDownloadReport } from './core/python/application-bundle.js';
 import type { CpythonDistributionDownloadReport } from './core/python/distribution-bundle.js';
 import type { CpythonDistributionPublishReport } from './core/python/distribution-publisher.js';
 import type { PythonGenericPublishReport } from './core/python/generic-publisher.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
-import type { PythonResolutionMode } from './core/python/resolution-policy.js';
 import type { PythonSecurityReport } from './core/python/security.js';
 
 export interface PackageIdentity {
@@ -65,7 +63,6 @@ export interface GitSource {
   id: string;
   localMirrorPath: string;
   owner: string;
-  pythonResolutionMode?: PythonResolutionMode;
   publishOwner?: string;
   publishOwnerKind?: 'organization' | 'user';
   publishRepo?: string;
@@ -128,7 +125,6 @@ export interface CollectReport {
   iterations: CollectIterationReport[];
   maxIterationsReached: boolean;
   outputDir: string;
-  python?: PythonFetchReport;
   pythonApplications?: PythonApplicationDownloadReport;
   pythonSecurity?: PythonSecurityReport;
   cpythonDistributions?: CpythonDistributionDownloadReport;
@@ -391,7 +387,6 @@ export interface FetchReport {
   errors: ResolutionError[];
   generatedAt: string;
   gitRequirements: GitRequirement[];
-  python?: PythonFetchReport;
   resolved: number;
   skipped: number;
   timings: FetchTimings;

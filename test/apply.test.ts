@@ -270,7 +270,7 @@ describe('applyBundle', () => {
     expect(report.succeeded).toBe(true);
   });
 
-  it('plans Python publishing when a Python seed manifest is present', async () => {
+  it('rejects a legacy Python seed manifest without an application index', async () => {
     const pythonManifest: PythonSeedManifest = {
       schemaVersion: 1,
       createdAt: '2026-07-10T00:00:00.000Z',
@@ -309,50 +309,18 @@ describe('applyBundle', () => {
     });
     await writeCleanPythonSecurityReport(pythonManifest, '2026-07-10T00:00:00.000Z');
 
-    const progress: ApplyProgressEvent[] = [];
-    const report = await applyBundle({
-      allowLegacyNpmBundle: true,
-      bundleDir,
-      dryRun: true,
-      generatedAt: '2026-07-10T00:00:00.000Z',
-      giteaBaseUrl: 'http://gitea.local',
-      giteaClient: noopClient,
-      onProgress: (event) => progress.push(event),
-      pythonOwner: 'public',
-      registryUrl: 'http://verdaccio.local:4873',
-    });
-
-    expect(report.python).toMatchObject({
-      indexUrl: 'http://gitea.local/api/packages/public/pypi/simple',
-      planned: 1,
-    });
-    expect(report.gitea.organizations).toContainEqual({
-      owner: 'public',
-      status: 'planned',
-    });
-    expect(report.succeeded).toBe(true);
-    expect(await fs.pathExists(path.join(bundleDir, 'python-publish-dry-run-report.json'))).toBe(
-      true
-    );
-    expect(progress).toContainEqual({
-      current: 0,
-      phase: 'python-publish',
-      status: 'start',
-      total: 1,
-    });
-    expect(progress).toContainEqual({
-      current: 1,
-      detail: 'planned demo_python-1.0-py3-none-any.whl',
-      phase: 'python-publish',
-      status: 'progress',
-      total: 1,
-    });
-    expect(progress).toContainEqual({
-      current: 1,
-      phase: 'python-publish',
-      status: 'done',
-      total: 1,
-    });
+    await expect(
+      applyBundle({
+        allowLegacyNpmBundle: true,
+        bundleDir,
+        dryRun: true,
+        generatedAt: '2026-07-10T00:00:00.000Z',
+        giteaBaseUrl: 'http://gitea.local',
+        giteaClient: noopClient,
+        pythonOwner: 'public',
+        registryUrl: 'http://verdaccio.local:4873',
+      })
+    ).rejects.toThrow('legacy Python seed bundles are no longer supported');
   });
 
   it('resolves and materializes Python application publication during apply', async () => {

@@ -17,6 +17,7 @@ let bundleDir: string;
 let server: http.Server | undefined;
 const wheel = Buffer.from('wheel bytes');
 const hash = createHash('sha256').update(wheel).digest('hex');
+const wheelRelativePath = `python/artifacts/wheels/${hash}/demo_package-1.0-py3-none-any.whl`;
 
 function manifest(): PythonSeedManifest {
   return {
@@ -36,7 +37,7 @@ function manifest(): PythonSeedManifest {
               version: '1.0',
             },
             environments: ['prod'],
-            file: 'python-packages/demo_package-1.0-py3-none-any.whl',
+            file: wheelRelativePath,
             filename: 'demo_package-1.0-py3-none-any.whl',
             kind: 'wheel',
             sha256: hash,
@@ -75,11 +76,8 @@ function simpleIndex(sha256?: string): string {
 
 beforeEach(async () => {
   bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-python-publish-'));
-  await fs.ensureDir(path.join(bundleDir, 'python-packages'));
-  await fs.writeFile(
-    path.join(bundleDir, 'python-packages/demo_package-1.0-py3-none-any.whl'),
-    wheel
-  );
+  await fs.ensureDir(path.dirname(path.join(bundleDir, wheelRelativePath)));
+  await fs.writeFile(path.join(bundleDir, wheelRelativePath), wheel);
   await writePythonSecurityReport(
     bundleDir,
     await scanPythonBundleSecurity({
@@ -172,7 +170,7 @@ describe('publishPythonBundle', () => {
 
   it('skips an existing wheel from compact registry metadata without uploading it', async () => {
     await fs.writeFile(
-      path.join(bundleDir, 'python-packages/demo_package-1.0-py3-none-any.whl'),
+      path.join(bundleDir, wheelRelativePath),
       'locally corrupted but not needed for an existing target'
     );
     const requests: { method: string | undefined; url: string | undefined }[] = [];
@@ -290,7 +288,7 @@ describe('publishPythonBundle', () => {
   });
 
   it('plans without credentials or reading wheel files', async () => {
-    await fs.remove(path.join(bundleDir, 'python-packages'));
+    await fs.remove(path.join(bundleDir, 'python/artifacts/wheels'));
     const report = await publishPythonBundle(manifest(), {
       bundleDir,
       dryRun: true,

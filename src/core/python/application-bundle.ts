@@ -116,7 +116,6 @@ export type PythonApplicationDownloadStatus =
   | 'downloaded'
   | 'error'
   | 'existing'
-  | 'reused'
   | 'would-download';
 
 export interface PythonApplicationDownloadAction {
@@ -138,7 +137,6 @@ export interface PythonApplicationDownloadReport {
   generatedAt: string;
   incrementalBytes: number;
   planned: number;
-  reused: number;
   schemaVersion: 1;
   totalBytes: number;
 }
@@ -313,37 +311,6 @@ async function downloadArtifact(
     validateFile,
   });
   return result.size;
-}
-
-async function reuseLegacyWheel(
-  bundleDir: string,
-  artifact: PlannedArtifact['artifact'],
-  targetPath: string,
-  onProgress?: (bytes: number) => void
-): Promise<boolean> {
-  const legacyPath = path.join(bundleDir, 'python-packages', artifact.filename);
-  if (!(await fs.pathExists(legacyPath))) {
-    return false;
-  }
-  const actual = await hashFile(legacyPath, onProgress);
-  if (
-    actual.sha256 !== artifact.sha256 ||
-    (artifact.expectedSize !== undefined && actual.size !== artifact.expectedSize)
-  ) {
-    return false;
-  }
-  await fs.ensureDir(path.dirname(targetPath));
-  await fs.remove(targetPath);
-  try {
-    await fs.link(legacyPath, targetPath);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'EXDEV' && code !== 'EPERM' && code !== 'EACCES') {
-      throw error;
-    }
-    await fs.copyFile(legacyPath, targetPath);
-  }
-  return true;
 }
 
 function addArtifact(
@@ -629,13 +596,6 @@ async function createPythonSeedCompatibilityManifest(
   const selectedPlans = new Map(
     selectedTargets.map(({ activePlan, targetId }) => [targetId, activePlan.plan])
   );
-  const previousApplicationRoots = new Set(
-    (existing?.packages ?? [])
-      .filter((pkg) =>
-        pkg.files.some((file) => file.file.startsWith(`${pythonWheelArtifactsDirectory}/`))
-      )
-      .map((pkg) => `${pkg.name}==${pkg.version}`)
-  );
   const previousApplicationFiles = new Map(
     (existing?.packages ?? []).flatMap((pkg) =>
       pkg.files
@@ -644,14 +604,6 @@ async function createPythonSeedCompatibilityManifest(
     )
   );
   const packages = new Map<string, PythonSeedPackage>();
-  for (const pkg of existing?.packages ?? []) {
-    const legacyFiles = pkg.files.filter(
-      (file) => !file.file.startsWith(`${pythonWheelArtifactsDirectory}/`)
-    );
-    if (legacyFiles.length > 0) {
-      packages.set(`${pkg.name}\0${pkg.version}`, { ...pkg, files: legacyFiles });
-    }
-  }
   for (const artifact of index.artifacts) {
     if (!artifact.package) {
       throw new Error(`Python wheel artifact has no package identity: ${artifact.id}`);
@@ -708,9 +660,7 @@ async function createPythonSeedCompatibilityManifest(
       });
     }
   }
-  const targetEnvironments = new Map<string, PythonTargetEnvironmentConfig>(
-    (existing?.targetEnvironments ?? []).map((environment) => [environment.name, environment])
-  );
+  const targetEnvironments = new Map<string, PythonTargetEnvironmentConfig>();
   for (const application of index.applications) {
     const selectedPlan = selectedPlans.get(application.targetId);
     for (const branch of application.branchSizes) {
@@ -724,22 +674,8 @@ async function createPythonSeedCompatibilityManifest(
       (left, right) =>
         left.name.localeCompare(right.name) || left.version.localeCompare(right.version)
     ),
-    roots: [
-      ...new Set([
-        ...(existing?.roots ?? []),
-        ...index.applications.map(
-          (application) => `${application.application.name}==${application.application.version}`
-        ),
-      ]),
-    ]
-      .filter(
-        (root) =>
-          !previousApplicationRoots.has(root) ||
-          index.applications.some(
-            (application) =>
-              root === `${application.application.name}==${application.application.version}`
-          )
-      )
+    roots: index.applications
+      .map((application) => `${application.application.name}==${application.application.version}`)
       .sort(),
     schemaVersion: 1,
     sourceIndex:
@@ -910,14 +846,6 @@ export async function downloadPythonApplicationPlans(
         if (matches) {
           status = 'existing';
           size = existing.size;
-        } else if (
-          !dryRun &&
-          (await reuseLegacyWheel(bundleDir, planned.artifact, targetPath, (bytes) => {
-            reportBytes(`reuse ${planned.artifact.filename}`, bytes, planned.artifact.expectedSize);
-          }))
-        ) {
-          status = 'reused';
-          size = (await fs.stat(targetPath)).size;
         } else if (dryRun) {
           status = 'would-download';
           size = planned.artifact.expectedSize ?? 0;
@@ -1096,7 +1024,6 @@ export async function downloadPythonApplicationPlans(
       .filter((artifact) => incrementalIds.has(artifact.id))
       .reduce((total, artifact) => total + artifact.size, 0),
     planned: actions.filter((action) => action.status === 'would-download').length,
-    reused: actions.filter((action) => action.status === 'reused').length,
     schemaVersion: 1,
     totalBytes: [...downloadedArtifacts.values()].reduce(
       (total, artifact) => total + artifact.size,

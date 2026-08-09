@@ -16,8 +16,8 @@ application repository coverage. See [Python Support](python.md).
 - Configuration replacement is atomic.
 - The original configuration is backed up before the first write.
 - Old persisted shapes belong in migration code, not new business logic.
-- Target behavior and file format lifetime are separate decisions. Migrating a legacy
-  target does not remove support for that target.
+- Removed target types fail with an actionable error instead of being silently
+  converted or discarded.
 
 ## Registered migrations
 
@@ -27,13 +27,14 @@ application repository coverage. See [Python Support](python.md).
 | `0002-python-application-publication` | early schema v2 without owners | legacy publication defaults     | `airgap-sync.json.before-0002-python-publication.backup`         |
 | `0003-python-publication-profile`     | legacy Python owner strings    | typed Gitea publication profile | `airgap-sync.json.before-0003-python-publication-profile.backup` |
 
-`0001` maps legacy Python configuration into `python.legacySeed`, preserves all
-targets and common settings, and installs maintained Python application recipes.
-Application coverage remains empty because exact legacy environments do not imply a
-broad Windows/Linux application policy.
+`0001` preserves Git/npm targets and common settings, carries the old Python source
+index and publication owner into the application settings, and installs maintained
+Python application recipes. Exact legacy environments and resolver mode are discarded
+because they do not imply application coverage. Removed `pypi` and `python-wheel`
+targets are rejected with an actionable error rather than silently migrated.
 
-`0002` repairs early schema-v2 workspaces that could omit the legacy Python owner
-strings so that `0003` has an explicit input.
+`0002` repairs early schema-v2 workspaces that could omit Python publication owners so
+that `0003` has an explicit input.
 
 `0003` maps the untouched `pypi`/`python-apps` pair to one managed public
 `airgap-packages` organization and removes the legacy strings. Custom legacy names

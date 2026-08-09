@@ -305,6 +305,11 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
   const pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
+  if (pythonManifest && !pythonApplicationIndex) {
+    throw new Error(
+      'Refusing Python publication: legacy Python seed bundles are no longer supported'
+    );
+  }
   if (pythonApplicationIndex && !pythonManifest) {
     throw new Error(
       'Refusing Python publication: python application index has no python-seed-manifest.json'

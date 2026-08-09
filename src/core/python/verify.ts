@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import * as fs from '../fs.js';
 import type { VerifyCheck } from '../../types.js';
-import type { PythonFetchReport, PythonSeedManifest } from './bundle.js';
+import type { PythonSeedManifest } from './bundle.js';
 import { normalizePackageName } from './names.js';
 import { compareVersions } from './pep440.js';
 import { parseWheelFilename } from './wheels.js';
@@ -18,11 +18,10 @@ function check(
 
 function safeBundleFile(bundleDir: string, relativeFile: string): string | undefined {
   const normalized = path.posix.normalize(relativeFile.replace(/\\/g, '/'));
-  const isLegacyFile = normalized.startsWith('python-packages/');
   const v2Match = /^python\/artifacts\/wheels\/([a-f0-9]{64})\/([^/]+\.whl)$/u.exec(normalized);
   if (
     normalized !== relativeFile ||
-    (!isLegacyFile && !v2Match) ||
+    !v2Match ||
     path.posix.isAbsolute(normalized) ||
     normalized.includes('\0')
   ) {
@@ -43,7 +42,6 @@ async function sha256(filePath: string): Promise<string> {
 
 export async function verifyPythonBundle(options: {
   bundleDir: string;
-  fetchReport?: PythonFetchReport;
   manifest: PythonSeedManifest;
 }): Promise<VerifyCheck[]> {
   const issues: { error: string; file?: string; package?: string }[] = [];
@@ -160,38 +158,5 @@ export async function verifyPythonBundle(options: {
         )
   );
 
-  if (options.fetchReport) {
-    if (options.fetchReport.errors.length > 0) {
-      checks.push(
-        check(
-          'python-fetch-report',
-          'error',
-          `${String(options.fetchReport.errors.length)} Python fetch errors`,
-          {
-            errors: options.fetchReport.errors,
-          }
-        )
-      );
-    } else if (options.fetchReport.unsupported.length > 0) {
-      checks.push(
-        check(
-          'python-fetch-report',
-          'warning',
-          `${String(options.fetchReport.unsupported.length)} unsupported Python inputs`,
-          { unsupported: options.fetchReport.unsupported }
-        )
-      );
-    } else {
-      checks.push(
-        check(
-          'python-fetch-report',
-          'ok',
-          'python-fetch-report.json has no errors or unsupported inputs'
-        )
-      );
-    }
-  } else {
-    checks.push(check('python-fetch-report', 'warning', 'python-fetch-report.json is missing'));
-  }
   return checks;
 }

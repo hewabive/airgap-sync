@@ -181,7 +181,6 @@ export function downloadReportSucceeded(report: CollectReport): boolean {
     report.fixedPoint &&
     report.repositoryUpdate.errors.length === 0 &&
     report.fetch.errors.length === 0 &&
-    (report.python?.errors.length ?? 0) === 0 &&
     (report.pythonApplications?.errors.length ?? 0) === 0 &&
     (report.cpythonDistributions?.errors.length ?? 0) === 0 &&
     report.gitSources.skipped.length === 0 &&
@@ -633,10 +632,6 @@ export async function writeDownloadRunHistory(
     copyIfExists(
       path.join(options.bundleDir, 'python-seed-manifest.json'),
       path.join(targetDir, 'python-seed-manifest.after.json')
-    ),
-    copyIfExists(
-      path.join(options.bundleDir, 'python-fetch-report.json'),
-      path.join(targetDir, 'python-fetch-report.json')
     ),
     copyIfExists(
       path.join(options.bundleDir, pythonApplicationIndexPath),

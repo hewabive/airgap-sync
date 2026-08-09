@@ -40,17 +40,6 @@ export function parseLockedDependencies(value: unknown): PythonLockedDependency[
   });
 }
 
-export function parseDependencyGroups(value: unknown): Record<string, PythonLockedDependency[]> {
-  if (!isRecord(value)) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, dependencies]) => [name, parseLockedDependencies(dependencies)])
-  );
-}
-
 function filenameFromUrl(url: string): string {
   const parsed = new URL(url);
   const filename = decodeURIComponent(path.posix.basename(parsed.pathname));

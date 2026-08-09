@@ -9,7 +9,6 @@ import type {
   CollectReport,
   GitSourcesManifest,
 } from '../types.js';
-import { readPythonSeedManifest } from './python/bundle.js';
 import {
   readPythonApplicationBundleIndex,
   type PythonApplicationBundleIndex,
@@ -48,7 +47,6 @@ function successfulCollectReport(report: CollectReport): boolean {
     !report.maxIterationsReached &&
     report.repositoryUpdate.errors.length === 0 &&
     report.fetch.errors.length === 0 &&
-    (report.python?.errors.length ?? 0) === 0 &&
     (report.pythonApplications?.errors.length ?? 0) === 0 &&
     (report.cpythonDistributions?.errors.length ?? 0) === 0 &&
     report.gitSources.skipped.length === 0 &&
@@ -263,14 +261,6 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     path.join(bundleDir, 'collect-report.json'),
     'collect-report.json'
   );
-  const pythonManifestPath = path.join(bundleDir, 'python-seed-manifest.json');
-  const pythonManifest = (await fs.pathExists(pythonManifestPath))
-    ? await readPythonSeedManifest(bundleDir).catch((error: unknown) => {
-        throw new Error(
-          `python-seed-manifest.json is missing or unreadable: ${(error as Error).message}`
-        );
-      })
-    : undefined;
   let pythonApplicationIndex: PythonApplicationBundleIndex | undefined;
   try {
     pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
@@ -297,7 +287,7 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
     )
   );
   const packageFiles = await listPackageFiles(bundleDir);
-  const pythonPackageFiles = pythonManifest ? await listPythonPackageFiles(bundleDir) : [];
+  const pythonPackageFiles = await listPythonPackageFiles(bundleDir);
   const pythonApplicationArtifactFiles = await listFilesRecursively(bundleDir, 'python/artifacts');
   const cpythonDistributionFiles = await listFilesRecursively(
     bundleDir,
@@ -308,14 +298,7 @@ export async function pruneBundle(options: PruneBundleOptions): Promise<BundlePr
   const pythonApplicationPlanDirectories = await listPythonApplicationPlanDirectories(bundleDir);
   const gitMirrors = await listGitMirrorDirs(bundleDir);
   const stalePackageFiles = packageFiles.filter((file) => !livePackageFiles.has(file));
-  const livePythonPackageFiles = new Set(
-    pythonManifest?.packages.flatMap((pkg) =>
-      pkg.files.map((file) => ensureRelativePath(file.file, 'Python manifest package file'))
-    ) ?? []
-  );
-  const stalePythonPackageFiles = pythonPackageFiles.filter(
-    (file) => !livePythonPackageFiles.has(file)
-  );
+  const stalePythonPackageFiles = pythonPackageFiles;
   const livePythonApplicationArtifacts = new Set(
     pythonApplicationIndex?.artifacts.map((artifact) =>
       ensureRelativePath(artifact.file, 'Python application artifact file')

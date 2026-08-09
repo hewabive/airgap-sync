@@ -458,8 +458,14 @@ describe('verifyBundle', () => {
     await writeValidBundle();
     const wheel = Buffer.from('verified wheel');
     const wheelHash = createHash('sha256').update(wheel).digest('hex');
-    await fs.ensureDir(path.join(bundleDir, 'python-packages'));
-    await fs.writeFile(path.join(bundleDir, 'python-packages/demo-1.0-py3-none-any.whl'), wheel);
+    const wheelPath = path.join(
+      bundleDir,
+      'python/artifacts/wheels',
+      wheelHash,
+      'demo-1.0-py3-none-any.whl'
+    );
+    await fs.ensureDir(path.dirname(wheelPath));
+    await fs.writeFile(wheelPath, wheel);
     await fs.writeJson(
       path.join(bundleDir, 'python-seed-manifest.json'),
       {
@@ -478,7 +484,7 @@ describe('verifyBundle', () => {
                   version: '1.0',
                 },
                 environments: ['linux'],
-                file: 'python-packages/demo-1.0-py3-none-any.whl',
+                file: `python/artifacts/wheels/${wheelHash}/demo-1.0-py3-none-any.whl`,
                 filename: 'demo-1.0-py3-none-any.whl',
                 kind: 'wheel',
                 sha256: wheelHash,
@@ -505,12 +511,6 @@ describe('verifyBundle', () => {
       },
       { spaces: 2 }
     );
-    await fs.writeJson(
-      path.join(bundleDir, 'python-fetch-report.json'),
-      { actions: [], errors: [], unsupported: [] },
-      { spaces: 2 }
-    );
-
     const valid = await verifyBundle({ bundleDir });
     expect(valid.checks).toEqual(
       expect.arrayContaining([
@@ -520,10 +520,7 @@ describe('verifyBundle', () => {
       ])
     );
 
-    await fs.writeFile(
-      path.join(bundleDir, 'python-packages/demo-1.0-py3-none-any.whl'),
-      'changed'
-    );
+    await fs.writeFile(wheelPath, 'changed');
     const corrupt = await verifyBundle({ bundleDir });
     expect(corrupt.ok).toBe(false);
     expect(corrupt.checks).toEqual(

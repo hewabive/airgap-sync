@@ -42,34 +42,11 @@ import type { RegistryClient } from './registry.js';
 import { type GitOutputCommandRunner, updateRepositories } from './repos.js';
 import type { RepositoryUpdateProgressEvent } from './repos.js';
 import { readStableTagResolutionIndex } from './tag-resolution.js';
-import { discoverPythonInputs, emptyPythonDiscoveredInputs } from './python/discovery.js';
-import type {
-  PythonDiscoveredInputs,
-  PythonLockInput,
-  PythonRequirementInput,
-  PythonRootWheelInput,
-  UnsupportedPythonInput,
-} from './python/input-types.js';
-import type { PythonIndexClient } from './python/index-client.js';
-import type { PythonTargetEnvironmentConfig } from './python/environments.js';
-import { readPythonMetadataCache, writePythonMetadataCache } from './python/metadata.js';
-import { resolvePython } from './python/resolver.js';
-import { fetchPythonBundle } from './python/fetch.js';
-import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
-import { preparePythonRootWheels, RootWheelPythonIndex } from './python/root-wheels.js';
-import type { PythonResolutionMode } from './python/resolution-policy.js';
-import {
-  scanPythonBundleSecurity,
-  writePythonSecurityReport,
-  type PythonAdvisoryClient,
-  type PythonSecurityPolicy,
-} from './python/security.js';
 import { scanNpmBundleSecurity, writeNpmSecurityReport } from './security.js';
 import type { NpmSecurityPolicy } from '../types.js';
 import { TarballInspectionCache } from './tarball.js';
 
 export interface CollectBundleOptions {
-  allowApproximatePython?: boolean;
   concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
@@ -86,17 +63,6 @@ export interface CollectBundleOptions {
   minReleaseAgeDays?: number;
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
-  initialPythonRequirements?: PythonRequirementInput[];
-  initialPythonRootWheels?: PythonRootWheelInput[];
-  pythonIndex?: PythonIndexClient;
-  pythonResolutionMode?: PythonResolutionMode;
-  pythonSourceIndex?: string;
-  pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
-  pythonTimeoutMs?: number;
-  pythonSecurity?: {
-    advisoryClient?: PythonAdvisoryClient;
-    policy?: Partial<PythonSecurityPolicy>;
-  };
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   registryUrl: string;
@@ -121,7 +87,6 @@ export type CollectProgressPhase =
   | 'npm-fetch'
   | 'git-fetch'
   | 'git-manifest-scan'
-  | 'python-fetch'
   | 'python-security-scan'
   | 'security-scan'
   | 'bundle-write';
@@ -180,73 +145,6 @@ function unsupportedKey(requirement: UnsupportedRootPackageRequirement): string 
   return [requirement.requiredBy, requirement.raw, requirement.type, requirement.reason].join('\0');
 }
 
-function pythonRequirementKey(input: PythonRequirementInput): string {
-  return [
-    input.constraint ? 'constraint' : 'requirement',
-    input.requirement.normalizedName,
-    input.requirement.specifier,
-    input.requirement.marker ?? '',
-    input.sourcePath,
-    String(input.line),
-    input.pythonResolutionMode ?? '',
-  ].join('\0');
-}
-
-function pythonLockfileKey(input: PythonLockInput): string {
-  return [input.format, input.sourcePath].join('\0');
-}
-
-function unsupportedPythonKey(input: UnsupportedPythonInput): string {
-  return [input.sourcePath, String(input.line ?? ''), input.type, input.raw].join('\0');
-}
-
-function mergePythonInputs(
-  target: PythonDiscoveredInputs,
-  source: PythonDiscoveredInputs,
-  seen: {
-    lockfiles: Set<string>;
-    requirements: Set<string>;
-    unsupported: Set<string>;
-  }
-): void {
-  addUnique(target.lockfiles, seen.lockfiles, source.lockfiles, pythonLockfileKey);
-  addUnique(target.requirements, seen.requirements, source.requirements, pythonRequirementKey);
-  addUnique(target.unsupported, seen.unsupported, source.unsupported, unsupportedPythonKey);
-  target.lockfilePaths = [...new Set([...target.lockfilePaths, ...source.lockfilePaths])].sort();
-  target.requirementPaths = [
-    ...new Set([...target.requirementPaths, ...source.requirementPaths]),
-  ].sort();
-  target.pyprojectWithoutLock = [
-    ...new Set([...target.pyprojectWithoutLock, ...source.pyprojectWithoutLock]),
-  ].sort();
-}
-
-function scopeGitPythonInputs(
-  inputs: PythonDiscoveredInputs,
-  source: GitSource
-): PythonDiscoveredInputs {
-  const scopePath = (sourcePath: string): string =>
-    path.posix.join('git-sources', source.id, sourcePath.replace(/\\/g, '/'));
-  return {
-    lockfiles: inputs.lockfiles.map((lockfile) => ({
-      ...lockfile,
-      sourcePath: scopePath(lockfile.sourcePath),
-    })),
-    lockfilePaths: inputs.lockfilePaths.map(scopePath),
-    pyprojectWithoutLock: inputs.pyprojectWithoutLock.map(scopePath),
-    requirements: inputs.requirements.map((requirement) => ({
-      ...requirement,
-      ...(source.pythonResolutionMode ? { pythonResolutionMode: source.pythonResolutionMode } : {}),
-      sourcePath: scopePath(requirement.sourcePath),
-    })),
-    requirementPaths: inputs.requirementPaths.map(scopePath),
-    unsupported: inputs.unsupported.map((unsupported) => ({
-      ...unsupported,
-      sourcePath: scopePath(unsupported.sourcePath),
-    })),
-  };
-}
-
 function addUnique<T>(
   items: T[],
   seen: Set<string>,
@@ -281,15 +179,8 @@ function mergeRetainedGitSource(current: GitSource, retained: GitSource): GitSou
       requirement,
     ])
   );
-  const pythonResolutionMode =
-    current.pythonResolutionMode === 'locked-only' ||
-    retained.pythonResolutionMode === 'locked-only'
-      ? 'locked-only'
-      : (current.pythonResolutionMode ?? retained.pythonResolutionMode);
-
   return {
     ...preferred,
-    ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
     requirements: [...requirements.values()].sort((left, right) =>
       gitRequirementKey(left).localeCompare(gitRequirementKey(right))
     ),
@@ -397,7 +288,6 @@ async function scanGitSourceManifests(options: {
   concurrency?: number;
   includeDev: boolean;
   includePeer: boolean;
-  includePython: boolean;
   runGitOutputCommand?: GitOutputCommandRunner;
   scannedSourceIds: Set<string>;
   sources: GitSource[];
@@ -407,7 +297,6 @@ async function scanGitSourceManifests(options: {
   scanned: number;
   stableRequiredBy: Set<string>;
   state: RequirementState;
-  python: PythonDiscoveredInputs;
 }> {
   const errors: CollectGitManifestScanError[] = [];
   const stableRequiredBy = new Set<string>();
@@ -417,12 +306,6 @@ async function scanGitSourceManifests(options: {
     unsupported: [],
   };
   let scanned = 0;
-  const python = emptyPythonDiscoveredInputs();
-  const seenPython = {
-    lockfiles: new Set<string>(),
-    requirements: new Set<string>(),
-    unsupported: new Set<string>(),
-  };
 
   const sources = options.sources.filter((source) => !options.scannedSourceIds.has(source.id));
   const perSourceConcurrency = sources.length > 1 ? 1 : options.concurrency;
@@ -444,7 +327,6 @@ async function scanGitSourceManifests(options: {
         ...(perSourceConcurrency === undefined ? {} : { concurrency: perSourceConcurrency }),
         includeDev: options.includeDev,
         includePeer: options.includePeer,
-        includePython: options.includePython,
         mirrorPath,
         ...(options.runGitOutputCommand ? { runner: options.runGitOutputCommand } : {}),
         source,
@@ -482,7 +364,6 @@ async function scanGitSourceManifests(options: {
       state.requirements.push(...result.requirements);
       state.gitRequirements.push(...result.gitRequirements);
       state.unsupported.push(...result.unsupported);
-      mergePythonInputs(python, scopeGitPythonInputs(result.python, source), seenPython);
     } catch (error) {
       errors.push({
         error: (error as Error).message,
@@ -492,7 +373,7 @@ async function scanGitSourceManifests(options: {
     }
   }
 
-  return { errors, python, scanned, stableRequiredBy, state };
+  return { errors, scanned, stableRequiredBy, state };
 }
 
 export async function collectBundle(options: CollectBundleOptions): Promise<CollectReport> {
@@ -506,9 +387,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const includePeer = options.includePeer === true;
   const maxIterations = options.maxIterations ?? 10;
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
-  const pythonEnabled = Boolean(
-    options.pythonIndex && options.pythonSourceIndex && options.pythonTargetEnvironments?.length
-  );
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
   const metadataCache = await readRegistryMetadataCache(outputDir);
   const stableRequiredBy = new Set<string>();
@@ -578,25 +456,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     status: 'done',
   });
   timings.lockfileScanMs = elapsedMs(lockfileScanStart);
-  const pythonInputs = emptyPythonDiscoveredInputs();
-  const seenPython = {
-    lockfiles: new Set<string>(),
-    requirements: new Set<string>(),
-    unsupported: new Set<string>(),
-  };
-  if (pythonEnabled && root) {
-    mergePythonInputs(pythonInputs, await discoverPythonInputs(root, { includeDev }), seenPython);
-  }
-  if (pythonEnabled && options.initialPythonRequirements) {
-    mergePythonInputs(
-      pythonInputs,
-      {
-        ...emptyPythonDiscoveredInputs(),
-        requirements: options.initialPythonRequirements,
-      },
-      seenPython
-    );
-  }
   const state: RequirementState = {
     gitRequirements: [],
     requirements: [],
@@ -788,7 +647,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
         includeDev,
         includePeer,
-        includePython: pythonEnabled,
         ...(options.runGitOutputCommand
           ? { runGitOutputCommand: options.runGitOutputCommand }
           : {}),
@@ -813,7 +671,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         gitRequirementKey
       );
       addUnique(state.unsupported, seenUnsupported, scan.state.unsupported, unsupportedKey);
-      mergePythonInputs(pythonInputs, scan.python, seenPython);
       gitManifestScanMs = elapsedMs(gitManifestScanStart);
       timings.gitManifestScanMs += gitManifestScanMs;
       options.onProgress?.({
@@ -867,82 +724,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     iterations.at(-1)?.addedUnsupported === 0;
   const reportGitFetch = aggregateGitFetchReports(gitFetchReports) ?? gitFetch;
   const reportFetch = aggregateFetchReports(fetchReports) ?? fetch;
-  let pythonResult: Awaited<ReturnType<typeof fetchPythonBundle>> | undefined;
-  let pythonMetadataCache: Awaited<ReturnType<typeof readPythonMetadataCache>> | undefined;
-  if (
-    pythonEnabled &&
-    options.pythonIndex &&
-    options.pythonSourceIndex &&
-    options.pythonTargetEnvironments
-  ) {
-    options.onProgress?.({
-      detail: `${String(pythonInputs.requirements.length)} requirements, ${String(options.initialPythonRootWheels?.length ?? 0)} root wheels, ${String(pythonInputs.lockfiles.length)} lockfiles`,
-      phase: 'python-fetch',
-      status: 'start',
-    });
-    pythonMetadataCache = await readPythonMetadataCache(outputDir, options.pythonSourceIndex);
-    const disallowedRootWheel = options.initialPythonRootWheels?.find(
-      (input) =>
-        options.allowApproximatePython !== true &&
-        (input.pythonResolutionMode ?? options.pythonResolutionMode ?? 'locked-only') !==
-          'approximate'
-    );
-    if (disallowedRootWheel) {
-      throw new Error(
-        `Python root wheel target ${disallowedRootWheel.sourcePath}:${String(
-          disallowedRootWheel.line
-        )} requires approximate resolution for transitive dependencies`
-      );
-    }
-    const preparedRootWheels = await preparePythonRootWheels({
-      bundleDir: outputDir,
-      dryRun,
-      inputs: options.initialPythonRootWheels ?? [],
-      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-    });
-    const pythonRequirements = [
-      ...pythonInputs.requirements,
-      ...preparedRootWheels.map((rootWheel) => rootWheel.requirement),
-    ];
-    const pythonIndex =
-      preparedRootWheels.length > 0
-        ? new RootWheelPythonIndex(options.pythonIndex, preparedRootWheels)
-        : options.pythonIndex;
-    const pythonResolution = await resolvePython({
-      allowApproximate: options.allowApproximatePython === true,
-      cache: pythonMetadataCache,
-      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
-      defaultResolutionMode: options.pythonResolutionMode ?? 'locked-only',
-      environments: options.pythonTargetEnvironments,
-      includeDev,
-      index: pythonIndex,
-      lockfiles: pythonInputs.lockfiles,
-      requirements: pythonRequirements,
-    });
-    pythonResult = await fetchPythonBundle({
-      bundleDir: outputDir,
-      cache: pythonMetadataCache,
-      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
-      dryRun,
-      generatedAt,
-      resolution: pythonResolution,
-      ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-      roots: pythonRequirements
-        .filter((input) => !input.constraint)
-        .map((input) => input.requirement.raw),
-      sourceIndex: options.pythonSourceIndex,
-      targetEnvironments: options.pythonTargetEnvironments,
-      ...(options.pythonTimeoutMs ? { timeoutMs: options.pythonTimeoutMs } : {}),
-      unsupported: pythonInputs.unsupported,
-    });
-    reportFetch.python = pythonResult.report;
-    options.onProgress?.({
-      current: pythonResult.report.resolvedFiles,
-      phase: 'python-fetch',
-      status: pythonResult.report.errors.length > 0 ? 'error' : 'done',
-      total: pythonResult.report.resolvedFiles,
-    });
-  }
   const activeGitSources = {
     ...gitSources,
     sources: mergeRetainedGitSources(gitSources.sources, options.retainedGitSources),
@@ -952,7 +733,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     repositoryUpdate.errors.length === 0 &&
     reportFetch.errors.length === 0 &&
     reportGitFetch.errors.length === 0 &&
-    (pythonResult?.report.errors.length ?? 0) === 0 &&
     scanErrors.length === 0 &&
     activeGitSources.skipped.length === 0 &&
     !maxIterationsReached;
@@ -974,7 +754,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
     root: root ?? outputDir,
     timings,
     wroteBundle,
-    ...(pythonResult ? { python: pythonResult.report } : {}),
   };
 
   if (!dryRun) {
@@ -1016,38 +795,8 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
           report.wroteBundle = false;
         }
       }
-      if (pythonResult?.manifest && options.pythonSecurity) {
-        options.onProgress?.({ phase: 'python-security-scan', status: 'start' });
-        const pythonSecurity = await scanPythonBundleSecurity({
-          ...(options.pythonSecurity.advisoryClient
-            ? { advisoryClient: options.pythonSecurity.advisoryClient }
-            : {}),
-          generatedAt,
-          manifest: pythonResult.manifest,
-          ...(options.pythonSecurity.policy ? { policy: options.pythonSecurity.policy } : {}),
-        });
-        report.pythonSecurity = pythonSecurity;
-        await writePythonSecurityReport(outputDir, pythonSecurity, {
-          failed: !pythonSecurity.ok,
-        });
-        options.onProgress?.({
-          current: pythonSecurity.packageCount,
-          phase: 'python-security-scan',
-          status: pythonSecurity.ok ? 'done' : 'error',
-          total: pythonSecurity.packageCount,
-        });
-        if (!pythonSecurity.ok) {
-          wroteBundle = false;
-          report.wroteBundle = false;
-        }
-      }
       if (wroteBundle) {
         await writeBundleDocuments(outputDir, documents);
-      }
-      if (pythonResult?.manifest) {
-        if (wroteBundle) {
-          await writePythonSeedManifest(outputDir, pythonResult.manifest);
-        }
       }
       timings.bundleDocumentsMs = elapsedMs(bundleDocumentsStart);
       options.onProgress?.({
@@ -1067,22 +816,12 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       });
       reportFetch.timings.metadataCachePersisted = true;
     }
-    if (pythonMetadataCache && options.pythonSourceIndex && wroteBundle) {
-      await writePythonMetadataCache(outputDir, pythonMetadataCache, {
-        createdAt: generatedAt,
-        sourceIndex: options.pythonSourceIndex,
-      });
-    }
-
     const reportWriteStart = performance.now();
     await writeFetchReport(outputDir, reportFetch);
     if (wroteBundle && options.deferGitSourcesActivation !== true) {
       await writeGitSourcesManifest(outputDir, activeGitSources);
     }
     await writeGitFetchReport(outputDir, reportGitFetch);
-    if (pythonResult) {
-      await writePythonFetchReport(outputDir, pythonResult.report);
-    }
     timings.reportWriteMs = elapsedMs(reportWriteStart);
     timings.totalMs = elapsedMs(totalStart);
     await writeCollectReport(outputDir, report);

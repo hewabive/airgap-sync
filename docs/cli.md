@@ -50,16 +50,8 @@ airgap-sync target add cpython-distributions \
   --latest 3 \
   --window-days 365
 
-# Advanced/legacy package seeding:
-airgap-sync target add pypi 'requests==2.32.4' \
-  --python-resolution-mode approximate
-airgap-sync target add python-wheel \
-  'https://downloads.example.test/app-1.0.0-cp313-abi3-manylinux_2_34_x86_64.whl' \
-  --sha256 <64-hex-digest> \
-  --python-resolution-mode approximate
 airgap-sync target list
 airgap-sync target edit <index> --branch release
-airgap-sync target edit <index> --python-resolution-mode inherit
 airgap-sync target edit <index> \
   --include-version 0.25.1 --include-version latest
 airgap-sync target edit <index> \
@@ -99,12 +91,6 @@ Only one `python-app` target may own a package/coverage combination. Use `target
 version selectors of an existing target; this invalidates its current planning evidence
 and causes the next plan/download to validate every selector together.
 
-Raw PyPI targets use PEP 508 requirement syntax and require an exact legacy target
-environment. Git, PyPI, and exact root-wheel targets may set
-`--python-resolution-mode locked-only|approximate`. With no target override they inherit
-the workspace default. `target edit <index> --python-resolution-mode inherit` removes
-an existing override.
-
 `cpython-distributions` is independent of `python-app`. It follows stable CPython 3
 minors from `--from-minor` through the newest stable minor visible in
 `python-build-standalone`, retaining the latest `--latest` patches independently for
@@ -118,14 +104,13 @@ adding a new one. Supplying an option for the wrong type is an error.
 
 | Target type             | Editable settings                                                    |
 | ----------------------- | -------------------------------------------------------------------- |
-| `git`                   | branch; target-specific Python resolution mode                       |
+| `git`                   | branch                                                               |
 | `npm`                   | none                                                                 |
 | `python-app`            | exact/`latest` application version selectors                         |
 | `cpython-distributions` | lower minor, platform set, latest-patch depth, provider-build window |
-| `pypi`, `python-wheel`  | target-specific Python resolution mode                               |
 
-`target set-python-app-versions` and `target set-python-resolution` remain deprecated
-compatibility aliases. New scripts should use `target edit`.
+`target set-python-app-versions` remains a deprecated compatibility alias. New scripts
+should use `target edit`.
 
 ## menu
 
@@ -137,8 +122,8 @@ airgap-sync menu /media/USB/airgap-sync
 
 Opens an interactive prompt menu for common workspace actions. The top level keeps the
 regular workflow compact: targets, download, publish, install verification, diagnostics,
-and settings. Target management, Python applications, Advanced/Legacy seeding, bundle
-checks, bundle info, and saved credentials live in submenus.
+and settings. Target management, Python applications, bundle checks, bundle info, and
+saved credentials live in submenus.
 
 The Targets submenu can add CPython distributions and edit any selected target through
 the same type-aware flow. It prompts only for fields supported by that type. When the
@@ -155,9 +140,8 @@ for comma-separated exact application versions and/or `latest`, plus optional Py
 minor versions. Initialization does not ask for distributions, wheel tags, CPU/GPU
 inventory, or a resolver.
 
-`Targets` → `Add Python application` is the normal flow. Raw PyPI targets, exact Python
-environments, and resolution modes are under Advanced/Legacy. Python application
-settings expose the source index, Gitea owners, and broad default coverage.
+`Targets` → `Add Python application` is the Python flow. Python application settings
+expose the source index, Gitea owners, and broad default coverage.
 Default answers live under `defaults.download`, `defaults.publish`, and
 `defaults.verifyInstall`. Boolean defaults can be `yes`, `no`, or `ask`; `ask` keeps
 the prompt for that action. `defaults.download.latestPolicy` is either `bundled` or
@@ -327,32 +311,11 @@ file-fingerprint-scoped cache reuses that inspection across fixed-point iteratio
 the security scan, so an unchanged tarball is normally read once per download command,
 including when the bundle is on removable media. The cache is not persisted.
 
-With an explicit root argument, keeps the lower-level behavior and scans that directory
-directly.
-
-Legacy Python seeding is strict and lock-first by default. `uv.lock` and `pylock.toml` are
-consumed exactly; a `requirements*.txt` beside a lock from the same project is treated
-as covered and is not resolved a second time. An uncovered requirements file or direct
-PyPI target is reported as an error before its dependency closure is guessed.
-
-The effective mode is selected in this order:
-
-1. `download --allow-approximate-python` overrides the whole run.
-2. A Git, PyPI, or exact root-wheel target's `pythonResolutionMode` overrides that
-   target.
-3. The top-level `pythonResolutionMode` in `airgap-sync.json` is the workspace default.
-
-Use `approximate` only when the simplified highest-compatible/no-backtracking resolver
-is an accepted tradeoff. The resulting fetch report remains marked
-`approximate: true`.
-
-`target add python-wheel` handles an exact root wheel that is not listed by the source
-index. SHA-256 is mandatory. During download the wheel
-is streamed into the bundle, hashed, and its embedded `METADATA` is validated against
-the filename. That exact root is overlaid on the configured Python index; its
-`Requires-Dist` edges are then resolved and the realized package/file/hash closure is
-written to `python-seed-manifest.json`. Because dependency selection still uses the
-no-backtracking resolver, this target requires the same explicit approximate opt-in.
+With an explicit root argument, the command scans npm manifests and lockfiles in that
+directory. It does not discover Python requirements or lockfiles. Raw `pypi` and
+`python-wheel` targets, repository Python scanning, and
+`--allow-approximate-python` were removed with legacy Python seeding. Use `python-app`
+for application coverage or `cpython-distributions` for portable interpreters.
 Set it on the wheel target when other targets should remain lock-only.
 
 `--latest-policy bundled` is the default. It does not store computed `latest` entries
@@ -422,7 +385,7 @@ airgap-sync bundle prune ./airgap-bundle
 ```
 
 Removes stale objects from the local transfer bundle: unreferenced `packages/*.tgz`,
-`python-packages/*.whl`, Python application artifacts under `python/artifacts/`,
+retired `python-packages/*.whl`, Python application artifacts under `python/artifacts/`,
 portable CPython archives under `python/distributions/artifacts/`, obsolete application
 plans under `python/applications/`, and `git-mirrors/**/*.git`. Empty
 content-addressed artifact directories are removed too. The command refuses to run

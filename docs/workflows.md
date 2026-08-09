@@ -66,7 +66,6 @@ airgap-sync
 The menu covers target management, endpoint configuration, Python compatibility
 coverage/publication, online download, offline publish, verification, and bundle info.
 The initial Python ceiling is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
-Exact legacy environments and raw PyPI targets remain under Advanced/Legacy.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so
 operators can review or change the sync set without learning hidden state.
@@ -104,10 +103,9 @@ stronger than producing a lock: ordinary clients must be able to install from an
 populated only with the bundle's artifacts. Shared wheels are stored once. The separate
 `plan` command remains useful for review, size estimates, and explicit refresh.
 
-Legacy `requirements*.txt`, `uv.lock`, `pylock*.toml`, raw `pypi`, and exact
-`python-wheel` inputs remain supported through the 0.x line.
-Their exact environments and approximate resolver opt-ins are Advanced/Legacy, not
-normal application settings.
+`requirements*.txt`, `uv.lock`, and `pylock*.toml` inside Git repositories are not
+Python application targets and are not scanned. Add a `python-app` target and a
+maintained recipe when a repository tool needs explicit offline support.
 
 ## Online Phase
 
@@ -185,10 +183,8 @@ The download step writes npm metadata and Git source metadata:
 - package tarballs under `packages/`
 - local bare Git mirrors under `git-mirrors/`
 - Git source records for offline publish
-- `python-seed-manifest.json`, `python-fetch-report.json`, and verified wheels under
-  `python-packages/` when legacy Python target environments are configured
-- `python-security-report.json` with manifest-bound exact-version PyPI OSV evidence
-  whenever a Python wheel manifest is activated
+- `python-seed-manifest.json` and `python-security-report.json` with the
+  manifest-bound application wheels and exact-version PyPI OSV evidence
 - `python/application-index.json`, per-application evidence, optional locks, and shared
   content-addressed artifacts for schema-v2 applications. These files contain no
   closed-network Gitea URL or package owner.
@@ -268,8 +264,8 @@ Copy the whole `./airgap-bundle` directory to the closed network, including:
 - `fetch-report.json`
 - Git source metadata
 - Git mirror fetch reports
-- `python-packages/`, `python-seed-manifest.json`, `python-security-report.json`, and
-  Python reports when present
+- `python-seed-manifest.json`, `python-security-report.json`, and Python reports when
+  present
 - `python/` application evidence, reports, optional locks, and shared artifacts
 
 Do not copy only tarballs. The JSON files are the audit trail and are required by later

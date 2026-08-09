@@ -192,7 +192,7 @@ describe('pruneBundle', () => {
     ).resolves.toBe(true);
   });
 
-  it('removes stale wheels when a Python seed manifest is present', async () => {
+  it('removes all wheels from retired legacy Python storage', async () => {
     await writeBundleFiles();
     await fs.ensureDir(path.join(bundleDir, 'python-packages'));
     await fs.writeFile(path.join(bundleDir, 'python-packages/kept-1.0-py3-none-any.whl'), 'kept');
@@ -223,10 +223,10 @@ describe('pruneBundle', () => {
 
     const report = await pruneBundle({ bundleDir });
 
-    expect(report.pythonPackages).toEqual({ kept: 1, removed: 1, stale: 1, total: 2 });
+    expect(report.pythonPackages).toEqual({ kept: 0, removed: 2, stale: 2, total: 2 });
     await expect(
       fs.pathExists(path.join(bundleDir, 'python-packages/kept-1.0-py3-none-any.whl'))
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
     await expect(
       fs.pathExists(path.join(bundleDir, 'python-packages/stale-1.0-py3-none-any.whl'))
     ).resolves.toBe(false);

@@ -102,8 +102,7 @@ The menu covers the normal workflow:
 - **Verify installs**: run package-manager installs for configured Git targets.
 - **Diagnostics**: inspect, validate, and summarize the bundle.
 - **Settings**: configure endpoints, Python application publication/coverage, defaults,
-  and saved credentials. Exact environments and raw PyPI seeding remain under
-  Advanced/Legacy.
+  and saved credentials.
 
 The same workflow can be scripted:
 
@@ -320,7 +319,6 @@ The bundle contains the current transferable state plus audit reports:
 
 ```text
 airgap-bundle/packages/                 npm tarballs
-airgap-bundle/python-packages/          Python wheels
 airgap-bundle/python/application-index.json
 airgap-bundle/python/applications/      Plans, resolver evidence, and optional locks
 airgap-bundle/python/artifacts/         Shared content-addressed Python artifacts
@@ -329,7 +327,7 @@ airgap-bundle/python/publications/      Closed-side publication manifests and re
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
 airgap-bundle/security-report.json      OSV and static npm security evidence
-airgap-bundle/python-seed-manifest.json bundled Python files and target environments
+airgap-bundle/python-seed-manifest.json bundled Python application wheels
 airgap-bundle/python-security-report.json exact-version PyPI OSV evidence
 airgap-bundle/dist-tags.json            real dist-tag requirements
 airgap-bundle/git-sources.json          Git source metadata

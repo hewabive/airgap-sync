@@ -16,9 +16,6 @@ import {
   type PythonTargetOs,
 } from './python/environments.js';
 import { parseRequirement } from './python/requirements.js';
-import type { PythonRequirementInput } from './python/input-types.js';
-import type { PythonRootWheelInput } from './python/input-types.js';
-import { isPythonResolutionMode, type PythonResolutionMode } from './python/resolution-policy.js';
 import {
   normalizeInlinePlatformCoveragePolicy,
   normalizePlatformCoveragePolicy,
@@ -47,8 +44,6 @@ import {
   type BuiltInPlatformFamilyId,
 } from './python/platform-family.js';
 
-export type { PythonResolutionMode } from './python/resolution-policy.js';
-
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
 export const workspaceConfigPythonPublicationBackupFileName = `${workspaceConfigFileName}.before-0002-python-publication.backup`;
@@ -64,7 +59,6 @@ export const workspacePythonPlannerVersion = '0.11.16';
 
 export interface WorkspaceGitTarget {
   branch?: string;
-  pythonResolutionMode?: PythonResolutionMode;
   type: 'git';
   url: string;
 }
@@ -72,19 +66,6 @@ export interface WorkspaceGitTarget {
 export interface WorkspaceNpmTarget {
   spec: string;
   type: 'npm';
-}
-
-export interface WorkspacePypiTarget {
-  pythonResolutionMode?: PythonResolutionMode;
-  spec: string;
-  type: 'pypi';
-}
-
-export interface WorkspacePythonWheelTarget {
-  pythonResolutionMode?: PythonResolutionMode;
-  sha256: string;
-  type: 'python-wheel';
-  url: string;
 }
 
 export interface WorkspaceCpythonDistributionsTarget {
@@ -122,16 +103,13 @@ export type WorkspaceTarget =
   | WorkspaceCpythonDistributionsTarget
   | WorkspaceGitTarget
   | WorkspaceNpmTarget
-  | WorkspacePypiTarget
-  | WorkspacePythonApplicationTarget
-  | WorkspacePythonWheelTarget;
+  | WorkspacePythonApplicationTarget;
 
 export type WorkspaceTargetEditableField =
   | 'branch'
   | 'fromMinor'
   | 'latest'
   | 'platforms'
-  | 'pythonResolutionMode'
   | 'versionSelection'
   | 'windowDays';
 
@@ -140,7 +118,6 @@ export interface WorkspaceTargetEdit {
   fromMinor?: string;
   latest?: number;
   platforms?: BuiltInPlatformFamilyId[];
-  pythonResolutionMode?: PythonResolutionMode | null;
   versionSelection?: PythonApplicationVersionSelection;
   windowDays?: number;
 }
@@ -166,14 +143,8 @@ export interface WorkspaceDefaults {
   };
 }
 
-export interface WorkspacePythonLegacySeedConfig {
-  resolutionMode: PythonResolutionMode;
-  targetEnvironments?: PythonTargetEnvironmentConfig[];
-}
-
 export interface WorkspacePythonConfig {
   applicationArtifactOwner?: string;
-  legacySeed?: WorkspacePythonLegacySeedConfig;
   planner: {
     engine: 'uv';
     version: typeof workspacePythonPlannerVersion;
@@ -181,13 +152,6 @@ export interface WorkspacePythonConfig {
   publication?: PythonPublicationProfile;
   publishOwner?: string;
   sourceIndex: string;
-}
-
-export interface WorkspaceLegacyPythonSettings {
-  publishOwner?: string;
-  resolutionMode: PythonResolutionMode;
-  sourceIndex?: string;
-  targetEnvironments?: PythonTargetEnvironmentConfig[];
 }
 
 export interface ResolvedWorkspacePythonApplication {
@@ -207,7 +171,7 @@ export interface WorkspaceConfig {
   npmSecurity?: NpmSecurityPolicy;
   output: string;
   pythonPublishOwner?: string;
-  pythonResolutionMode?: PythonResolutionMode;
+  pythonResolutionMode?: 'approximate' | 'locked-only';
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   python?: WorkspacePythonConfig;
@@ -225,7 +189,6 @@ export interface WorkspaceSecrets {
 interface WorkspaceGitTargetSnapshot {
   branch?: string;
   localMirrorPath: string;
-  pythonResolutionMode?: PythonResolutionMode;
   sourceId: string;
   type: 'git';
   url: string;
@@ -236,19 +199,6 @@ interface WorkspaceNpmTargetSnapshot {
   type: 'npm';
 }
 
-interface WorkspacePypiTargetSnapshot {
-  pythonResolutionMode?: PythonResolutionMode;
-  spec: string;
-  type: 'pypi';
-}
-
-interface WorkspacePythonWheelTargetSnapshot {
-  pythonResolutionMode?: PythonResolutionMode;
-  sha256: string;
-  type: 'python-wheel';
-  url: string;
-}
-
 interface WorkspaceCpythonDistributionsTargetSnapshot extends WorkspaceCpythonDistributionsTarget {}
 
 interface WorkspacePythonApplicationTargetSnapshot extends WorkspacePythonApplicationTarget {}
@@ -257,9 +207,7 @@ export type WorkspaceTargetSnapshot =
   | WorkspaceCpythonDistributionsTargetSnapshot
   | WorkspaceGitTargetSnapshot
   | WorkspaceNpmTargetSnapshot
-  | WorkspacePypiTargetSnapshot
-  | WorkspacePythonApplicationTargetSnapshot
-  | WorkspacePythonWheelTargetSnapshot;
+  | WorkspacePythonApplicationTargetSnapshot;
 
 export interface WorkspaceSnapshot {
   createdAt: string;
@@ -267,10 +215,6 @@ export interface WorkspaceSnapshot {
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
   output: string;
-  pythonPublishOwner?: string;
-  pythonResolutionMode?: PythonResolutionMode;
-  pythonSourceIndex?: string;
-  pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   python?: WorkspacePythonConfig;
   coveragePolicies?: PlatformCoveragePolicy[];
   schemaVersion: 1 | 2;
@@ -280,7 +224,6 @@ export interface WorkspaceSnapshot {
 
 export interface InitWorkspaceOptions {
   force?: boolean;
-  legacy?: boolean;
   workspaceDir: string;
 }
 
@@ -305,51 +248,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
-  if (!legacy) {
-    return {
-      coveragePolicies: [
-        {
-          id: 'desktop-x64',
-          platforms: ['linux-glibc-x86_64'],
-          version: 1,
-          wheelStrategy: 'minimum-cover',
-        },
-      ],
-      defaults: {
-        download: {
-          includeDev: true,
-          includePeer: true,
-          latestPolicy: 'bundled',
-          prune: true,
-          rangeResolutionPolicy: 'reuse-stable',
-          tagResolutionPolicy: 'reuse-stable',
-        },
-        publish: {
-          configureGitGlobal: false,
-          provisionGit: true,
-          publicRepositories: true,
-        },
-        verifyInstall: {
-          ignoreScripts: true,
-        },
-      },
-      gitOwnerStrategy: 'preserve',
-      output: defaultWorkspaceOutputDir,
-      python: {
-        planner: {
-          engine: 'uv',
-          version: workspacePythonPlannerVersion,
-        },
-        publication: defaultPythonPublicationProfile(),
-        sourceIndex: defaultWorkspacePythonSourceIndex,
-      },
-      schemaVersion: 2,
-      sourceRegistry: defaultWorkspaceSourceRegistry,
-      targets: [],
-    };
-  }
+function createDefaultWorkspaceConfig(): WorkspaceConfig {
   return {
+    coveragePolicies: [
+      {
+        id: 'desktop-x64',
+        platforms: ['linux-glibc-x86_64'],
+        version: 1,
+        wheelStrategy: 'minimum-cover',
+      },
+    ],
     defaults: {
       download: {
         includeDev: true,
@@ -368,10 +276,17 @@ function createDefaultWorkspaceConfig(legacy = false): WorkspaceConfig {
         ignoreScripts: true,
       },
     },
-    output: defaultWorkspaceOutputDir,
-    pythonResolutionMode: 'locked-only',
     gitOwnerStrategy: 'preserve',
-    schemaVersion: 1,
+    output: defaultWorkspaceOutputDir,
+    python: {
+      planner: {
+        engine: 'uv',
+        version: workspacePythonPlannerVersion,
+      },
+      publication: defaultPythonPublicationProfile(),
+      sourceIndex: defaultWorkspacePythonSourceIndex,
+    },
+    schemaVersion: 2,
     sourceRegistry: defaultWorkspaceSourceRegistry,
     targets: [],
   };
@@ -381,19 +296,6 @@ function createDefaultWorkspaceSecrets(): WorkspaceSecrets {
   return {
     schemaVersion: 1,
   };
-}
-
-function normalizeTargetPythonResolutionMode(
-  value: unknown,
-  targetType: 'git' | 'pypi' | 'python-wheel'
-): PythonResolutionMode | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!isPythonResolutionMode(value)) {
-    throw new Error(`${targetType} target pythonResolutionMode must be locked-only or approximate`);
-  }
-  return value;
 }
 
 export function workspaceConfigPath(workspaceDir: string): string {
@@ -602,43 +504,18 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
       throw new Error('Git target must include a non-empty url');
     }
 
-    const pythonResolutionMode = normalizeTargetPythonResolutionMode(
-      value.pythonResolutionMode,
-      'git'
-    );
     return {
       ...(typeof value.branch === 'string' && value.branch.trim().length > 0
         ? { branch: value.branch.trim() }
         : {}),
-      ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
       type: 'git',
       url: value.url.trim(),
     };
   }
 
-  if (value.type === 'npm' || value.type === 'pypi') {
+  if (value.type === 'npm') {
     if (typeof value.spec !== 'string' || value.spec.trim().length === 0) {
-      throw new Error(`${value.type} target must include a non-empty spec`);
-    }
-
-    if (value.type === 'pypi') {
-      const parsed = parseRequirement(value.spec.trim());
-      if (!parsed.ok || parsed.requirement.url) {
-        throw new Error(
-          `Invalid pypi target: ${parsed.ok ? 'direct URLs are not supported' : parsed.reason}`
-        );
-      }
-    }
-    if (value.type === 'pypi') {
-      const pythonResolutionMode = normalizeTargetPythonResolutionMode(
-        value.pythonResolutionMode,
-        'pypi'
-      );
-      return {
-        ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
-        spec: value.spec.trim(),
-        type: 'pypi',
-      };
+      throw new Error('npm target must include a non-empty spec');
     }
     return { spec: value.spec.trim(), type: 'npm' };
   }
@@ -700,30 +577,10 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     };
   }
 
-  if (value.type === 'python-wheel') {
-    if (typeof value.url !== 'string' || !value.url.trim()) {
-      throw new Error('python-wheel target must include a non-empty url');
-    }
-    const url = new URL(value.url.trim());
-    if (!['file:', 'http:', 'https:'].includes(url.protocol)) {
-      throw new Error('python-wheel target URL must use file, HTTP, or HTTPS');
-    }
-    if (url.username || url.password) {
-      throw new Error('python-wheel target URL must not contain credentials');
-    }
-    if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(value.sha256.trim())) {
-      throw new Error('python-wheel target must include a 64-character SHA-256');
-    }
-    const pythonResolutionMode = normalizeTargetPythonResolutionMode(
-      value.pythonResolutionMode,
-      'python-wheel'
+  if (value.type === 'pypi' || value.type === 'python-wheel') {
+    throw new Error(
+      `${value.type} targets were removed with legacy Python seeding; use a python-app target`
     );
-    return {
-      ...(pythonResolutionMode ? { pythonResolutionMode } : {}),
-      sha256: value.sha256.trim().toLowerCase(),
-      type: 'python-wheel',
-      url: url.toString(),
-    };
   }
 
   throw new Error(`Unsupported workspace target type: ${value.type}`);
@@ -968,25 +825,14 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
     );
   }
 
-  let legacySeed: WorkspacePythonLegacySeedConfig | undefined;
   if (value.legacySeed !== undefined) {
-    if (!isRecord(value.legacySeed)) {
-      throw new Error('python.legacySeed must be an object');
-    }
-    const targetEnvironments = normalizePythonTargetEnvironments(
-      value.legacySeed.targetEnvironments
+    throw new Error(
+      'python.legacySeed was removed; delete it and use python-app targets for Python applications'
     );
-    const resolutionMode: PythonResolutionMode =
-      value.legacySeed.resolutionMode === 'approximate' ? 'approximate' : 'locked-only';
-    legacySeed = {
-      resolutionMode,
-      ...(targetEnvironments ? { targetEnvironments } : {}),
-    };
   }
 
   return {
     ...(applicationArtifactOwner ? { applicationArtifactOwner } : {}),
-    ...(legacySeed ? { legacySeed } : {}),
     planner: {
       engine: 'uv',
       version: workspacePythonPlannerVersion,
@@ -1064,7 +910,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       : undefined;
   const pythonPublishOwner =
     schemaVersion === 1 ? optionalString(value.pythonPublishOwner) : undefined;
-  const pythonResolutionMode: PythonResolutionMode | undefined =
+  const pythonResolutionMode: 'approximate' | 'locked-only' | undefined =
     schemaVersion === 1
       ? value.pythonResolutionMode === 'approximate'
         ? 'approximate'
@@ -1072,11 +918,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       : undefined;
   const python =
     schemaVersion === 2 &&
-    (value.python !== undefined ||
-      targets.some(
-        (target) =>
-          target.type === 'python-app' || target.type === 'pypi' || target.type === 'python-wheel'
-      ))
+    (value.python !== undefined || targets.some((target) => target.type === 'python-app'))
       ? normalizeWorkspacePythonConfig(value.python ?? {})
       : undefined;
   const gitOwnerStrategy: GitOwnerStrategy =
@@ -1094,14 +936,6 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       'fixed-owner gitOwnerStrategy requires gitPublishOwner and gitPublishOwnerKind'
     );
   }
-  if (
-    targets.some((target) => target.type === 'pypi' || target.type === 'python-wheel') &&
-    !(schemaVersion === 1 ? pythonTargetEnvironments : python?.legacySeed?.targetEnvironments)
-      ?.length
-  ) {
-    throw new Error('pypi targets require pythonTargetEnvironments');
-  }
-
   return {
     defaults: normalizeWorkspaceDefaults(value.defaults),
     ...(giteaUrl ? { giteaUrl } : {}),
@@ -1152,7 +986,7 @@ export async function initWorkspace(options: InitWorkspaceOptions): Promise<Work
     throw new Error(`${workspaceConfigFileName} already exists in ${workspaceDir}`);
   }
 
-  const config = createDefaultWorkspaceConfig(options.legacy === true);
+  const config = createDefaultWorkspaceConfig();
   await fs.writeJson(configPath, config, { spaces: 2 });
   await fs.ensureDir(path.resolve(workspaceDir, config.output));
   if (config.schemaVersion === 2) {
@@ -1167,83 +1001,6 @@ async function readWorkspaceConfigWithoutMigration(workspaceDir: string): Promis
 
 export async function readWorkspaceConfig(workspaceDir: string): Promise<WorkspaceConfig> {
   return (await migrateWorkspaceConfig(workspaceDir)).config;
-}
-
-export function workspaceLegacyPythonSettings(
-  config: WorkspaceConfig
-): WorkspaceLegacyPythonSettings {
-  if (config.schemaVersion === 2) {
-    const publicationOwner =
-      config.python?.publication?.pypiOwner ?? config.python?.publication?.owner;
-    return {
-      ...(publicationOwner?.strategy === 'fixed-owner'
-        ? { publishOwner: publicationOwner.name }
-        : config.python?.publishOwner
-          ? { publishOwner: config.python.publishOwner }
-          : {}),
-      resolutionMode: config.python?.legacySeed?.resolutionMode ?? 'locked-only',
-      ...(config.python?.sourceIndex ? { sourceIndex: config.python.sourceIndex } : {}),
-      ...(config.python?.legacySeed?.targetEnvironments
-        ? { targetEnvironments: config.python.legacySeed.targetEnvironments }
-        : {}),
-    };
-  }
-  return {
-    ...(config.pythonPublishOwner ? { publishOwner: config.pythonPublishOwner } : {}),
-    resolutionMode: config.pythonResolutionMode ?? 'locked-only',
-    ...(config.pythonSourceIndex ? { sourceIndex: config.pythonSourceIndex } : {}),
-    ...(config.pythonTargetEnvironments
-      ? { targetEnvironments: config.pythonTargetEnvironments }
-      : {}),
-  };
-}
-
-export function withWorkspaceLegacyPythonSettings(
-  config: WorkspaceConfig,
-  settings: WorkspaceLegacyPythonSettings
-): WorkspaceConfig {
-  if (config.schemaVersion === 1) {
-    const nextConfig: WorkspaceConfig = {
-      ...config,
-      ...(settings.publishOwner ? { pythonPublishOwner: settings.publishOwner } : {}),
-      pythonResolutionMode: settings.resolutionMode,
-      ...(settings.sourceIndex ? { pythonSourceIndex: settings.sourceIndex } : {}),
-    };
-    if (settings.targetEnvironments) {
-      nextConfig.pythonTargetEnvironments = settings.targetEnvironments;
-    } else {
-      delete nextConfig.pythonTargetEnvironments;
-    }
-    return nextConfig;
-  }
-
-  return {
-    ...config,
-    python: {
-      legacySeed: {
-        resolutionMode: settings.resolutionMode,
-        ...(settings.targetEnvironments ? { targetEnvironments: settings.targetEnvironments } : {}),
-      },
-      planner: config.python?.planner ?? {
-        engine: 'uv',
-        version: workspacePythonPlannerVersion,
-      },
-      publication: {
-        ...(config.python?.publication ?? defaultPythonPublicationProfile()),
-        ...(settings.publishOwner
-          ? {
-              pypiOwner: {
-                kind: 'organization' as const,
-                name: settings.publishOwner,
-                strategy: 'fixed-owner' as const,
-              },
-            }
-          : {}),
-      },
-      sourceIndex:
-        settings.sourceIndex ?? config.python?.sourceIndex ?? defaultWorkspacePythonSourceIndex,
-    },
-  };
 }
 
 export function resolveWorkspacePythonApplication(
@@ -1321,30 +1078,20 @@ export function previewWorkspaceConfigMigration(config: WorkspaceConfig): Worksp
     return normalized;
   }
 
-  const {
-    pythonPublishOwner,
-    pythonResolutionMode,
-    pythonSourceIndex,
-    pythonTargetEnvironments,
-    ...common
-  } = normalized;
-  const hasLegacyPythonIntent =
-    pythonPublishOwner !== undefined ||
-    pythonSourceIndex !== undefined ||
-    pythonTargetEnvironments !== undefined ||
-    normalized.targets.some(
-      (target) => target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
-    );
+  const pythonPublishOwner = normalized.pythonPublishOwner;
+  const pythonSourceIndex = normalized.pythonSourceIndex;
+  const common = { ...normalized };
+  delete common.pythonPublishOwner;
+  delete common.pythonResolutionMode;
+  delete common.pythonSourceIndex;
+  delete common.pythonTargetEnvironments;
+  const hasLegacyPythonIntent = pythonPublishOwner !== undefined || pythonSourceIndex !== undefined;
   const migrated: WorkspaceConfig = {
     ...common,
     coveragePolicies: [],
     ...(hasLegacyPythonIntent
       ? {
           python: {
-            legacySeed: {
-              resolutionMode: pythonResolutionMode ?? 'locked-only',
-              ...(pythonTargetEnvironments ? { targetEnvironments: pythonTargetEnvironments } : {}),
-            },
             planner: {
               engine: 'uv',
               version: workspacePythonPlannerVersion,
@@ -1405,7 +1152,6 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   return normalizeWorkspaceConfig({
     ...normalized,
     python: {
-      ...(normalized.python?.legacySeed ? { legacySeed: normalized.python.legacySeed } : {}),
       planner: normalized.python!.planner,
       publication: defaultPythonPublicationProfile(),
       sourceIndex: normalized.python!.sourceIndex,
@@ -1546,9 +1292,7 @@ function targetKey(target: WorkspaceTarget): string {
               python: target.python,
             }),
           ].join('\0')
-        : target.type === 'python-wheel'
-          ? [target.type, target.url, target.sha256].join('\0')
-          : [target.type, target.spec].join('\0');
+        : [target.type, target.spec].join('\0');
 }
 
 const workspaceTargetEditFields: WorkspaceTargetEditableField[] = [
@@ -1556,7 +1300,6 @@ const workspaceTargetEditFields: WorkspaceTargetEditableField[] = [
   'fromMinor',
   'latest',
   'platforms',
-  'pythonResolutionMode',
   'versionSelection',
   'windowDays',
 ];
@@ -1568,12 +1311,9 @@ export function workspaceTargetEditableFields(
     case 'cpython-distributions':
       return ['fromMinor', 'platforms', 'latest', 'windowDays'];
     case 'git':
-      return ['branch', 'pythonResolutionMode'];
+      return ['branch'];
     case 'npm':
       return [];
-    case 'pypi':
-    case 'python-wheel':
-      return ['pythonResolutionMode'];
     case 'python-app':
       return ['versionSelection'];
   }
@@ -1591,16 +1331,6 @@ export async function addWorkspaceTarget(
 ): Promise<{ added: boolean; config: WorkspaceConfig }> {
   const config = await readWorkspaceConfig(workspaceDir);
   const normalizedTarget = normalizeWorkspaceTarget(target);
-  if (
-    (normalizedTarget.type === 'pypi' || normalizedTarget.type === 'python-wheel') &&
-    !(
-      config.schemaVersion === 1
-        ? config.pythonTargetEnvironments
-        : config.python?.legacySeed?.targetEnvironments
-    )?.length
-  ) {
-    throw new Error('pypi targets require pythonTargetEnvironments');
-  }
   const id = targetKey(normalizedTarget);
   const exists = config.targets.some((existing) => targetKey(existing) === id);
   if (
@@ -1650,9 +1380,6 @@ export async function editWorkspaceTarget(
   }
   const unsupportedField = requestedFields.find((field) => !editableFields.includes(field));
   if (unsupportedField) {
-    if (unsupportedField === 'pythonResolutionMode') {
-      throw new Error(`${current.type} targets do not resolve Python dependencies`);
-    }
     if (unsupportedField === 'versionSelection') {
       throw new Error(`Target ${String(index)} is not a python-app target`);
     }
@@ -1681,23 +1408,6 @@ export async function editWorkspaceTarget(
         } else {
           candidate.branch = edit.branch;
         }
-      }
-      if (edit.pythonResolutionMode !== undefined) {
-        if (edit.pythonResolutionMode === null) {
-          delete candidate.pythonResolutionMode;
-        } else {
-          candidate.pythonResolutionMode = edit.pythonResolutionMode;
-        }
-      }
-      break;
-    }
-    case 'pypi':
-    case 'python-wheel': {
-      candidate = { ...current };
-      if (edit.pythonResolutionMode === null) {
-        delete candidate.pythonResolutionMode;
-      } else if (edit.pythonResolutionMode !== undefined) {
-        candidate.pythonResolutionMode = edit.pythonResolutionMode;
       }
       break;
     }
@@ -1767,17 +1477,6 @@ export async function removeWorkspaceTarget(
   return { config, removed };
 }
 
-export async function setWorkspaceTargetPythonResolutionMode(
-  workspaceDir: string,
-  index: number,
-  pythonResolutionMode: PythonResolutionMode | undefined
-): Promise<{ config: WorkspaceConfig; target: WorkspaceTarget }> {
-  const result = await editWorkspaceTarget(workspaceDir, index, {
-    pythonResolutionMode: pythonResolutionMode ?? null,
-  });
-  return { config: result.config, target: result.target };
-}
-
 export function selectWorkspaceTargets(
   config: WorkspaceConfig,
   indexes: number[]
@@ -1817,59 +1516,10 @@ export function createWorkspaceGitSources(config: WorkspaceConfig): GitSource[] 
     .map((target) =>
       createGitSourceFromUrl({
         ...(target.branch ? { committish: target.branch } : {}),
-        ...(target.pythonResolutionMode
-          ? { pythonResolutionMode: target.pythonResolutionMode }
-          : {}),
         target: true,
         url: target.url,
       })
     );
-}
-
-export function createWorkspacePythonRequirements(
-  config: WorkspaceConfig
-): PythonRequirementInput[] {
-  return config.targets.flatMap((target, index) => {
-    if (target.type !== 'pypi') {
-      return [];
-    }
-    const parsed = parseRequirement(target.spec);
-    if (!parsed.ok || parsed.requirement.url) {
-      throw new Error(`Invalid pypi target at index ${String(index + 1)}: ${target.spec}`);
-    }
-    return [
-      {
-        constraint: false,
-        hashes: [],
-        line: index + 1,
-        ...(target.pythonResolutionMode
-          ? { pythonResolutionMode: target.pythonResolutionMode }
-          : {}),
-        requiredBy: 'root',
-        requirement: parsed.requirement,
-        sourcePath: 'workspace-targets',
-      },
-    ];
-  });
-}
-
-export function createWorkspacePythonRootWheels(config: WorkspaceConfig): PythonRootWheelInput[] {
-  return config.targets.flatMap((target, index) =>
-    target.type === 'python-wheel'
-      ? [
-          {
-            line: index + 1,
-            ...(target.pythonResolutionMode
-              ? { pythonResolutionMode: target.pythonResolutionMode }
-              : {}),
-            requiredBy: 'root',
-            sha256: target.sha256,
-            sourcePath: 'workspace-wheel-targets',
-            url: target.url,
-          },
-        ]
-      : []
-  );
 }
 
 export function createWorkspaceSnapshot(
@@ -1878,10 +1528,6 @@ export function createWorkspaceSnapshot(
   const gitSourcesByUrl = new Map(
     createWorkspaceGitSources(options.config).map((source) => [source.sourceUrl, source])
   );
-  const legacyPython = workspaceLegacyPythonSettings(options.config);
-  const hasLegacyPython =
-    options.config.schemaVersion === 1 || options.config.python?.legacySeed !== undefined;
-
   return {
     createdAt: options.createdAt ?? new Date().toISOString(),
     gitOwnerStrategy: options.config.gitOwnerStrategy,
@@ -1890,16 +1536,6 @@ export function createWorkspaceSnapshot(
       ? { gitPublishOwnerKind: options.config.gitPublishOwnerKind }
       : {}),
     output: options.config.output,
-    ...(hasLegacyPython && legacyPython.publishOwner
-      ? { pythonPublishOwner: legacyPython.publishOwner }
-      : {}),
-    ...(hasLegacyPython ? { pythonResolutionMode: legacyPython.resolutionMode } : {}),
-    ...(hasLegacyPython && legacyPython.sourceIndex
-      ? { pythonSourceIndex: legacyPython.sourceIndex }
-      : {}),
-    ...(legacyPython.targetEnvironments
-      ? { pythonTargetEnvironments: legacyPython.targetEnvironments }
-      : {}),
     ...(options.config.python ? { python: options.config.python } : {}),
     ...(options.config.coveragePolicies
       ? { coveragePolicies: options.config.coveragePolicies }
@@ -1925,27 +1561,6 @@ export function createWorkspaceSnapshot(
         };
       }
 
-      if (target.type === 'pypi') {
-        return {
-          ...(target.pythonResolutionMode
-            ? { pythonResolutionMode: target.pythonResolutionMode }
-            : {}),
-          spec: target.spec,
-          type: target.type,
-        };
-      }
-
-      if (target.type === 'python-wheel') {
-        return {
-          ...(target.pythonResolutionMode
-            ? { pythonResolutionMode: target.pythonResolutionMode }
-            : {}),
-          sha256: target.sha256,
-          type: target.type,
-          url: target.url,
-        };
-      }
-
       if (target.type === 'python-app') {
         return {
           application: target.application,
@@ -1964,9 +1579,6 @@ export function createWorkspaceSnapshot(
       return {
         ...(target.branch ? { branch: target.branch } : {}),
         localMirrorPath: source.localMirrorPath,
-        ...(target.pythonResolutionMode
-          ? { pythonResolutionMode: target.pythonResolutionMode }
-          : {}),
         sourceId: source.id,
         type: 'git',
         url: target.url,

@@ -41,9 +41,8 @@ specific workspace, not process startup before command arguments are known.
 6. The interactive menu reports migrations applied while opening the workspace.
 7. `migrate --dry-run` bypasses automatic application and remains available to inspect
    the final current-schema representation without writing it.
-8. Legacy `pypi`, `python-wheel`, and `python-runtime` targets retain their behavior
-   through `python.legacySeed`. Automatic schema migration does not retire the legacy
-   resolver.
+8. This historical decision retained `pypi`, `python-wheel`, and `python-runtime`
+   targets through `python.legacySeed`; ADR 0012 later removes that behavior.
 9. Migration does not invent application platform coverage from exact legacy Python
    environments. When a migrated workspace first adds a Python application, the menu
    asks for broad Windows/Linux coverage.

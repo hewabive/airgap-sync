@@ -28,8 +28,6 @@ import {
   createBundleDocuments,
   createFetchReport,
   createWorkspaceGitSources,
-  createWorkspacePythonRequirements,
-  createWorkspacePythonRootWheels,
   createWorkspaceSnapshot,
   defaultPythonPublicationProfile,
   defaultNpmSecurityPolicy,
@@ -91,7 +89,6 @@ import {
   resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
-  setWorkspaceTargetPythonResolutionMode,
   setWorkspacePythonApplicationVersionSelection,
   updateRepositories,
   UvApplicationResolver,
@@ -118,10 +115,8 @@ import {
   formatPythonPlanDiff,
   workspaceSecretsFileName,
   workspaceConfigFileName,
-  workspaceLegacyPythonSettings,
   workspacePythonPlannerVersion,
   workspaceTargetEditableFields,
-  withWorkspaceLegacyPythonSettings,
   provisionGiteaRepositories,
 } from './index.js';
 import type { GiteaClient } from './index.js';
@@ -142,7 +137,6 @@ import type {
   LatestPolicy,
   PlatformCoveragePolicy,
   PythonApplicationDownloadProgressEvent,
-  PythonResolutionMode,
   PublishProgressEvent,
   PublishProgressPhase,
   RangeResolutionPolicy,
@@ -160,23 +154,10 @@ import type {
   WorkspacePythonApplicationTarget,
   WorkspaceTargetEdit,
 } from './index.js';
-import {
-  resolveTargetEnvironment,
-  type PythonTargetEnvironmentConfig,
-} from './core/python/environments.js';
-import {
-  parseLinuxWheelCompatibility,
-  parsePythonResolutionMode,
-  parsePythonTargetArch,
-  parsePythonTargetOs,
-  parsePythonVersion,
-  supportedPythonTargetArches,
-  validatePythonIndexUrl,
-} from './menu/python-settings.js';
+import { validatePythonIndexUrl } from './menu/python-settings.js';
 
 const defaultDistTagConcurrency = 4;
 const defaultPublishConcurrency = 4;
-const defaultPythonPublishOwner = 'pypi';
 const defaultPythonSourceIndex = 'https://pypi.org/simple/';
 
 interface FetchOptions {
@@ -241,7 +222,6 @@ interface VerifyInstallOptions {
 }
 
 interface CollectOptions {
-  allowApproximatePython?: boolean;
   allowWindowGap?: boolean;
   allowPackage?: string[];
   concurrency: number;
@@ -274,11 +254,6 @@ interface InitOptions {
 
 interface TargetGitOptions {
   branch?: string;
-  pythonResolutionMode?: PythonResolutionMode;
-}
-
-interface TargetPythonOptions {
-  pythonResolutionMode?: PythonResolutionMode;
 }
 
 interface TargetPythonApplicationOptions {
@@ -307,7 +282,6 @@ interface TargetEditOptions {
   includeVersion?: string[];
   latest?: number;
   platform?: string[];
-  pythonResolutionMode?: string;
   windowDays?: number;
 }
 
@@ -442,12 +416,6 @@ function parseRangeResolutionPolicy(value: string): RangeResolutionPolicy {
   );
 }
 
-function parseTargetPythonResolutionMode(value: string): PythonResolutionMode | undefined {
-  return value.trim().toLowerCase() === 'inherit'
-    ? undefined
-    : parsePythonResolutionMode(value.trim().toLowerCase());
-}
-
 function addNpmPublishOptions(command: Command): Command {
   return command
     .option('--no-skip-existing', 'Attempt to publish npm versions that already exist')
@@ -525,7 +493,6 @@ function collectShouldFail(report: {
   gitManifestScanErrors: unknown[];
   gitSources: { skipped: unknown[] };
   maxIterationsReached: boolean;
-  python?: { errors: unknown[] };
   pythonApplications?: { errors: unknown[] };
   cpythonDistributions?: { errors: unknown[] };
   repositoryUpdate: { errors: unknown[] };
@@ -535,7 +502,6 @@ function collectShouldFail(report: {
   return (
     report.repositoryUpdate.errors.length > 0 ||
     report.fetch.errors.length > 0 ||
-    (report.python?.errors.length ?? 0) > 0 ||
     (report.pythonApplications?.errors.length ?? 0) > 0 ||
     (report.cpythonDistributions?.errors.length ?? 0) > 0 ||
     report.gitSources.skipped.length > 0 ||
@@ -580,7 +546,6 @@ function formatDownloadSummary(report: CollectReport): string {
   const gitSkipped = report.gitSources.skipped.length;
   const unsupported = report.fetch.unsupported.length;
   const npmErrors = report.fetch.errors.length;
-  const pythonErrors = report.python?.errors.length ?? 0;
   const pythonApplicationErrors =
     report.pythonApplications?.errors.filter(
       (error) => error.id !== 'python-security' || report.pythonSecurity?.ok !== false
@@ -603,7 +568,6 @@ function formatDownloadSummary(report: CollectReport): string {
   const totalErrors =
     npmErrors +
     gitErrors +
-    pythonErrors +
     pythonApplicationErrors +
     cpythonDistributionErrors +
     securityErrors +
@@ -636,15 +600,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
     : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed${newGitCommits > 0 ? `, +${String(newGitCommits)} commits` : ''}, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
-  const pythonLine = report.python
-    ? report.dryRun
-      ? `Python wheels: ${String(report.python.resolvedFiles)} resolved, ${String(report.python.planned)} planned, ${String(report.python.errors.length)} errors.`
-      : `Python wheels: ${String(report.python.resolvedFiles)} resolved (${String(report.python.downloaded)} downloaded, ${String(report.python.skipped)} already on disk), ${String(report.python.errors.length)} errors.`
-    : undefined;
   const pythonApplicationsLine = report.pythonApplications
     ? report.dryRun
       ? `Python applications: ${String(report.pythonApplications.applications.length)} planned, ${String(report.pythonApplications.planned)} artifacts / ${String(report.pythonApplications.incrementalBytes)} incremental bytes, ${String(report.pythonApplications.errors.length)} errors.`
-      : `Python applications: ${String(report.pythonApplications.applications.length)} bundled (${String(report.pythonApplications.downloaded)} artifacts downloaded, ${String(report.pythonApplications.reused)} reused from legacy storage, ${String(report.pythonApplications.existing)} already on disk, ${String(report.pythonApplications.totalBytes)} total bytes / ${String(report.pythonApplications.incrementalBytes)} incremental), ${String(report.pythonApplications.errors.length)} errors.`
+      : `Python applications: ${String(report.pythonApplications.applications.length)} bundled (${String(report.pythonApplications.downloaded)} artifacts downloaded, ${String(report.pythonApplications.existing)} already on disk, ${String(report.pythonApplications.totalBytes)} total bytes / ${String(report.pythonApplications.incrementalBytes)} incremental), ${String(report.pythonApplications.errors.length)} errors.`
     : undefined;
   const pythonApplicationCoverageLine = report.pythonApplications
     ? formatPythonApplicationCoverageLine(report.pythonApplications.applications)
@@ -665,7 +624,7 @@ function formatDownloadSummary(report: CollectReport): string {
     : report.dryRun
       ? 'NPM security: not run during dry-run.'
       : yellow('NPM security: not run.');
-  const hasPythonPackages = Boolean(report.python ?? report.pythonApplications);
+  const hasPythonPackages = Boolean(report.pythonApplications);
   const pythonSecurityLine = report.pythonSecurity
     ? report.pythonSecurity.ok
       ? green(
@@ -686,7 +645,6 @@ function formatDownloadSummary(report: CollectReport): string {
     npmLine,
     securityLine,
     gitLine,
-    ...(pythonLine ? [pythonLine] : []),
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
     ...(pythonApplicationCoverageLine
       ? [
@@ -750,14 +708,6 @@ function formatDownloadSummary(report: CollectReport): string {
     );
   }
 
-  if (report.python?.errors.length) {
-    lines.push(
-      ...report.python.errors.map((error) => {
-        const subject = [error.environment, error.name].filter(Boolean).join(' / ');
-        return red(`Python error${subject ? ` [${subject}]` : ''}: ${error.reason}`);
-      })
-    );
-  }
   if (report.pythonApplications?.errors.length) {
     lines.push(
       ...report.pythonApplications.errors
@@ -1038,13 +988,7 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
       ? `cpython-distributions ${target.series.from}..${target.series.through}; latest ${String(target.patches.latest)}; ${String(target.builds.windowDays)} days; ${target.platforms.join(', ')}`
       : target.type === 'git'
         ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
-        : target.type === 'python-wheel'
-          ? `python-wheel ${target.url}#sha256=${target.sha256}`
-          : `${target.type} ${target.spec}`;
-  const pythonResolutionMode =
-    target.type === 'git' || target.type === 'pypi' || target.type === 'python-wheel'
-      ? target.pythonResolutionMode
-      : undefined;
+        : `${target.type} ${target.spec}`;
   const pythonApplicationRuntime =
     target.type === 'python-app'
       ? target.python.policy === 'selected'
@@ -1069,72 +1013,30 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
           ? `latest (${target.application.version})`
           : 'latest'
       : undefined;
-  return `${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}${pythonResolutionMode ? ` [python resolution: ${pythonResolutionMode}]` : ''}`;
-}
-
-function formatPythonTargetEnvironment(environment: PythonTargetEnvironmentConfig): string {
-  const platform =
-    environment.platformTags?.join(',') ??
-    environment.manylinux ??
-    environment.musllinux ??
-    (environment.os === 'macos' ? `macOS ${environment.macosVersion ?? '12.0'}` : undefined);
-  return `${environment.name}: Python ${environment.pythonVersion}, ${environment.os}/${environment.arch}${
-    platform ? `, ${platform}` : ''
-  }`;
-}
-
-function formatPythonTargetEnvironmentList(
-  environments: PythonTargetEnvironmentConfig[] | undefined
-): string {
-  if (!environments?.length) {
-    return 'No Python target environments configured.';
-  }
-
-  return environments
-    .map(
-      (environment, index) => `${String(index + 1)}. ${formatPythonTargetEnvironment(environment)}`
-    )
-    .join('\n');
+  return `${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
-  const legacyPython = workspaceLegacyPythonSettings(config);
   const defaultCoverage = config.coveragePolicies?.[0];
   const publication = config.python?.publication ?? defaultPythonPublicationProfile();
   const publicationOwner = (owner: PythonPublicationProfile['owner']): string =>
     owner.strategy === 'authenticated-user' ? 'authenticated user' : `${owner.kind} ${owner.name}`;
-  const pythonLines =
-    config.schemaVersion === 2
+  const pythonLines = [
+    `Python application source: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`,
+    `Python publication owner: ${publicationOwner(publication.owner)}`,
+    `Python PyPI owner: ${publicationOwner(publication.pypiOwner ?? publication.owner)}`,
+    ...(publication.publishEvidence === true
       ? [
-          `Python application source: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`,
-          `Python publication owner: ${publicationOwner(publication.owner)}`,
-          `Python PyPI owner: ${publicationOwner(publication.pypiOwner ?? publication.owner)}`,
-          ...(publication.publishEvidence === true
-            ? [
-                `Python Generic evidence owner: ${publicationOwner(publication.genericOwner ?? publication.owner)}`,
-              ]
-            : []),
-          `Default application coverage: ${
-            defaultCoverage
-              ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
-              : '(not set)'
-          }`,
-          `Python planner: ${config.python?.planner.engine ?? 'uv'} ${config.python?.planner.version ?? '(not set)'}`,
-          ...(config.python?.legacySeed
-            ? [
-                `Legacy Python resolution mode: ${config.python.legacySeed.resolutionMode}`,
-                'Legacy Python target environments:',
-                formatPythonTargetEnvironmentList(config.python.legacySeed.targetEnvironments),
-              ]
-            : []),
+          `Python Generic evidence owner: ${publicationOwner(publication.genericOwner ?? publication.owner)}`,
         ]
-      : [
-          `Python source index: ${legacyPython.sourceIndex ?? '(disabled)'}`,
-          `Python publish owner: ${legacyPython.publishOwner ?? '(not set)'}`,
-          `Default Python resolution mode: ${legacyPython.resolutionMode}`,
-          'Python target environments:',
-          formatPythonTargetEnvironmentList(legacyPython.targetEnvironments),
-        ];
+      : []),
+    `Default application coverage: ${
+      defaultCoverage
+        ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
+        : '(not set)'
+    }`,
+    `Python planner: ${config.python?.planner.engine ?? 'uv'} ${config.python?.planner.version ?? '(not set)'}`,
+  ];
   return [
     `Bundle directory: ${config.output}`,
     `Source registry: ${config.sourceRegistry}`,
@@ -1506,7 +1408,6 @@ const collectPhaseLabels: Record<DownloadProgressEvent['phase'], string> = {
   'manifest-scan': 'scan package manifests',
   'npm-fetch': 'resolve/download npm',
   'python-application-fetch': 'prepare Python application artifacts',
-  'python-fetch': 'resolve/download Python',
   'python-security-scan': 'scan Python package security',
   'repository-update': 'update repositories',
   'security-scan': 'scan npm package security',
@@ -2109,19 +2010,6 @@ async function askRangeResolutionPolicy(
   return parseRangeResolutionPolicy(answer || current);
 }
 
-async function askTargetPythonResolutionMode(
-  rl: ReadlineInterface,
-  defaultValue: PythonResolutionMode | 'inherit'
-): Promise<PythonResolutionMode | undefined> {
-  return parseTargetPythonResolutionMode(
-    await ask(
-      rl,
-      'Python resolution mode for this target (inherit/locked-only/approximate)',
-      defaultValue
-    )
-  );
-}
-
 async function resolvePromptBoolean(
   rl: ReadlineInterface,
   question: string,
@@ -2382,241 +2270,6 @@ async function configureBundleDirectory(
   return nextConfig;
 }
 
-async function askPythonTargetEnvironment(
-  rl: ReadlineInterface,
-  current?: PythonTargetEnvironmentConfig
-): Promise<PythonTargetEnvironmentConfig> {
-  const pythonVersion = parsePythonVersion(
-    await ask(rl, 'Target Python version (MAJOR.MINOR.PATCH)', current?.pythonVersion)
-  );
-  const os = parsePythonTargetOs(
-    await ask(rl, 'Target OS (linux/windows/macos)', current?.os ?? 'linux')
-  );
-  const supportedArches = supportedPythonTargetArches(os);
-  const defaultArch =
-    current && supportedArches.includes(current.arch) ? current.arch : supportedArches[0];
-  const arch = parsePythonTargetArch(
-    await ask(rl, `Target architecture (${supportedArches.join('/')})`, defaultArch),
-    os
-  );
-  const defaultName = current?.name ?? `python-${pythonVersion}-${os}-${arch}`;
-  const name = await ask(rl, 'Environment name', defaultName);
-  if (!name.trim()) {
-    throw new Error('Python target environment name is required');
-  }
-
-  const baseConfig: PythonTargetEnvironmentConfig = {
-    arch,
-    name: name.trim(),
-    os,
-    pythonVersion,
-    ...(current?.markerOverrides ? { markerOverrides: current.markerOverrides } : {}),
-  };
-  let environment: PythonTargetEnvironmentConfig;
-  const currentPlatformTags =
-    current?.os === os && current.arch === arch ? current.platformTags : undefined;
-
-  if (currentPlatformTags) {
-    console.log(`Retaining custom platform tags: ${currentPlatformTags.join(', ')}`);
-    environment = {
-      ...baseConfig,
-      platformTags: currentPlatformTags,
-    };
-  } else if (os === 'linux') {
-    const currentCompatibility =
-      current?.os === 'linux'
-        ? (current.manylinux ?? current.musllinux ?? 'manylinux_2_17')
-        : 'manylinux_2_17';
-    const compatibility = parseLinuxWheelCompatibility(
-      await ask(
-        rl,
-        'Linux wheel compatibility (for example manylinux_2_17 or musllinux_1_2)',
-        currentCompatibility
-      )
-    );
-    environment = {
-      ...baseConfig,
-      ...compatibility,
-    };
-  } else if (os === 'macos') {
-    environment = {
-      ...baseConfig,
-      macosVersion: await ask(
-        rl,
-        'Minimum macOS version (MAJOR.MINOR)',
-        current?.os === 'macos' ? (current.macosVersion ?? '12.0') : '12.0'
-      ),
-    };
-  } else {
-    environment = baseConfig;
-  }
-
-  resolveTargetEnvironment(environment);
-  return environment;
-}
-
-function assertUniquePythonEnvironmentName(
-  environments: PythonTargetEnvironmentConfig[] | undefined,
-  name: string,
-  ignoredIndex?: number
-): void {
-  const duplicate = environments?.find(
-    (environment, index) => index !== ignoredIndex && environment.name === name
-  );
-  if (duplicate) {
-    throw new Error(`Duplicate Python target environment name: ${name}`);
-  }
-}
-
-async function configurePythonPackageSettings(
-  workspaceDir: string,
-  rl: ReadlineInterface,
-  config: WorkspaceConfig
-): Promise<WorkspaceConfig> {
-  const current = workspaceLegacyPythonSettings(config);
-  const pythonSourceIndex = validatePythonIndexUrl(
-    await ask(rl, 'Python source index', current.sourceIndex ?? defaultPythonSourceIndex)
-  );
-  const pythonPublishOwner = await ask(
-    rl,
-    'Gitea Python package owner',
-    current.publishOwner ?? defaultPythonPublishOwner
-  );
-  if (!pythonPublishOwner.trim()) {
-    throw new Error('Gitea Python package owner is required');
-  }
-  console.log(
-    'This is the default for Python inputs whose target does not override the resolution mode.'
-  );
-  const pythonResolutionMode = parsePythonResolutionMode(
-    await ask(
-      rl,
-      'Default Python resolution mode (locked-only/approximate)',
-      current.resolutionMode
-    )
-  );
-  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
-    ...current,
-    publishOwner: pythonPublishOwner.trim(),
-    resolutionMode: pythonResolutionMode,
-    sourceIndex: pythonSourceIndex,
-  });
-  await saveWorkspaceConfig(workspaceDir, nextConfig);
-  return nextConfig;
-}
-
-async function addPythonTargetEnvironment(
-  workspaceDir: string,
-  rl: ReadlineInterface,
-  config: WorkspaceConfig
-): Promise<WorkspaceConfig> {
-  const current = workspaceLegacyPythonSettings(config);
-  const environment = await askPythonTargetEnvironment(rl);
-  assertUniquePythonEnvironmentName(current.targetEnvironments, environment.name);
-  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
-    ...current,
-    publishOwner: current.publishOwner ?? defaultPythonPublishOwner,
-    sourceIndex: current.sourceIndex ?? defaultPythonSourceIndex,
-    targetEnvironments: [...(current.targetEnvironments ?? []), environment],
-  });
-  await saveWorkspaceConfig(workspaceDir, nextConfig);
-  return nextConfig;
-}
-
-function parsePythonEnvironmentIndex(
-  value: string,
-  environments: PythonTargetEnvironmentConfig[]
-): number {
-  const index = parsePositiveInteger(value);
-  if (index > environments.length) {
-    throw new Error(
-      `Python target environment index must be between 1 and ${String(environments.length)}`
-    );
-  }
-  return index - 1;
-}
-
-async function editPythonTargetEnvironment(
-  workspaceDir: string,
-  rl: ReadlineInterface,
-  config: WorkspaceConfig
-): Promise<WorkspaceConfig> {
-  const current = workspaceLegacyPythonSettings(config);
-  const environments = current.targetEnvironments ?? [];
-  if (environments.length === 0) {
-    console.log('No Python target environments configured.');
-    return config;
-  }
-  console.log(formatPythonTargetEnvironmentList(environments));
-  const selectedIndex = parsePythonEnvironmentIndex(
-    await ask(rl, 'Environment index to edit'),
-    environments
-  );
-  const environment = await askPythonTargetEnvironment(rl, environments[selectedIndex]);
-  assertUniquePythonEnvironmentName(environments, environment.name, selectedIndex);
-  const nextEnvironments = [...environments];
-  nextEnvironments[selectedIndex] = environment;
-  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
-    ...current,
-    targetEnvironments: nextEnvironments,
-  });
-  await saveWorkspaceConfig(workspaceDir, nextConfig);
-  return nextConfig;
-}
-
-async function removePythonTargetEnvironment(
-  workspaceDir: string,
-  rl: ReadlineInterface,
-  config: WorkspaceConfig
-): Promise<WorkspaceConfig> {
-  const current = workspaceLegacyPythonSettings(config);
-  const environments = current.targetEnvironments ?? [];
-  if (environments.length === 0) {
-    console.log('No Python target environments configured.');
-    return config;
-  }
-  console.log(formatPythonTargetEnvironmentList(environments));
-  const selectedIndex = parsePythonEnvironmentIndex(
-    await ask(rl, 'Environment index to remove'),
-    environments
-  );
-  const selected = environments[selectedIndex];
-  if (!selected) {
-    throw new Error('Python target environment index is out of range');
-  }
-  if (!(await askYesNo(rl, `Remove Python target environment "${selected.name}"?`, false))) {
-    return config;
-  }
-  if (
-    environments.length === 1 &&
-    config.targets.some((target) => target.type === 'pypi' || target.type === 'python-wheel')
-  ) {
-    throw new Error('Cannot remove the last Python target environment while PyPI targets exist');
-  }
-
-  const nextEnvironments = environments.filter((_, index) => index !== selectedIndex);
-  const nextConfig = withWorkspaceLegacyPythonSettings(config, {
-    ...(current.publishOwner ? { publishOwner: current.publishOwner } : {}),
-    resolutionMode: current.resolutionMode,
-    ...(current.sourceIndex ? { sourceIndex: current.sourceIndex } : {}),
-    ...(nextEnvironments.length > 0 ? { targetEnvironments: nextEnvironments } : {}),
-  });
-  await saveWorkspaceConfig(workspaceDir, nextConfig);
-  return nextConfig;
-}
-
-async function configureInitialPythonSettings(
-  workspaceDir: string,
-  rl: ReadlineInterface,
-  config: WorkspaceConfig
-): Promise<WorkspaceConfig> {
-  let nextConfig = await configurePythonPackageSettings(workspaceDir, rl, config);
-  do {
-    nextConfig = await addPythonTargetEnvironment(workspaceDir, rl, nextConfig);
-  } while (await askYesNo(rl, 'Add another Python target environment?', false));
-  return nextConfig;
-}
-
 function parseApplicationCoverageChoice(value: string): PlatformCoveragePolicy['platforms'] {
   switch (value.trim().toLowerCase()) {
     case 'both':
@@ -2724,7 +2377,6 @@ async function configurePythonApplicationPublication(
   const nextConfig: WorkspaceConfig = {
     ...config,
     python: {
-      ...(config.python?.legacySeed ? { legacySeed: config.python.legacySeed } : {}),
       planner: config.python?.planner ?? {
         engine: 'uv',
         version: workspacePythonPlannerVersion,
@@ -3031,10 +2683,6 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
         'Branch (enter current/new value, or "-" to clear)',
         target.branch ?? ''
       );
-      const pythonResolutionMode = await askTargetPythonResolutionMode(
-        rl,
-        target.pythonResolutionMode ?? 'inherit'
-      );
       await runSelfCommand(
         [
           'target',
@@ -3042,27 +2690,6 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
           indexValue,
           workspaceDir,
           ...(branch === '-' ? ['--clear-branch'] : branch ? ['--branch', branch] : []),
-          '--python-resolution-mode',
-          pythonResolutionMode ?? 'inherit',
-        ],
-        workspaceDir
-      );
-      return;
-    }
-    case 'pypi':
-    case 'python-wheel': {
-      const pythonResolutionMode = await askTargetPythonResolutionMode(
-        rl,
-        target.pythonResolutionMode ?? 'inherit'
-      );
-      await runSelfCommand(
-        [
-          'target',
-          'edit',
-          indexValue,
-          workspaceDir,
-          '--python-resolution-mode',
-          pythonResolutionMode ?? 'inherit',
         ],
         workspaceDir
       );
@@ -3105,7 +2732,6 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('6. Edit target');
     console.log('7. Remove target');
     console.log('8. Download selected target');
-    console.log('9. Advanced / legacy Python targets');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -3214,101 +2840,8 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         }
         break;
       }
-      case '9':
-        await configureLegacyPythonTargetsMenu(workspaceDir, rl);
-        break;
       default:
         console.log('Unknown menu item.');
-    }
-  }
-}
-
-async function configureLegacyPythonTargetsMenu(
-  workspaceDir: string,
-  rl: ReadlineInterface
-): Promise<void> {
-  for (;;) {
-    console.log('\nAdvanced / legacy Python targets');
-    console.log('1. Add raw PyPI requirement target');
-    console.log('0. Back');
-    const choice = await ask(rl, 'Choose an action', '0');
-    if (choice === '0') {
-      return;
-    }
-    if (choice === '1') {
-      let config = await readMenuWorkspace(workspaceDir, rl);
-      if (!workspaceLegacyPythonSettings(config).targetEnvironments?.length) {
-        console.log('A raw PyPI target requires at least one exact Python target environment.');
-        if (!(await askYesNo(rl, 'Configure legacy Python seeding now?', true))) {
-          continue;
-        }
-        config = await configureInitialPythonSettings(workspaceDir, rl, config);
-      }
-      const pythonResolutionMode = await askTargetPythonResolutionMode(rl, 'approximate');
-      const spec = await ask(rl, 'PyPI package requirement');
-      if (spec) {
-        await runSelfCommand(
-          compactArgs([
-            'target',
-            'add',
-            'pypi',
-            spec,
-            workspaceDir,
-            pythonResolutionMode ? '--python-resolution-mode' : undefined,
-            pythonResolutionMode,
-          ]),
-          workspaceDir
-        );
-      }
-      continue;
-    }
-    console.log('Unknown menu item.');
-  }
-}
-
-async function configureLegacyPythonSettingsMenu(
-  workspaceDir: string,
-  rl: ReadlineInterface
-): Promise<void> {
-  for (;;) {
-    const config = await readMenuWorkspace(workspaceDir, rl);
-    const legacyPython = workspaceLegacyPythonSettings(config);
-    console.log('\nPython / PyPI settings');
-    console.log(`Source index: ${legacyPython.sourceIndex ?? '(disabled)'}`);
-    console.log(`Publish owner: ${legacyPython.publishOwner ?? '(not set)'}`);
-    console.log(`Default resolution mode: ${legacyPython.resolutionMode}`);
-    console.log('Target environments:');
-    console.log(formatPythonTargetEnvironmentList(legacyPython.targetEnvironments));
-    console.log('Actions:');
-    console.log('1. Configure package settings');
-    console.log('2. Add target environment');
-    console.log('3. Edit target environment');
-    console.log('4. Remove target environment');
-    console.log('0. Back');
-
-    const choice = await ask(rl, 'Choose an action', '0');
-    switch (choice) {
-      case '0':
-        return;
-      case '1':
-        await configurePythonPackageSettings(workspaceDir, rl, config);
-        console.log('Saved Python/PyPI settings.');
-        break;
-      case '2':
-        await addPythonTargetEnvironment(workspaceDir, rl, config);
-        console.log('Saved Python target environment.');
-        break;
-      case '3':
-        await editPythonTargetEnvironment(workspaceDir, rl, config);
-        console.log('Saved Python target environment.');
-        break;
-      case '4':
-        await removePythonTargetEnvironment(workspaceDir, rl, config);
-        console.log('Updated Python target environments.');
-        break;
-      default:
-        console.log('Unknown menu item.');
-        break;
     }
   }
 }
@@ -3319,11 +2852,6 @@ async function configurePythonSettingsMenu(
 ): Promise<void> {
   for (;;) {
     const config = await readMenuWorkspace(workspaceDir, rl);
-    if (config.schemaVersion !== 2) {
-      console.log('This schema-v1 workspace uses legacy Python package seeding.');
-      await configureLegacyPythonSettingsMenu(workspaceDir, rl);
-      return;
-    }
     const defaultCoverage = config.coveragePolicies?.[0];
     const publication = config.python?.publication ?? defaultPythonPublicationProfile();
     const publicationOwner =
@@ -3361,7 +2889,6 @@ async function configurePythonSettingsMenu(
     console.log('Actions:');
     console.log('1. Configure source and publication');
     console.log('2. Configure default platform coverage');
-    console.log('3. Advanced / legacy package seeding');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -3375,9 +2902,6 @@ async function configurePythonSettingsMenu(
       case '2':
         await configureApplicationCoverage(workspaceDir, rl, config);
         console.log('Saved Python application coverage.');
-        break;
-      case '3':
-        await configureLegacyPythonSettingsMenu(workspaceDir, rl);
         break;
       default:
         console.log('Unknown menu item.');
@@ -4004,18 +3528,10 @@ targetAddCommand
   .argument('<url>', 'Git repository URL')
   .argument('[workspace]', 'Workspace directory', '.')
   .option('--branch <name>', 'Branch to clone on first materialization')
-  .option(
-    '--python-resolution-mode <mode>',
-    'Override the workspace Python resolution mode: locked-only or approximate',
-    parsePythonResolutionMode
-  )
   .action(async (url: string, workspace: string, options: TargetGitOptions) => {
     try {
       const target = {
         ...(options.branch ? { branch: options.branch } : {}),
-        ...(options.pythonResolutionMode
-          ? { pythonResolutionMode: options.pythonResolutionMode }
-          : {}),
         type: 'git' as const,
         url,
       };
@@ -4186,68 +3702,6 @@ targetAddCommand
   });
 
 targetAddCommand
-  .command('pypi')
-  .description('Add a legacy raw Python package requirement target')
-  .argument('<spec>', 'PEP 508 requirement, e.g. requests[socks]>=2.31')
-  .argument('[workspace]', 'Workspace directory', '.')
-  .option(
-    '--python-resolution-mode <mode>',
-    'Override the workspace Python resolution mode: locked-only or approximate',
-    parsePythonResolutionMode
-  )
-  .action(async (spec: string, workspace: string, options: TargetPythonOptions) => {
-    try {
-      const target = {
-        ...(options.pythonResolutionMode
-          ? { pythonResolutionMode: options.pythonResolutionMode }
-          : {}),
-        spec,
-        type: 'pypi' as const,
-      };
-      const result = await addWorkspaceTarget(workspace, target);
-      console.log(
-        `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
-      );
-    } catch (error) {
-      console.error(`Error: ${(error as Error).message}`);
-      process.exitCode = 1;
-    }
-  });
-
-targetAddCommand
-  .command('python-wheel')
-  .description('Add an exact Python root wheel target')
-  .argument('<url>', 'HTTP(S) or file URL to the wheel')
-  .requiredOption('--sha256 <digest>', 'Expected wheel SHA-256')
-  .argument('[workspace]', 'Workspace directory', '.')
-  .option(
-    '--python-resolution-mode <mode>',
-    'Override the workspace Python resolution mode: locked-only or approximate',
-    parsePythonResolutionMode
-  )
-  .action(
-    async (url: string, workspace: string, options: TargetPythonOptions & { sha256: string }) => {
-      try {
-        const target = {
-          ...(options.pythonResolutionMode
-            ? { pythonResolutionMode: options.pythonResolutionMode }
-            : {}),
-          sha256: options.sha256,
-          type: 'python-wheel' as const,
-          url,
-        };
-        const result = await addWorkspaceTarget(workspace, target);
-        console.log(
-          `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nTotal targets: ${String(result.config.targets.length)}`
-        );
-      } catch (error) {
-        console.error(`Error: ${(error as Error).message}`);
-        process.exitCode = 1;
-      }
-    }
-  );
-
-targetAddCommand
   .command('npm')
   .description('Add an npm package spec target')
   .argument('<spec>', 'Package spec, e.g. eslint@latest')
@@ -4397,10 +3851,6 @@ targetCommand
     'Replace Python application exact/latest selectors; repeat for alternatives',
     collectOptionalStrings
   )
-  .option(
-    '--python-resolution-mode <mode>',
-    'Replace a target override: locked-only, approximate, or inherit'
-  )
   .action(async (index: string, workspace: string, options: TargetEditOptions) => {
     try {
       if (options.branch !== undefined && options.clearBranch === true) {
@@ -4417,43 +3867,11 @@ targetCommand
         ...(options.platform !== undefined
           ? { platforms: parsePythonApplicationPlatforms(options.platform) }
           : {}),
-        ...(options.pythonResolutionMode !== undefined
-          ? {
-              pythonResolutionMode:
-                parseTargetPythonResolutionMode(options.pythonResolutionMode) ?? null,
-            }
-          : {}),
         ...(options.windowDays !== undefined ? { windowDays: options.windowDays } : {}),
       };
       const result = await editWorkspaceTarget(workspace, parsePositiveInteger(index), edit);
       console.log(
         `${result.changed ? 'Updated' : 'Unchanged'} target: ${formatTargetValue(result.target)}\nTotal targets: ${String(result.config.targets.length)}`
-      );
-    } catch (error) {
-      console.error(`Error: ${(error as Error).message}`);
-      process.exitCode = 1;
-    }
-  });
-
-targetCommand
-  .command('set-python-resolution')
-  .description('Deprecated alias for target edit --python-resolution-mode')
-  .argument('<index>', 'Target index from target list')
-  .argument('<mode>', 'locked-only, approximate, or inherit')
-  .argument('[workspace]', 'Workspace directory', '.')
-  .action(async (index: string, mode: string, workspace: string) => {
-    try {
-      const pythonResolutionMode = parseTargetPythonResolutionMode(mode);
-      const result = await setWorkspaceTargetPythonResolutionMode(
-        workspace,
-        parsePositiveInteger(index),
-        pythonResolutionMode
-      );
-      console.log(
-        `Updated target: ${formatTargetValue(result.target)}\nPython resolution mode: ${
-          pythonResolutionMode ??
-          `inherit (${workspaceLegacyPythonSettings(result.config).resolutionMode})`
-        }`
       );
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
@@ -4531,10 +3949,6 @@ program
     collectOptionalStrings
   )
   .option(
-    '--allow-approximate-python',
-    'Opt in to simplified no-backtracking resolution for unlocked Python requirements'
-  )
-  .option(
     '--allow-window-gap',
     'Continue when the last successful full download is older than a configured artifact window'
   )
@@ -4593,7 +4007,6 @@ program
             ? selectWorkspaceTargets(config, options.target)
             : undefined;
         const activeConfig = targetSelection?.config ?? config;
-        const legacyPython = workspaceLegacyPythonSettings(activeConfig);
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const lastSuccessfulDownload = await reportDownloadWatermark(outputDir);
         await confirmCpythonWindowGap({
@@ -4620,8 +4033,6 @@ program
             .map((target) => target.spec)
         );
         const gitTargets = createWorkspaceGitSources(activeConfig);
-        const pythonRequirements = createWorkspacePythonRequirements(activeConfig);
-        const pythonRootWheels = createWorkspacePythonRootWheels(activeConfig);
         const cpythonTargets = activeConfig.targets.filter(
           (target) => target.type === 'cpython-distributions'
         );
@@ -4691,7 +4102,6 @@ program
         const pythonAdvisoryClient = new OsvPythonAdvisoryClient(osvClient);
         const prune =
           !targetSelection && (options.prune === true || config.defaults.download.prune === true);
-        const allowApproximatePython = options.allowApproximatePython === true;
         const snapshotOutput = options.output
           ? path.relative(workspaceDir, outputDir) || '.'
           : config.output;
@@ -4701,11 +4111,6 @@ program
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
           })
         );
-        const pythonIndex = legacyPython.sourceIndex
-          ? new HttpPythonIndexClient(legacyPython.sourceIndex, {
-              ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-            })
-          : undefined;
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
         const retainedGitSources =
@@ -4714,7 +4119,6 @@ program
             : undefined;
         const onDownloadProgress = createCollectProgressLogger();
         const report = await collectBundle({
-          allowApproximatePython,
           dryRun: options.dryRun === true,
           concurrency: options.concurrency,
           deferGitSourcesActivation: true,
@@ -4723,8 +4127,6 @@ program
           initialGitRequirements: parsedTargets.gitRequirements,
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
-          initialPythonRequirements: pythonRequirements,
-          initialPythonRootWheels: pythonRootWheels,
           initialUnsupported: parsedTargets.unsupported,
           latestPolicy,
           minReleaseAgeDays: npmSecurity.minReleaseAgeDays,
@@ -4734,16 +4136,6 @@ program
           ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
           onProgress: onDownloadProgress,
           outputDir,
-          ...(pythonIndex ? { pythonIndex } : {}),
-          ...(legacyPython.sourceIndex ? { pythonSourceIndex: legacyPython.sourceIndex } : {}),
-          pythonResolutionMode: legacyPython.resolutionMode,
-          pythonSecurity: {
-            advisoryClient: pythonAdvisoryClient,
-            policy: { maxReportAgeHours: npmSecurity.maxReportAgeHours },
-          },
-          ...(legacyPython.targetEnvironments
-            ? { pythonTargetEnvironments: legacyPython.targetEnvironments }
-            : {}),
           registry,
           registryUrl,
           security: {
@@ -4926,10 +4318,6 @@ program
           policy: {
             ...npmSecurity,
           },
-        },
-        pythonSecurity: {
-          advisoryClient: new OsvPythonAdvisoryClient(osvClient),
-          policy: { maxReportAgeHours: npmSecurity.maxReportAgeHours },
         },
         root,
       });

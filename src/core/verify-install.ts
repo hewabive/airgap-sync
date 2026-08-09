@@ -13,12 +13,11 @@ import type {
   VerifyInstallReport,
 } from '../types.js';
 import type { WorkspaceSnapshot, WorkspaceTargetSnapshot } from './workspace.js';
-import { readPythonSeedManifest, type PythonSeedManifest } from './python/bundle.js';
+import { readPythonSeedManifest } from './python/bundle.js';
 import {
   startPythonBundleIndexServer,
   type PythonBundleIndexServer,
 } from './python/bundle-index-server.js';
-import type { PythonTargetEnvironmentConfig } from './python/environments.js';
 import {
   readPythonApplicationBundleIndex,
   type PythonApplicationBundleEntry,
@@ -228,137 +227,6 @@ function installEnv(options: {
   delete env.UV_INDEX;
   delete env.UV_INDEX_URL;
   return env;
-}
-
-function localPythonPlatformMatches(environment: PythonTargetEnvironmentConfig): boolean {
-  const osMatches =
-    (process.platform === 'linux' && environment.os === 'linux') ||
-    (process.platform === 'darwin' && environment.os === 'macos') ||
-    (process.platform === 'win32' && environment.os === 'windows');
-  const archMatches =
-    (process.arch === 'x64' && environment.arch === 'x86_64') ||
-    (process.arch === 'arm64' && environment.arch === 'aarch64');
-  return osMatches && archMatches;
-}
-
-async function verifyPythonInstall(options: {
-  env: NodeJS.ProcessEnv;
-  indexUrl: string;
-  manifest: PythonSeedManifest;
-  runner: InstallCommandRunner;
-  tempRoot: string;
-  timeoutMs: number;
-}): Promise<VerifyInstallProjectResult> {
-  const candidates = process.platform === 'win32' ? ['py', 'python'] : ['python3', 'python'];
-  for (const command of candidates) {
-    const versionResult = await options.runner({
-      args: ['--version'],
-      command,
-      cwd: options.tempRoot,
-      env: options.env,
-      timeoutMs: options.timeoutMs,
-    });
-    if (versionResult.exitCode !== 0) {
-      continue;
-    }
-    const version = /Python\s+(\d+\.\d+\.\d+)/i.exec(
-      `${versionResult.stdout}\n${versionResult.stderr}`
-    )?.[1];
-    const environment = options.manifest.targetEnvironments.find(
-      (item) => item.pythonVersion === version && localPythonPlatformMatches(item)
-    );
-    if (!environment) {
-      continue;
-    }
-    const requirements = options.manifest.packages
-      .filter((pkg) => pkg.files.some((file) => file.environments.includes(environment.name)))
-      .map((pkg) => `${pkg.name}==${pkg.version}`)
-      .sort();
-    if (requirements.length === 0) {
-      return {
-        packageManager: 'pip',
-        projectPath: `python:${environment.name}`,
-        reason: 'No bundled Python packages apply to the matching target environment',
-        status: 'skipped',
-        targetUrl: options.indexUrl,
-      };
-    }
-    const venvPath = path.join(options.tempRoot, 'python-venv');
-    const create = await options.runner({
-      args: ['-m', 'venv', venvPath],
-      command,
-      cwd: options.tempRoot,
-      env: options.env,
-      timeoutMs: options.timeoutMs,
-    });
-    if (create.exitCode !== 0) {
-      const output = `${create.stdout}\n${create.stderr}`;
-      if (/ensurepip|python\S*-venv|no module named ['"]?venv/i.test(output)) {
-        return {
-          command: [command, '-m', 'venv', venvPath],
-          exitCode: create.exitCode,
-          packageManager: 'pip',
-          projectPath: `python:${environment.name}`,
-          reason:
-            'Matching Python interpreter is present but venv/ensurepip support is unavailable',
-          status: 'skipped',
-          stderr: truncateOutput(create.stderr),
-          stdout: truncateOutput(create.stdout),
-          targetUrl: options.indexUrl,
-        };
-      }
-      return {
-        command: [command, '-m', 'venv', venvPath],
-        exitCode: create.exitCode,
-        packageManager: 'pip',
-        projectPath: `python:${environment.name}`,
-        status: 'failed',
-        stderr: truncateOutput(create.stderr),
-        stdout: truncateOutput(create.stdout),
-        targetUrl: options.indexUrl,
-      };
-    }
-    const python =
-      process.platform === 'win32'
-        ? path.join(venvPath, 'Scripts', 'python.exe')
-        : path.join(venvPath, 'bin', 'python');
-    const args = [
-      '-m',
-      'pip',
-      'install',
-      '--index-url',
-      options.indexUrl,
-      '--only-binary',
-      ':all:',
-      '--no-deps',
-      ...requirements,
-    ];
-    const install = await options.runner({
-      args,
-      command: python,
-      cwd: options.tempRoot,
-      env: options.env,
-      timeoutMs: options.timeoutMs,
-    });
-    return {
-      command: [python, ...args],
-      exitCode: install.exitCode,
-      packageManager: 'pip',
-      projectPath: `python:${environment.name}`,
-      status: install.exitCode === 0 ? 'passed' : 'failed',
-      stderr: truncateOutput(install.stderr),
-      stdout: truncateOutput(install.stdout),
-      targetUrl: options.indexUrl,
-      tempPath: venvPath,
-    };
-  }
-  return {
-    packageManager: 'pip',
-    projectPath: 'python',
-    reason: 'No local Python interpreter exactly matches a configured target environment',
-    status: 'skipped',
-    targetUrl: options.indexUrl,
-  };
 }
 
 interface PythonInterpreterCommand {
@@ -807,35 +675,6 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
           targetUrl: target.url,
           timeoutMs,
         })
-      );
-    }
-    const legacyPythonManifest = pythonManifest
-      ? {
-          ...pythonManifest,
-          packages: pythonManifest.packages.flatMap((pkg) => {
-            const files = pkg.files.filter((file) => file.file.startsWith('python-packages/'));
-            return files.length > 0 ? [{ ...pkg, files }] : [];
-          }),
-        }
-      : undefined;
-    if (legacyPythonManifest?.packages.length) {
-      projects.push(
-        pythonIndexUrl
-          ? await verifyPythonInstall({
-              env,
-              indexUrl: pythonIndexUrl,
-              manifest: legacyPythonManifest,
-              runner,
-              tempRoot,
-              timeoutMs,
-            })
-          : {
-              packageManager: 'pip',
-              projectPath: 'python',
-              reason: 'Python publish owner is not configured',
-              status: 'skipped',
-              targetUrl: options.giteaBaseUrl,
-            }
       );
     }
     for (const application of pythonApplicationIndex?.applications ?? []) {

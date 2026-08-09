@@ -6,8 +6,6 @@ import {
   addWorkspaceTarget,
   clearWorkspaceGiteaToken,
   createWorkspaceGitSources,
-  createWorkspacePythonRequirements,
-  createWorkspacePythonRootWheels,
   createWorkspaceSnapshot,
   editWorkspaceTarget,
   initWorkspace,
@@ -21,11 +19,9 @@ import {
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
   setWorkspacePythonApplicationVersionSelection,
-  setWorkspaceTargetPythonResolutionMode,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
   workspaceConfigV1BackupFileName,
-  workspaceLegacyPythonSettings,
   workspaceTargetEditableFields,
   workspaceSecretsFileName,
   writeWorkspaceConfig,
@@ -122,12 +118,12 @@ describe('workspace config', () => {
     expect((await readWorkspaceConfig(tempDir)).targets).toEqual([
       {
         branch: 'main',
-        type: 'git',
+        type: 'git' as const,
         url: 'https://github.com/acme/app.git',
       },
       {
         spec: 'eslint@latest',
-        type: 'npm',
+        type: 'npm' as const,
       },
     ]);
 
@@ -225,7 +221,7 @@ describe('workspace config', () => {
     );
   });
 
-  it('edits and clears shared target settings without changing target identity', async () => {
+  it('edits and clears a Git branch without changing target identity', async () => {
     await initWorkspace({ workspaceDir: tempDir });
     await addWorkspaceTarget(tempDir, {
       branch: 'main',
@@ -233,21 +229,14 @@ describe('workspace config', () => {
       url: 'https://github.com/acme/app.git',
     });
 
-    const updated = await editWorkspaceTarget(tempDir, 1, {
-      branch: 'release',
-      pythonResolutionMode: 'approximate',
-    });
+    const updated = await editWorkspaceTarget(tempDir, 1, { branch: 'release' });
     expect(updated.target).toEqual({
       branch: 'release',
-      pythonResolutionMode: 'approximate',
       type: 'git',
       url: 'https://github.com/acme/app.git',
     });
 
-    const cleared = await editWorkspaceTarget(tempDir, 1, {
-      branch: null,
-      pythonResolutionMode: null,
-    });
+    const cleared = await editWorkspaceTarget(tempDir, 1, { branch: null });
     expect(cleared.target).toEqual({
       type: 'git',
       url: 'https://github.com/acme/app.git',
@@ -487,188 +476,25 @@ describe('workspace config', () => {
     });
   });
 
-  it('normalizes Python settings and PyPI targets', async () => {
-    await initWorkspace({ workspaceDir: tempDir });
+  it('rejects removed legacy Python targets and settings', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
     await fs.writeJson(
       path.join(tempDir, 'airgap-sync.json'),
       {
-        output: './airgap-bundle',
-        pythonPublishOwner: ' pypi ',
-        pythonSourceIndex: 'https://packages.example/simple',
-        pythonTargetEnvironments: [
-          {
-            arch: 'x86_64',
-            manylinux: 'manylinux_2_17',
-            name: 'prod-linux',
-            os: 'linux',
-            pythonVersion: '3.11.9',
-          },
-        ],
-        schemaVersion: 1,
-        sourceRegistry: 'https://registry.npmjs.org',
-        targets: [
-          {
-            pythonResolutionMode: 'approximate',
-            spec: 'requests[socks]>=2.31',
-            type: 'pypi',
-          },
-        ],
+        ...config,
+        python: { ...config.python, legacySeed: { resolutionMode: 'locked-only' } },
       },
       { spaces: 2 }
     );
+    await expect(readWorkspaceConfig(tempDir)).rejects.toThrow('python.legacySeed was removed');
 
-    expect(await readWorkspaceConfig(tempDir)).toMatchObject({
-      python: {
-        legacySeed: {
-          resolutionMode: 'locked-only',
-          targetEnvironments: [
-            {
-              arch: 'x86_64',
-              manylinux: 'manylinux_2_17',
-              name: 'prod-linux',
-              os: 'linux',
-              pythonVersion: '3.11.9',
-            },
-          ],
-        },
-        publication: {
-          owner: {
-            kind: 'organization',
-            name: 'airgap-packages',
-            strategy: 'fixed-owner',
-          },
-          visibility: 'public',
-        },
-        sourceIndex: 'https://packages.example/simple',
-      },
-      schemaVersion: 2,
-      targets: [
-        {
-          pythonResolutionMode: 'approximate',
-          spec: 'requests[socks]>=2.31',
-          type: 'pypi',
-        },
-      ],
-    });
-  });
-
-  it('normalizes exact Python wheel targets and creates transfer inputs', async () => {
     await fs.writeJson(
       path.join(tempDir, 'airgap-sync.json'),
-      {
-        output: './airgap-bundle',
-        pythonResolutionMode: 'locked-only',
-        pythonTargetEnvironments: [
-          {
-            arch: 'x86_64',
-            manylinux: 'manylinux_2_34',
-            name: 'cpu',
-            os: 'linux',
-            pythonVersion: '3.12.13',
-          },
-        ],
-        schemaVersion: 1,
-        sourceRegistry: 'https://registry.npmjs.org',
-        targets: [
-          {
-            pythonResolutionMode: 'approximate',
-            sha256: 'A'.repeat(64),
-            type: 'python-wheel',
-            url: 'https://example.test/vllm-0.24.0+cpu-cp38-abi3-manylinux_2_34_x86_64.whl',
-          },
-        ],
-      },
+      { ...config, targets: [{ spec: 'requests==2.32.3', type: 'pypi' }] },
       { spaces: 2 }
     );
-
-    const config = await readWorkspaceConfig(tempDir);
-    expect(config.targets[0]).toMatchObject({
-      pythonResolutionMode: 'approximate',
-      sha256: 'a'.repeat(64),
-      type: 'python-wheel',
-    });
-    expect(createWorkspacePythonRootWheels(config)[0]).toMatchObject({
-      pythonResolutionMode: 'approximate',
-      requiredBy: 'root',
-      sha256: 'a'.repeat(64),
-      sourcePath: 'workspace-wheel-targets',
-    });
-  });
-
-  it('requires target environments for PyPI targets', async () => {
-    await initWorkspace({ workspaceDir: tempDir });
-    await expect(
-      addWorkspaceTarget(tempDir, { spec: 'requests==2.32.3', type: 'pypi' })
-    ).rejects.toThrow(/pythonTargetEnvironments/);
-  });
-
-  it('creates Python requirements for configured PyPI targets', async () => {
-    const config = await initWorkspace({ workspaceDir: tempDir });
-    config.targets.push({
-      pythonResolutionMode: 'approximate',
-      spec: 'requests[socks]>=2.31',
-      type: 'pypi',
-    });
-    expect(createWorkspacePythonRequirements(config)).toEqual([
-      {
-        constraint: false,
-        hashes: [],
-        line: 1,
-        pythonResolutionMode: 'approximate',
-        requiredBy: 'root',
-        requirement: {
-          extras: ['socks'],
-          name: 'requests',
-          normalizedName: 'requests',
-          raw: 'requests[socks]>=2.31',
-          specifier: '>=2.31',
-        },
-        sourcePath: 'workspace-targets',
-      },
-    ]);
-  });
-
-  it('sets and clears a target-specific Python resolution override', async () => {
-    const config = await initWorkspace({ legacy: true, workspaceDir: tempDir });
-    config.pythonTargetEnvironments = [
-      {
-        arch: 'x86_64',
-        manylinux: 'manylinux_2_17',
-        name: 'prod-linux',
-        os: 'linux',
-        pythonVersion: '3.11.9',
-      },
-    ];
-    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
-    await addWorkspaceTarget(tempDir, {
-      spec: 'requests>=2.31',
-      type: 'pypi',
-    });
-
-    const updated = await setWorkspaceTargetPythonResolutionMode(tempDir, 1, 'approximate');
-    expect(updated.target).toMatchObject({
-      pythonResolutionMode: 'approximate',
-      spec: 'requests>=2.31',
-      type: 'pypi',
-    });
-    expect((await readWorkspaceConfig(tempDir)).targets[0]).toHaveProperty(
-      'pythonResolutionMode',
-      'approximate'
-    );
-
-    await setWorkspaceTargetPythonResolutionMode(tempDir, 1, undefined);
-    expect((await readWorkspaceConfig(tempDir)).targets[0]).not.toHaveProperty(
-      'pythonResolutionMode'
-    );
-  });
-
-  it('rejects Python resolution overrides for target types without Python inputs', async () => {
-    const config = await initWorkspace({ workspaceDir: tempDir });
-    config.targets.push({ spec: 'eslint@latest', type: 'npm' });
-    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
-
-    await expect(setWorkspaceTargetPythonResolutionMode(tempDir, 1, 'approximate')).rejects.toThrow(
-      'npm targets do not resolve Python dependencies'
+    await expect(readWorkspaceConfig(tempDir)).rejects.toThrow(
+      'pypi targets were removed with legacy Python seeding'
     );
   });
 
@@ -750,7 +576,6 @@ describe('workspace config', () => {
     const config = await initWorkspace({ workspaceDir: tempDir });
     config.targets.push({
       branch: 'main',
-      pythonResolutionMode: 'approximate',
       type: 'git',
       url: 'https://github.com/acme/app.git',
     });
@@ -762,7 +587,6 @@ describe('workspace config', () => {
         id: 'github.com/acme/app',
         localMirrorPath: 'git-mirrors/github.com/acme/app.git',
         owner: 'acme',
-        pythonResolutionMode: 'approximate',
         repo: 'app',
         requirements: [],
         sourceUrl: 'https://github.com/acme/app.git',
@@ -776,7 +600,6 @@ describe('workspace config', () => {
     config.targets.push(
       {
         branch: 'main',
-        pythonResolutionMode: 'approximate',
         type: 'git',
         url: 'https://github.com/acme/app.git',
       },
@@ -800,7 +623,6 @@ describe('workspace config', () => {
           },
           {
             branch: 'main',
-            pythonResolutionMode: 'approximate',
             type: 'git',
             url: 'https://github.com/acme/app.git',
           },
@@ -814,7 +636,6 @@ describe('workspace config', () => {
         },
         {
           branch: 'main',
-          pythonResolutionMode: 'approximate',
           type: 'git',
           url: 'https://github.com/acme/app.git',
         },
@@ -835,11 +656,10 @@ describe('workspace config', () => {
   });
 
   it('creates a portable workspace snapshot for later verification', async () => {
-    const config = await initWorkspace({ legacy: true, workspaceDir: tempDir });
+    const config = await initWorkspace({ workspaceDir: tempDir });
     config.targets.push(
       {
         branch: 'main',
-        pythonResolutionMode: 'approximate',
         type: 'git',
         url: 'https://github.com/acme/app.git',
       },
@@ -857,14 +677,14 @@ describe('workspace config', () => {
       createdAt: '2026-05-21T00:00:00.000Z',
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
-      pythonResolutionMode: 'locked-only',
-      schemaVersion: 1,
+      python: config.python,
+      coveragePolicies: config.coveragePolicies,
+      schemaVersion: 2,
       sourceRegistry: 'https://registry.npmjs.org',
       targets: [
         {
           branch: 'main',
           localMirrorPath: 'git-mirrors/github.com/acme/app.git',
-          pythonResolutionMode: 'approximate',
           sourceId: 'github.com/acme/app',
           type: 'git',
           url: 'https://github.com/acme/app.git',
@@ -991,48 +811,34 @@ describe('workspace config', () => {
   });
 
   it('previews schema-v1 migration without changing the workspace', async () => {
-    const config = await initWorkspace({ legacy: true, workspaceDir: tempDir });
-    config.pythonPublishOwner = 'pypi';
-    config.pythonSourceIndex = 'https://pypi.org/simple/';
-    config.pythonTargetEnvironments = [
-      {
-        arch: 'x86_64',
-        manylinux: 'manylinux_2_17',
-        name: 'prod-linux',
-        os: 'linux',
-        pythonVersion: '3.11.9',
-      },
-    ];
-    config.targets.push(
-      {
-        branch: 'main',
-        type: 'git',
-        url: 'https://github.com/acme/app.git',
-      },
-      {
-        spec: 'eslint@latest',
-        type: 'npm',
-      },
-      {
-        spec: 'requests==2.32.3',
-        type: 'pypi',
-      },
-      {
-        sha256: 'a'.repeat(64),
-        type: 'python-wheel',
-        url: 'https://example.test/packages/demo-1.0.0-py3-none-any.whl',
-      }
-    );
+    const initialized = await initWorkspace({ workspaceDir: tempDir });
+    const common = { ...initialized };
+    delete common.coveragePolicies;
+    delete common.python;
+    const config = {
+      ...common,
+      pythonPublishOwner: 'pypi',
+      pythonSourceIndex: 'https://pypi.org/simple/',
+      schemaVersion: 1 as const,
+      targets: [
+        {
+          branch: 'main',
+          type: 'git' as const,
+          url: 'https://github.com/acme/app.git',
+        },
+        {
+          spec: 'eslint@latest',
+          type: 'npm' as const,
+        },
+      ],
+    };
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), config, { spaces: 2 });
 
     const migrated = previewWorkspaceConfigMigration(config);
 
     expect(migrated).toMatchObject({
       coveragePolicies: [],
       python: {
-        legacySeed: {
-          resolutionMode: 'locked-only',
-          targetEnvironments: config.pythonTargetEnvironments,
-        },
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -1043,24 +849,6 @@ describe('workspace config', () => {
       schemaVersion: 2,
       targets: config.targets,
     });
-    expect(migrated).not.toHaveProperty('pythonResolutionMode');
-    expect(migrated).not.toHaveProperty('pythonTargetEnvironments');
-    expect(workspaceLegacyPythonSettings(migrated)).toEqual({
-      publishOwner: 'pypi',
-      resolutionMode: 'locked-only',
-      sourceIndex: 'https://pypi.org/simple/',
-      targetEnvironments: config.pythonTargetEnvironments,
-    });
-    expect(
-      createWorkspaceSnapshot({
-        config: migrated,
-        createdAt: '2026-07-27T00:00:00.000Z',
-      })
-    ).toMatchObject({
-      pythonResolutionMode: 'locked-only',
-      pythonTargetEnvironments: config.pythonTargetEnvironments,
-      schemaVersion: 2,
-    });
     expect(
       (await fs.readJson<{ schemaVersion: number }>(path.join(tempDir, 'airgap-sync.json')))
         .schemaVersion
@@ -1069,8 +857,15 @@ describe('workspace config', () => {
   });
 
   it('automatically migrates schema v1 once with an exact backup', async () => {
-    const legacy = await initWorkspace({ legacy: true, workspaceDir: tempDir });
-    legacy.pythonSourceIndex = 'https://packages.example/simple/';
+    const initialized = await initWorkspace({ workspaceDir: tempDir });
+    const common = { ...initialized };
+    delete common.coveragePolicies;
+    delete common.python;
+    const legacy = {
+      ...common,
+      pythonSourceIndex: 'https://packages.example/simple/',
+      schemaVersion: 1 as const,
+    };
     await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), legacy, { spaces: 2 });
     const original = await fs.readFile(path.join(tempDir, 'airgap-sync.json'), 'utf8');
 
@@ -1089,9 +884,6 @@ describe('workspace config', () => {
     ]);
     expect(first.config).toMatchObject({
       python: {
-        legacySeed: {
-          resolutionMode: 'locked-only',
-        },
         publication: {
           owner: {
             kind: 'organization',
@@ -1173,7 +965,7 @@ describe('workspace config', () => {
     ).toBe(false);
   });
 
-  it('does not create a backup when legacy configuration is invalid', async () => {
+  it('does not create a backup for a removed legacy Python target', async () => {
     await fs.writeJson(
       path.join(tempDir, 'airgap-sync.json'),
       {
@@ -1186,7 +978,7 @@ describe('workspace config', () => {
     );
 
     await expect(readWorkspaceConfig(tempDir)).rejects.toThrow(
-      'pypi targets require pythonTargetEnvironments'
+      'pypi targets were removed with legacy Python seeding'
     );
     expect(await fs.pathExists(path.join(tempDir, workspaceConfigV1BackupFileName))).toBe(false);
     expect(

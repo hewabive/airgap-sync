@@ -226,9 +226,12 @@ The application path now:
 - prunes inactive workspace plans and locally unreferenced bundle artifacts after a
   successful full pruned download.
 
-Legacy raw PyPI, exact-wheel, requirements, and lockfile inputs remain available for
-advanced workflows. The legacy `python-runtime` target, `python.artifactTransfer`, and
-application-plan runtime/tool artifacts have been removed. `cpython-distributions`
+Raw PyPI, exact-wheel, repository requirements, and repository lockfile seeding have
+been removed. If Python converters, GUIs, benchmark tools, or test tools from a Git
+repository need offline support, they require an explicit application-level design and
+recipe rather than automatic repository scanning. The former `python-runtime` target,
+`python.artifactTransfer`, and application-plan runtime/tool artifacts are also gone.
+`cpython-distributions`
 selects stable Python minors, patches, platforms, and provider builds independently and
 publishes them additively to Gitea Generic Packages. Broader indexes/platforms and a
 full multi-platform Gitea integration matrix remain future work.

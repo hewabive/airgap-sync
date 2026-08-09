@@ -3,7 +3,6 @@ import path from 'node:path';
 import {
   chmod,
   copyFile,
-  link,
   mkdir,
   mkdtemp,
   readdir,
@@ -18,7 +17,7 @@ export type { Dirent } from 'node:fs';
 
 export const createWriteStream = nativeFs.createWriteStream;
 export const createReadStream = nativeFs.createReadStream;
-export { chmod, copyFile, link, mkdtemp, readdir, readFile, rename, stat, writeFile };
+export { chmod, copyFile, mkdtemp, readdir, readFile, rename, stat, writeFile };
 
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });

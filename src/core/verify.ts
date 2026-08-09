@@ -18,7 +18,7 @@ import type {
   VerifyReport,
 } from '../types.js';
 import type { WorkspaceSnapshot } from './workspace.js';
-import type { PythonFetchReport, PythonSeedManifest } from './python/bundle.js';
+import type { PythonSeedManifest } from './python/bundle.js';
 import { verifyPythonBundle } from './python/verify.js';
 import { assertPythonSecurityGate } from './python/security.js';
 import {
@@ -403,22 +403,9 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
   if (hasPythonManifest) {
     try {
       const pythonManifest = await fs.readJson<PythonSeedManifest>(pythonManifestPath);
-      let pythonFetchReport: PythonFetchReport | undefined;
-      try {
-        pythonFetchReport = await readOptionalJson<PythonFetchReport>(
-          path.join(bundleDir, 'python-fetch-report.json')
-        );
-      } catch (error) {
-        checks.push(
-          check('python-fetch-report', 'error', 'python-fetch-report.json is unreadable', {
-            error: (error as Error).message,
-          })
-        );
-      }
       checks.push(
         ...(await verifyPythonBundle({
           bundleDir,
-          ...(pythonFetchReport ? { fetchReport: pythonFetchReport } : {}),
           manifest: pythonManifest,
         }))
       );
@@ -456,19 +443,16 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
         })
       );
     }
-  } else if (workspaceSnapshot?.pythonTargetEnvironments?.length || fetchReport?.python?.enabled) {
-    checks.push(
-      check(
-        'python-seed-manifest',
-        'error',
-        'Python target environments are configured but python-seed-manifest.json is missing'
-      )
-    );
   }
 
   const hasPythonApplicationIndex = await fs.pathExists(
     path.join(bundleDir, pythonApplicationIndexPath)
   );
+  if (hasPythonManifest && !hasPythonApplicationIndex) {
+    checks.push(
+      check('python-applications', 'error', 'Legacy Python seed bundles are no longer supported')
+    );
+  }
   if (hasPythonApplicationIndex) {
     if (!hasPythonManifest) {
       checks.push(
