@@ -74,7 +74,7 @@ describe('npm security gate', () => {
     );
   });
 
-  it('blocks preinstall and non-registry dependencies but allows a digest-pinned exception', async () => {
+  it('warns about lifecycle code, blocks non-registry dependencies, and accepts exact approvals', async () => {
     const manifest = await createBundle({
       name: 'demo',
       optionalDependencies: { setup: 'github:example/setup#main' },
@@ -90,7 +90,7 @@ describe('npm security gate', () => {
     expect(blocked.ok).toBe(false);
     expect(blocked.staticFindings).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: 'scripts.preinstall', severity: 'error' }),
+        expect.objectContaining({ field: 'scripts.preinstall', severity: 'warning' }),
         expect.objectContaining({
           field: 'optionalDependencies.setup',
           severity: 'error',
@@ -107,6 +107,42 @@ describe('npm security gate', () => {
     });
     expect(allowed.ok).toBe(true);
     expect(allowed.staticFindings.every((finding) => finding.allowed)).toBe(true);
+  });
+
+  it('does not block a bundle only because a package declares lifecycle code', async () => {
+    const manifest = await createBundle({
+      name: 'demo',
+      scripts: { install: 'node install.js', postinstall: 'node verify.js' },
+      version: '1.0.0',
+    });
+    const report = await scanNpmBundleSecurity({
+      advisoryClient: advisoryClient([]),
+      bundleDir,
+      manifest,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.staticFindings).toEqual([
+      expect.objectContaining({ field: 'scripts.install', severity: 'warning' }),
+      expect.objectContaining({ field: 'scripts.postinstall', severity: 'warning' }),
+    ]);
+    expect(summarizeNpmSecurityReport(report)).toMatchObject({
+      blocking: 0,
+      blockingStatic: 0,
+      details: [
+        {
+          level: 'warning',
+          message: 'Lifecycle script [demo@1.0.0] scripts.install: node install.js',
+        },
+        {
+          level: 'warning',
+          message: 'Lifecycle script [demo@1.0.0] scripts.postinstall: node verify.js',
+        },
+      ],
+      warningAdvisories: 0,
+      warningStatic: 2,
+      warnings: 2,
+    });
   });
 
   it('reports ordinary vulnerabilities without treating them as malware', async () => {
@@ -176,7 +212,7 @@ describe('npm security gate', () => {
             field: 'scripts.postinstall',
             message: 'demo@1.0.0 declares postinstall lifecycle code',
             name: 'demo',
-            severity: 'error',
+            severity: 'warning',
             sha256: 'def',
             type: 'lifecycle-script',
             value: 'node setup.js',
@@ -188,12 +224,14 @@ describe('npm security gate', () => {
     );
 
     expect(summary).toMatchObject({
-      blocking: 3,
+      blocking: 2,
       blockingAdvisories: 1,
-      blockingStatic: 1,
+      blockingStatic: 0,
       omitted: 2,
       scannerErrors: 1,
-      warnings: 1,
+      warningAdvisories: 1,
+      warningStatic: 1,
+      warnings: 2,
     });
     expect(summary.details).toEqual([
       { level: 'error', message: 'Scanner error: OSV mirror returned incomplete data' },

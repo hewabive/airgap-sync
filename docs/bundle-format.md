@@ -112,10 +112,11 @@ publication trust boundaries.
 Records the exact-version OSV query and static tarball inspection result. Its
 `manifestSha256` is the canonical SHA-256 of the complete `seed-manifest.json`; publish
 requires `ok: true`, an exact digest match, and a report no older than the policy TTL.
-Malware advisories, scanner errors, lifecycle scripts, and non-registry dependencies
-block the report. Ordinary vulnerability advisories are warnings. Static exceptions
-record an exact `name@version#sha256:<hex>` approval. A failed scan is written as
-`security-report.failed.json` so it cannot replace previously active evidence.
+Malware advisories, scanner errors, and non-registry dependencies block the report.
+Lifecycle scripts and ordinary vulnerability advisories are warnings. Static
+acknowledgements or exceptions record an exact `name@version#sha256:<hex>` approval. A
+failed scan is written as `security-report.failed.json` so it cannot replace previously
+active evidence.
 
 ## dist-tags.json
 

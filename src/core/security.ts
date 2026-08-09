@@ -40,6 +40,8 @@ export interface NpmSecurityConsoleSummary {
   details: NpmSecurityConsoleDetail[];
   omitted: number;
   scannerErrors: number;
+  warningAdvisories: number;
+  warningStatic: number;
   warnings: number;
 }
 
@@ -91,7 +93,7 @@ function scanManifest(
       staticFinding(pkg, policy, {
         field: `scripts.${scriptName}`,
         message: `${pkg.name}@${pkg.version} declares ${scriptName} lifecycle code`,
-        severity: 'error',
+        severity: 'warning',
         type: 'lifecycle-script',
         value: command,
       })
@@ -164,13 +166,16 @@ export function summarizeNpmSecurityReport(
       level: 'error' as const,
       message: `Blocked static finding [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
     })),
+    ...warningStatic.map((finding) => ({
+      level: 'warning' as const,
+      message:
+        finding.type === 'lifecycle-script'
+          ? `Lifecycle script [${findingSubject(finding)}] ${finding.field}: ${finding.value}`
+          : `Static warning [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
+    })),
     ...warningAdvisories.map((finding) => ({
       level: 'warning' as const,
       message: `Vulnerability [${findingSubject(finding)}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`,
-    })),
-    ...warningStatic.map((finding) => ({
-      level: 'warning' as const,
-      message: `Static warning [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
     })),
     ...approvedStatic.map((finding) => ({
       level: 'info' as const,
@@ -187,6 +192,8 @@ export function summarizeNpmSecurityReport(
     details: detailCandidates.slice(0, maxDetails),
     omitted: Math.max(0, detailCandidates.length - maxDetails),
     scannerErrors: report.errors.length,
+    warningAdvisories: warningAdvisories.length,
+    warningStatic: warningStatic.length,
     warnings: warningAdvisories.length + warningStatic.length,
   };
 }

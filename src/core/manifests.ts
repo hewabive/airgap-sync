@@ -9,6 +9,7 @@ import type {
 } from '../types.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import { parsePackageManagerRequirements } from './package-managers.js';
+import { parsePnpmLockImporterDirectoriesFromContent } from './lockfiles.js';
 
 const ignoredDirectoryNames = new Set([
   '.git',
@@ -105,13 +106,11 @@ function isLocalDependency(
 }
 
 async function findProjectFiles(rootDir: string): Promise<{
-  lockfileDirs: string[];
+  lockfileFiles: string[];
   packageJsonFiles: string[];
-  pnpmLockfileDirs: string[];
 }> {
-  const lockfileDirs = new Set<string>();
+  const lockfileFiles: string[] = [];
   const packageJsonFiles: string[] = [];
-  const pnpmLockfileDirs = new Set<string>();
 
   async function walk(dir: string): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -132,25 +131,38 @@ async function findProjectFiles(rootDir: string): Promise<{
       }
 
       if (entry.isFile() && supportedLockfileNames.has(entry.name)) {
-        lockfileDirs.add(dir);
-        if (entry.name === 'pnpm-lock.yaml') {
-          pnpmLockfileDirs.add(dir);
-        }
+        lockfileFiles.push(entryPath);
       }
     }
   }
 
   await walk(rootDir);
   return {
-    lockfileDirs: [...lockfileDirs].sort(),
+    lockfileFiles: lockfileFiles.sort(),
     packageJsonFiles: packageJsonFiles.sort(),
-    pnpmLockfileDirs: [...pnpmLockfileDirs].sort(),
   };
 }
 
-function isCoveredByLockfile(file: string, lockfileDirs: string[]): boolean {
-  const dir = path.dirname(file);
-  return lockfileDirs.includes(dir);
+async function manifestCoverageDirectories(
+  lockfileFiles: string[]
+): Promise<{ all: Set<string>; pnpm: Set<string> }> {
+  const all = new Set<string>();
+  const pnpm = new Set<string>();
+  for (const lockfilePath of lockfileFiles) {
+    const lockfileDirectory = path.dirname(lockfilePath);
+    if (path.basename(lockfilePath) !== 'pnpm-lock.yaml') {
+      all.add(lockfileDirectory);
+      continue;
+    }
+    const content = await fs.readFile(lockfilePath, 'utf8');
+    const importers = parsePnpmLockImporterDirectoriesFromContent(content);
+    for (const importer of importers.length > 0 ? importers : ['']) {
+      const directory = path.resolve(lockfileDirectory, importer || '.');
+      all.add(directory);
+      pnpm.add(directory);
+    }
+  }
+  return { all, pnpm };
 }
 
 async function manifestInputToFiles(
@@ -159,7 +171,7 @@ async function manifestInputToFiles(
 ): Promise<{
   files: string[];
   packageManagerFiles: string[];
-  pnpmLockfileDirs: string[];
+  pnpmCoveredManifestDirs: Set<string>;
   rootDir: string;
 }> {
   const absolutePath = path.resolve(manifestPath);
@@ -167,31 +179,33 @@ async function manifestInputToFiles(
 
   if (stat.isDirectory()) {
     const projectFiles = await findProjectFiles(absolutePath);
+    const coverageDirectories = await manifestCoverageDirectories(projectFiles.lockfileFiles);
     return {
       files:
         options.skipManifestsCoveredByLockfiles === true
           ? projectFiles.packageJsonFiles.filter(
-              (file) => !isCoveredByLockfile(file, projectFiles.lockfileDirs)
+              (file) => !coverageDirectories.all.has(path.dirname(file))
             )
           : projectFiles.packageJsonFiles,
       packageManagerFiles: projectFiles.packageJsonFiles,
-      pnpmLockfileDirs: projectFiles.pnpmLockfileDirs,
+      pnpmCoveredManifestDirs: coverageDirectories.pnpm,
       rootDir: absolutePath,
     };
   }
 
   const rootDir = path.dirname(absolutePath);
   const projectFiles = await findProjectFiles(rootDir);
+  const coverageDirectories = await manifestCoverageDirectories(projectFiles.lockfileFiles);
   return {
     files: [...new Set([absolutePath, ...projectFiles.packageJsonFiles])]
       .filter(
         (file) =>
           options.skipManifestsCoveredByLockfiles !== true ||
-          !isCoveredByLockfile(file, projectFiles.lockfileDirs)
+          !coverageDirectories.all.has(path.dirname(file))
       )
       .sort(),
     packageManagerFiles: [...new Set([absolutePath, ...projectFiles.packageJsonFiles])].sort(),
-    pnpmLockfileDirs: projectFiles.pnpmLockfileDirs,
+    pnpmCoveredManifestDirs: coverageDirectories.pnpm,
     rootDir,
   };
 }
@@ -200,10 +214,8 @@ export async function readManifestRequirements(
   manifestPath: string,
   options: ReadManifestRequirementsOptions = {}
 ): Promise<ParseRootSpecsResult> {
-  const { files, packageManagerFiles, pnpmLockfileDirs, rootDir } = await manifestInputToFiles(
-    manifestPath,
-    options
-  );
+  const { files, packageManagerFiles, pnpmCoveredManifestDirs, rootDir } =
+    await manifestInputToFiles(manifestPath, options);
   const manifests = new Map<string, ProjectPackageManifest>();
 
   for (const file of packageManagerFiles) {
@@ -219,7 +231,7 @@ export async function readManifestRequirements(
     packageManagerFiles
       .map((file) => ({
         manifest: manifests.get(file)!,
-        pnpmLockfileCovered: pnpmLockfileDirs.includes(path.dirname(file)),
+        pnpmLockfileCovered: pnpmCoveredManifestDirs.has(path.dirname(file)),
         requiredBy: manifestRequiredBy(
           {
             manifest: manifests.get(file)!,

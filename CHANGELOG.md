@@ -11,6 +11,11 @@
   OSV malware checks, lifecycle/non-registry dependency inspection with digest-pinned
   approvals, fresh security evidence required by verify/publish, and script-free
   install verification by default.
+- Made lifecycle-script findings non-blocking audit warnings and distinguished them
+  from OSV vulnerability warnings in the download summary. Non-registry dependencies
+  remain blocking unless approved for exact package bytes.
+- Fixed pnpm workspace discovery so a root `pnpm-lock.yaml` covers nested manifests
+  listed in its `importers` section instead of resolving their ranges a second time.
 - Combined npm hashing and manifest inspection into one streaming tarball pass and
   reused unchanged results within each download or verify run, reducing removable-media
   reads without persisting trust across commands.

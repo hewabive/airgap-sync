@@ -9,9 +9,10 @@ configured target registries, and can push Git mirrors into Gitea.
 Downloaded npm tarballs are checked against registry SRI/SHA-1 metadata and recorded
 with SHA-256 in a schema-v2 bundle manifest. Download activation fails closed when OSV
 is unavailable, an exact version has a malware advisory, or static inspection finds a
-lifecycle script or non-registry dependency. A reviewed static exception is bound to
-the exact package name, version, and SHA-256. Ordinary vulnerability advisories remain
-visible warnings and still require operator review.
+non-registry dependency. Lifecycle scripts are visible audit warnings, not blockers,
+because many legitimate native and toolchain packages require them. A static
+acknowledgement or exception is bound to the exact package name, version, and SHA-256.
+Ordinary vulnerability advisories also remain visible warnings.
 
 Hashing and static manifest inspection share one streaming tarball read within a command.
 Results are cached only in memory for unchanged files and never survive the process, so

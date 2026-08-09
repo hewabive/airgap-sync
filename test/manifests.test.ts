@@ -120,6 +120,34 @@ describe('readManifestRequirements', () => {
     ]);
   });
 
+  it('uses root pnpm importers to cover nested workspace manifests', async () => {
+    await fs.writeFile(
+      path.join(tempDir, 'pnpm-lock.yaml'),
+      ["lockfileVersion: '9.0'", 'importers:', "  '.': {}", '  packages/lib: {}'].join('\n')
+    );
+    await writePackageJson('examples/standalone/package.json', {
+      name: 'standalone',
+      version: '1.0.0',
+      dependencies: {
+        lodash: '^4.17.21',
+      },
+    });
+
+    const result = await readManifestRequirements(tempDir, {
+      skipManifestsCoveredByLockfiles: true,
+    });
+
+    expect(result.requirements).toEqual([
+      {
+        name: 'lodash',
+        raw: 'lodash@^4.17.21',
+        requiredBy: 'standalone@1.0.0',
+        specifier: '^4.17.21',
+        type: 'range',
+      },
+    ]);
+  });
+
   it('keeps pinned pnpm toolchain requirements when a manifest is covered by a lockfile', async () => {
     await writePackageJson('apps/arriero/package.json', {
       name: 'arriero',

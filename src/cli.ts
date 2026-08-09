@@ -616,10 +616,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const securityLine = report.security
     ? report.security.ok
       ? green(
-          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warnings ?? 0)} warnings, ${String(securitySummary?.approved ?? 0)} approved static findings).`
+          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warningAdvisories ?? 0)} vulnerability warnings, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings, ${String(securitySummary?.approved ?? 0)} approved static findings).`
         )
       : red(
-          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warnings ?? 0)} warnings).`
+          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warningAdvisories ?? 0)} vulnerability warnings, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings).`
         )
     : report.dryRun
       ? 'NPM security: not run during dry-run.'

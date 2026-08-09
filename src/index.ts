@@ -301,6 +301,7 @@ export {
 export {
   parseLockfileRequirementsFromContent,
   parseNpmLockRequirementsFromContent,
+  parsePnpmLockImporterDirectoriesFromContent,
   parsePnpmLockRequirementsFromContent,
   parseYarnLockRequirementsFromContent,
   readLockfileRequirements,

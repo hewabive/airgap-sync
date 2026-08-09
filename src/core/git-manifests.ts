@@ -7,7 +7,10 @@ import {
 } from './manifests.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
 import { mapConcurrent } from './concurrency.js';
-import { parseLockfileRequirementsFromContent } from './lockfiles.js';
+import {
+  parseLockfileRequirementsFromContent,
+  parsePnpmLockImporterDirectoriesFromContent,
+} from './lockfiles.js';
 import { parsePackageManagerRequirements } from './package-managers.js';
 import { runGitOutputCommand, type GitOutputCommandRunner } from './repos.js';
 
@@ -75,9 +78,31 @@ function directoryName(filePath: string): string {
   return directory === '.' ? '' : directory;
 }
 
-function isCoveredByLockfile(filePath: string, lockfilePaths: string[]): boolean {
-  const directory = directoryName(filePath);
-  return lockfilePaths.some((lockfilePath) => directory === directoryName(lockfilePath));
+function repositoryDirectory(base: string, relative: string): string {
+  const directory = path.posix.join(base || '.', relative || '.');
+  return directory === '.' ? '' : directory;
+}
+
+function manifestCoverageDirectories(lockfileEntries: { content: string; path: string }[]): {
+  all: Set<string>;
+  pnpm: Set<string>;
+} {
+  const all = new Set<string>();
+  const pnpm = new Set<string>();
+  for (const entry of lockfileEntries) {
+    const lockfileDirectory = directoryName(entry.path);
+    if (path.posix.basename(entry.path) !== 'pnpm-lock.yaml') {
+      all.add(lockfileDirectory);
+      continue;
+    }
+    const importers = parsePnpmLockImporterDirectoriesFromContent(entry.content);
+    for (const importer of importers.length > 0 ? importers : ['']) {
+      const directory = repositoryDirectory(lockfileDirectory, importer);
+      all.add(directory);
+      pnpm.add(directory);
+    }
+  }
+  return { all, pnpm };
 }
 
 function isInsideSubdir(filePath: string, subdir: string): boolean {
@@ -190,13 +215,22 @@ export async function readGitSourceManifestRequirements(
   });
   const manifestPaths = repositoryPaths.filter(isPackageJsonPath);
   const lockfilePaths = repositoryPaths.filter(isLockfilePath);
-  const unlockedManifestPaths = manifestPaths.filter(
-    (manifestPath) => !isCoveredByLockfile(manifestPath, lockfilePaths)
+  const lockfileEntries = await mapConcurrent(
+    lockfilePaths,
+    options.concurrency,
+    async (lockfilePath) => ({
+      content: await readFileFromGit({
+        filePath: lockfilePath,
+        mirrorPath,
+        revision,
+        runner,
+      }),
+      path: lockfilePath,
+    })
   );
-  const pnpmLockfileDirs = new Set(
-    lockfilePaths
-      .filter((lockfilePath) => path.posix.basename(lockfilePath) === 'pnpm-lock.yaml')
-      .map(directoryName)
+  const coverageDirectories = manifestCoverageDirectories(lockfileEntries);
+  const unlockedManifestPaths = manifestPaths.filter(
+    (manifestPath) => !coverageDirectories.all.has(directoryName(manifestPath))
   );
   const manifestEntries = await mapConcurrent(
     manifestPaths,
@@ -222,7 +256,7 @@ export async function readGitSourceManifestRequirements(
       const entry = entriesByPath.get(manifestPath)!;
       return {
         manifest: entry.manifest,
-        pnpmLockfileCovered: pnpmLockfileDirs.has(directoryName(manifestPath)),
+        pnpmLockfileCovered: coverageDirectories.pnpm.has(directoryName(manifestPath)),
         requiredBy:
           entry.manifest.name && entry.manifest.version
             ? `${entry.manifest.name}@${entry.manifest.version}`
@@ -230,18 +264,11 @@ export async function readGitSourceManifestRequirements(
       };
     })
   );
-  const parsedLockfiles = await mapConcurrent(
-    lockfilePaths,
-    options.concurrency,
-    async (lockfilePath): Promise<ParseRootSpecsResult> =>
+  const parsedLockfiles = lockfileEntries.map(
+    ({ content, path: lockfilePath }): ParseRootSpecsResult =>
       parseLockfileRequirementsFromContent(
         path.basename(lockfilePath),
-        await readFileFromGit({
-          filePath: lockfilePath,
-          mirrorPath,
-          revision,
-          runner,
-        }),
+        content,
         `lockfile:${lockfilePath}`
       )
   );

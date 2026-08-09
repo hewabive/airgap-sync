@@ -141,9 +141,11 @@ them.
 
 Pinned pnpm is part of that closure. A `packageManager: pnpm@<version>` declaration
 adds exact `pnpm` and `@pnpm/exe` roots. `devEngines.packageManager` ranges are resolved
-only when no adjacent pnpm lockfile exists; otherwise the lockfile's exact
-`packageManagerDependencies` entries are used. This scan is independent of the normal
-rule that lets a lockfile replace dependency scanning of its adjacent `package.json`.
+only when no covering pnpm lockfile exists; otherwise the lockfile's exact
+`packageManagerDependencies` entries are used. A root pnpm lockfile covers every nested
+workspace manifest named by its `importers` section. This scan is independent of the
+normal rule that lets a lockfile replace dependency scanning of a covered
+`package.json`.
 
 Lower-level collection from an explicit repository directory is still available:
 

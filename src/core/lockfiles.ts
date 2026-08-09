@@ -58,6 +58,26 @@ interface PnpmImporterEntry {
   packageManagerDependencies?: Record<string, PnpmImporterDependencyEntry | string>;
 }
 
+function normalizePnpmImporterDirectory(value: string): string | undefined {
+  const normalized = path.posix.normalize(value.replace(/\\/gu, '/'));
+  if (path.posix.isAbsolute(normalized) || normalized === '..' || normalized.startsWith('../')) {
+    return undefined;
+  }
+  return normalized === '.' ? '' : normalized.replace(/^\.\//u, '');
+}
+
+export function parsePnpmLockImporterDirectoriesFromContent(content: string): string[] {
+  const parsed = YAML.parse(content) as PackageLockDocument | null;
+  return [
+    ...new Set(
+      Object.keys(parsed?.importers ?? {}).flatMap((importer) => {
+        const normalized = normalizePnpmImporterDirectory(importer);
+        return normalized === undefined ? [] : [normalized];
+      })
+    ),
+  ].sort();
+}
+
 function registryRequirement(
   name: string,
   version: string,

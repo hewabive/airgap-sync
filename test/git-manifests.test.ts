@@ -330,6 +330,104 @@ describe('readGitSourceManifestRequirements', () => {
     ]);
   });
 
+  it('uses root pnpm importers to cover nested workspace manifests', async () => {
+    const result = await readGitSourceManifestRequirements({
+      mirrorPath: '/bundle/git-mirrors/github.com/owner/repo.git',
+      source,
+      runner(invocation): Promise<GitOutputCommandResult> {
+        if (gitCommand(invocation) === 'rev-parse --verify main^{tree}') {
+          return Promise.resolve({ stderr: '', stdout: 'tree\n' });
+        }
+
+        if (gitCommand(invocation) === 'ls-tree -r --name-only main') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: [
+              'package.json',
+              'apps/api/package.json',
+              'examples/standalone/package.json',
+              'pnpm-lock.yaml',
+            ].join('\n'),
+          });
+        }
+
+        if (gitCommand(invocation) === 'show main:pnpm-lock.yaml') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: [
+              "lockfileVersion: '9.0'",
+              'importers:',
+              "  '.': {}",
+              '  apps/api:',
+              '    dependencies:',
+              '      better-sqlite3:',
+              '        specifier: ^12.5.0',
+              '        version: 12.10.0',
+              'packages:',
+              '  better-sqlite3@12.10.0: {}',
+            ].join('\n'),
+          });
+        }
+
+        if (gitCommand(invocation) === 'show main:package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              name: 'arriero',
+              packageManager: 'pnpm@11.17.0',
+              version: '0.1.0',
+            }),
+          });
+        }
+
+        if (gitCommand(invocation) === 'show main:apps/api/package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              dependencies: { 'better-sqlite3': '^12.5.0' },
+              name: '@arriero/api',
+              version: '0.1.0',
+            }),
+          });
+        }
+
+        if (gitCommand(invocation) === 'show main:examples/standalone/package.json') {
+          return Promise.resolve({
+            stderr: '',
+            stdout: JSON.stringify({
+              dependencies: { lodash: '^4.17.21' },
+              name: 'standalone',
+              version: '1.0.0',
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected git call: ${invocation.args.join(' ')}`);
+      },
+    });
+
+    expect(result.manifestPaths).toEqual(['examples/standalone/package.json']);
+    expect(result.lockfilePaths).toEqual(['pnpm-lock.yaml']);
+    expect(
+      result.requirements.filter((requirement) => requirement.name === 'better-sqlite3')
+    ).toEqual([
+      {
+        name: 'better-sqlite3',
+        raw: 'better-sqlite3@12.10.0',
+        requiredBy: 'lockfile:pnpm-lock.yaml',
+        specifier: '12.10.0',
+        type: 'version',
+      },
+    ]);
+    expect(result.requirements).toContainEqual({
+      name: 'lodash',
+      raw: 'lodash@^4.17.21',
+      requiredBy: 'standalone@1.0.0',
+      specifier: '^4.17.21',
+      type: 'range',
+    });
+  });
+
   it('reports a clear error when the requested revision is missing', async () => {
     await expect(
       readGitSourceManifestRequirements({

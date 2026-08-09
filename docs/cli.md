@@ -288,11 +288,13 @@ npm releases younger than `--min-release-age-days` are quarantined before select
 the default is three days and `0` disables the delay. Download verifies registry
 SRI/SHA-1, records SHA-256, queries OSV for every exact package/version, and inspects
 each tarball for lifecycle scripts and non-registry dependencies. Any malware finding,
-OSV failure, integrity mismatch, or unapproved static finding prevents activation.
+OSV failure, integrity mismatch, or unapproved non-registry dependency prevents
+activation. Lifecycle scripts are audit warnings and do not block activation.
 `security-report.failed.json` keeps failed evidence without replacing a previously
 active report. `--allow-package name@version#sha256:<hex>` is repeatable and approves
-static findings only for those exact bytes. `--max-security-report-age-hours` defaults
-to 72. Workspace defaults can be stored in top-level `npmSecurity`.
+or acknowledges static findings only for those exact bytes.
+`--max-security-report-age-hours` defaults to 72. Workspace defaults can be stored in
+top-level `npmSecurity`.
 
 The normal download summary names blocking and warning package findings, reports scanner
 failures, and prints the path to `security-report.json` or
@@ -362,12 +364,14 @@ when the download is incomplete and partial target downloads never prune shared
 objects. This only cleans the transfer bundle; it does not delete packages from
 Verdaccio or repositories from Gitea.
 
-When a package manifest is in the same directory as a supported lockfile, `download`
-uses the lockfile as the stronger source and does not also resolve that manifest's
-range dependencies. Packages pulled only from lockfiles also do not expand their own
-registry metadata dependencies; their transitive closure is expected to come from the
-same lockfile. This keeps lockfile-based installs from accumulating newer transitive
-versions that the install will not use.
+When a package manifest is covered by a supported lockfile, `download` uses the
+lockfile as the stronger source and does not also resolve that manifest's range
+dependencies. npm and Yarn lockfiles cover an adjacent manifest. A pnpm lockfile covers
+the root and nested workspace manifests named by its `importers` section. Packages
+pulled only from lockfiles also do not expand their own registry metadata dependencies;
+their transitive closure is expected to come from the same lockfile. This keeps
+lockfile-based installs from accumulating newer transitive versions that the install
+will not use.
 
 After a successful non-dry-run download, the latest root reports are copied into
 `airgap-bundle/runs/download/<run-id>/`. That run directory also includes

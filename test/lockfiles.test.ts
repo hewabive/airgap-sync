@@ -4,12 +4,27 @@ import * as fs from '../src/core/fs.js';
 import { describe, expect, it } from 'vitest';
 import {
   parseNpmLockRequirementsFromContent,
+  parsePnpmLockImporterDirectoriesFromContent,
   parsePnpmLockRequirementsFromContent,
   parseYarnLockRequirementsFromContent,
   readLockfileRequirements,
 } from '../src/core/lockfiles.js';
 
 describe('parsePnpmLockRequirementsFromContent', () => {
+  it('extracts safe workspace importer directories', () => {
+    expect(
+      parsePnpmLockImporterDirectoriesFromContent(`
+lockfileVersion: '9.0'
+importers:
+  .: {}
+  apps/api: {}
+  packages/core: {}
+  ../outside: {}
+  /absolute: {}
+`)
+    ).toEqual(['', 'apps/api', 'packages/core']);
+  });
+
   it('extracts exact package versions from pnpm lockfile package keys', () => {
     const result = parsePnpmLockRequirementsFromContent(
       `

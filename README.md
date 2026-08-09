@@ -144,7 +144,8 @@ After a global install, omit the `npm exec --` prefix.
 When a project pins pnpm through `packageManager` or `devEngines.packageManager`,
 download also includes both the Node-based `pnpm` package and the standalone
 `@pnpm/exe` bootstrap closure. Toolchain declarations are scanned even when the
-adjacent `package.json` is otherwise covered by a lockfile. A pnpm lockfile's
+`package.json` is otherwise covered by a lockfile. A root pnpm lockfile covers nested
+workspace manifests named by its `importers` section, and its
 `packageManagerDependencies` remain authoritative for ranged `devEngines` declarations.
 
 For Windows operators who prefer a double-click workflow, optional launchers live in
@@ -298,8 +299,9 @@ three-day release quarantine and a 72-hour security-report lifetime:
 }
 ```
 
-Packages with lifecycle scripts or non-registry dependencies are blocked. A reviewed
-exception must pin the exact downloaded bytes as
+Lifecycle scripts are reported as audit warnings because their presence is common and
+does not by itself identify malicious code. Non-registry dependencies remain blocking.
+An optional acknowledgement or a reviewed exception pins the exact downloaded bytes as
 `name@version#sha256:<hex>` in `allowPackages`; a changed tarball no longer matches.
 `maxReportAgeHours` is also the lifetime of Python OSV evidence; Python malware has no
 allow-list escape hatch.
