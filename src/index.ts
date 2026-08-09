@@ -237,6 +237,7 @@ export {
   defaultNpmSecurityPolicy,
   OsvNpmAdvisoryClient,
   scanNpmBundleSecurity,
+  summarizeNpmSecurityReport,
   writeNpmSecurityReport,
 } from './core/security.js';
 export { pruneBundle, writePruneReport } from './core/prune.js';

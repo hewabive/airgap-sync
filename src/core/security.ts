@@ -19,6 +19,24 @@ export const defaultNpmSecurityPolicy: NpmSecurityPolicy = {
   minReleaseAgeDays: 3,
 };
 
+type NpmSecurityConsoleDetailLevel = 'error' | 'info' | 'warning';
+
+interface NpmSecurityConsoleDetail {
+  level: NpmSecurityConsoleDetailLevel;
+  message: string;
+}
+
+export interface NpmSecurityConsoleSummary {
+  approved: number;
+  blocking: number;
+  blockingAdvisories: number;
+  blockingStatic: number;
+  details: NpmSecurityConsoleDetail[];
+  omitted: number;
+  scannerErrors: number;
+  warnings: number;
+}
+
 interface OsvVulnerability {
   aliases?: string[];
   id: string;
@@ -145,6 +163,63 @@ function normalizePolicy(policy: Partial<NpmSecurityPolicy> = {}): NpmSecurityPo
       0,
       policy.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays
     ),
+  };
+}
+
+function findingSubject(finding: { name: string; version: string }): string {
+  return `${finding.name}@${finding.version}`;
+}
+
+export function summarizeNpmSecurityReport(
+  report: NpmSecurityReport,
+  options: { maxDetails?: number } = {}
+): NpmSecurityConsoleSummary {
+  const blockingAdvisories = report.advisories.filter((finding) => finding.severity === 'error');
+  const warningAdvisories = report.advisories.filter((finding) => finding.severity === 'warning');
+  const blockingStatic = report.staticFindings.filter(
+    (finding) => finding.severity === 'error' && !finding.allowed
+  );
+  const warningStatic = report.staticFindings.filter(
+    (finding) => finding.severity === 'warning' && !finding.allowed
+  );
+  const approvedStatic = report.staticFindings.filter((finding) => finding.allowed);
+  const detailCandidates: NpmSecurityConsoleDetail[] = [
+    ...report.errors.map((error) => ({
+      level: 'error' as const,
+      message: `Scanner error: ${error}`,
+    })),
+    ...blockingAdvisories.map((finding) => ({
+      level: 'error' as const,
+      message: `${finding.type === 'malware' ? 'Malware' : 'Advisory'} [${findingSubject(finding)}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`,
+    })),
+    ...blockingStatic.map((finding) => ({
+      level: 'error' as const,
+      message: `Blocked static finding [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
+    })),
+    ...warningAdvisories.map((finding) => ({
+      level: 'warning' as const,
+      message: `Vulnerability [${findingSubject(finding)}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`,
+    })),
+    ...warningStatic.map((finding) => ({
+      level: 'warning' as const,
+      message: `Static warning [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
+    })),
+    ...approvedStatic.map((finding) => ({
+      level: 'info' as const,
+      message: `Approved static finding [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
+    })),
+  ];
+  const maxDetails = Math.max(0, Math.floor(options.maxDetails ?? 20));
+
+  return {
+    approved: approvedStatic.length,
+    blocking: report.errors.length + blockingAdvisories.length + blockingStatic.length,
+    blockingAdvisories: blockingAdvisories.length,
+    blockingStatic: blockingStatic.length,
+    details: detailCandidates.slice(0, maxDetails),
+    omitted: Math.max(0, detailCandidates.length - maxDetails),
+    scannerErrors: report.errors.length,
+    warnings: warningAdvisories.length + warningStatic.length,
   };
 }
 

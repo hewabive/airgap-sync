@@ -6,7 +6,9 @@ import * as fs from '../src/core/fs.js';
 import { computeFileDigests } from '../src/core/integrity.js';
 import {
   assertNpmSecurityGate,
+  defaultNpmSecurityPolicy,
   scanNpmBundleSecurity,
+  summarizeNpmSecurityReport,
   writeNpmSecurityReport,
   type NpmAdvisoryClient,
 } from '../src/core/security.js';
@@ -136,6 +138,70 @@ describe('npm security gate', () => {
 
     expect(report.ok).toBe(false);
     expect(report.errors).toContain('OSV: network unavailable');
+  });
+
+  it('builds a bounded console summary with actionable package identities', () => {
+    const summary = summarizeNpmSecurityReport(
+      {
+        advisories: [
+          {
+            aliases: [],
+            id: 'MAL-2026-1234',
+            name: 'malicious-demo',
+            severity: 'error',
+            summary: 'Malicious package',
+            type: 'malware',
+            version: '1.0.0',
+          },
+          {
+            aliases: [],
+            id: 'GHSA-xxxx-yyyy-zzzz',
+            name: 'vulnerable-demo',
+            severity: 'warning',
+            type: 'vulnerability',
+            version: '2.0.0',
+          },
+        ],
+        errors: ['OSV mirror returned incomplete data'],
+        generatedAt: '2026-08-09T00:00:00.000Z',
+        manifestSha256: 'abc',
+        ok: false,
+        packageCount: 2,
+        policy: defaultNpmSecurityPolicy,
+        provider: { name: 'OSV', url: 'https://api.osv.dev/v1/querybatch' },
+        schemaVersion: 1,
+        staticFindings: [
+          {
+            allowed: false,
+            field: 'scripts.postinstall',
+            message: 'demo@1.0.0 declares postinstall lifecycle code',
+            name: 'demo',
+            severity: 'error',
+            sha256: 'def',
+            type: 'lifecycle-script',
+            value: 'node setup.js',
+            version: '1.0.0',
+          },
+        ],
+      },
+      { maxDetails: 2 }
+    );
+
+    expect(summary).toMatchObject({
+      blocking: 3,
+      blockingAdvisories: 1,
+      blockingStatic: 1,
+      omitted: 2,
+      scannerErrors: 1,
+      warnings: 1,
+    });
+    expect(summary.details).toEqual([
+      { level: 'error', message: 'Scanner error: OSV mirror returned incomplete data' },
+      {
+        level: 'error',
+        message: 'Malware [malicious-demo@1.0.0] MAL-2026-1234: Malicious package',
+      },
+    ]);
   });
 
   it('requires a fresh report bound to the exact manifest', async () => {

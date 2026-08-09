@@ -10,6 +10,8 @@
 - Combined npm hashing and manifest inspection into one streaming tarball pass and
   reused unchanged results within each download or verify run, reducing removable-media
   reads without persisting trust across commands.
+- Made the human-readable download summary identify npm malware, static findings,
+  vulnerability warnings, scanner failures, and the full security-report path.
 - Fixed CPython discovery failures caused by oversized GitHub release-list responses.
   Provider metadata now uses bounded pages, retries transient HTTP/network failures,
   honors server retry delays, and reports retry progress through `download`.

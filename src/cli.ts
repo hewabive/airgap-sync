@@ -66,6 +66,7 @@ import {
   pruneInactivePythonApplicationPlans,
   publishBundle,
   scanNpmBundleSecurity,
+  summarizeNpmSecurityReport,
   TarballInspectionCache,
   pruneBundle,
   readBundleInfo,
@@ -553,6 +554,18 @@ function red(text: string): string {
   return color(text, 31);
 }
 
+function yellow(text: string): string {
+  return color(text, 33);
+}
+
+function safeConsoleDetail(value: string, maxLength = 500): string {
+  const singleLine = value
+    .replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return singleLine.length <= maxLength ? singleLine : `${singleLine.slice(0, maxLength - 1)}…`;
+}
+
 function formatDownloadSummary(report: CollectReport): string {
   const failed = collectShouldFail(report);
   const gitSkipped = report.gitSources.skipped.length;
@@ -565,8 +578,18 @@ function formatDownloadSummary(report: CollectReport): string {
     report.repositoryUpdate.errors.length +
     report.gitFetch.errors.length +
     report.gitManifestScanErrors.length;
+  const securitySummary = report.security
+    ? summarizeNpmSecurityReport(report.security, { maxDetails: 20 })
+    : undefined;
+  const securityErrors =
+    report.security?.ok === false ? Math.max(1, securitySummary?.blocking ?? 0) : 0;
   const totalErrors =
-    npmErrors + gitErrors + pythonErrors + pythonApplicationErrors + cpythonDistributionErrors;
+    npmErrors +
+    gitErrors +
+    pythonErrors +
+    pythonApplicationErrors +
+    cpythonDistributionErrors +
+    securityErrors;
   const status = failed
     ? red(
         `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
@@ -610,17 +633,55 @@ function formatDownloadSummary(report: CollectReport): string {
       ? `CPython distributions: ${String(report.cpythonDistributions.selected)} selected, ${String(report.cpythonDistributions.planned)} planned, ${String(report.cpythonDistributions.errors.length)} errors.`
       : `CPython distributions: ${String(report.cpythonDistributions.selected)} selected (${String(report.cpythonDistributions.downloaded)} downloaded, ${String(report.cpythonDistributions.skipped)} already on disk), ${String(report.cpythonDistributions.errors.length)} errors.`
     : undefined;
+  const securityLine = report.security
+    ? report.security.ok
+      ? green(
+          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warnings ?? 0)} warnings, ${String(securitySummary?.approved ?? 0)} approved static findings).`
+        )
+      : red(
+          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warnings ?? 0)} warnings).`
+        )
+    : report.dryRun
+      ? 'NPM security: not run during dry-run.'
+      : yellow('NPM security: not run.');
   const reportsWritten = report.dryRun ? 'no' : 'yes';
   const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
     status,
     npmLine,
+    securityLine,
     gitLine,
     ...(pythonLine ? [pythonLine] : []),
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
     ...(cpythonDistributionsLine ? [cpythonDistributionsLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
+
+  if (report.security && securitySummary) {
+    lines.push(
+      ...securitySummary.details.map((detail) => {
+        const line = `NPM security ${detail.level.toUpperCase()}: ${safeConsoleDetail(detail.message)}`;
+        return detail.level === 'error'
+          ? red(line)
+          : detail.level === 'warning'
+            ? yellow(line)
+            : line;
+      })
+    );
+    if (securitySummary.omitted > 0) {
+      lines.push(
+        yellow(
+          `NPM security: ${String(securitySummary.omitted)} more findings omitted from console output.`
+        )
+      );
+    }
+    lines.push(
+      `NPM security report: ${path.join(
+        report.outputDir,
+        report.security.ok ? 'security-report.json' : 'security-report.failed.json'
+      )}`
+    );
+  }
 
   if (report.python?.errors.length) {
     lines.push(

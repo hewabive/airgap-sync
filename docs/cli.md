@@ -310,6 +310,11 @@ active report. `--allow-package name@version#sha256:<hex>` is repeatable and app
 static findings only for those exact bytes. `--max-security-report-age-hours` defaults
 to 72. Workspace defaults can be stored in top-level `npmSecurity`.
 
+The normal download summary names blocking and warning package findings, reports scanner
+failures, and prints the path to `security-report.json` or
+`security-report.failed.json`. Console details are bounded; `--json` and the report file
+retain the complete result.
+
 Tarball hashing and `package.json` inspection use the same stream. An in-memory,
 file-fingerprint-scoped cache reuses that inspection across fixed-point iterations and
 the security scan, so an unchanged tarball is normally read once per download command,
