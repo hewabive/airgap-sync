@@ -8,6 +8,10 @@ import * as fs from '../../src/core/fs.js';
 import type { PythonSeedManifest } from '../../src/core/python/bundle.js';
 import { publishPythonBundle } from '../../src/core/python/publisher.js';
 import type { PythonPublishProgressEvent } from '../../src/core/python/publish-progress.js';
+import {
+  scanPythonBundleSecurity,
+  writePythonSecurityReport,
+} from '../../src/core/python/security.js';
 
 let bundleDir: string;
 let server: http.Server | undefined;
@@ -76,6 +80,13 @@ beforeEach(async () => {
     path.join(bundleDir, 'python-packages/demo_package-1.0-py3-none-any.whl'),
     wheel
   );
+  await writePythonSecurityReport(
+    bundleDir,
+    await scanPythonBundleSecurity({
+      advisoryClient: { query: (packages) => Promise.resolve(packages.map(() => [])) },
+      manifest: manifest(),
+    })
+  );
 });
 
 afterEach(async () => {
@@ -95,6 +106,19 @@ afterEach(async () => {
 });
 
 describe('publishPythonBundle', () => {
+  it('refuses publication without manifest-bound Python security evidence', async () => {
+    await fs.remove(path.join(bundleDir, 'python-security-report.json'));
+
+    await expect(
+      publishPythonBundle(manifest(), {
+        bundleDir,
+        dryRun: true,
+        giteaBaseUrl: 'http://gitea.local',
+        owner: 'public',
+      })
+    ).rejects.toThrow('python-security-report.json is missing or unreadable');
+  });
+
   it('streams a legacy multipart upload with Basic authentication', async () => {
     let received = Buffer.alloc(0);
     const progress: PythonPublishProgressEvent[] = [];

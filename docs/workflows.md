@@ -187,6 +187,8 @@ The download step writes npm metadata and Git source metadata:
 - Git source records for offline publish
 - `python-seed-manifest.json`, `python-fetch-report.json`, and verified wheels under
   `python-packages/` when legacy Python target environments are configured
+- `python-security-report.json` with manifest-bound exact-version PyPI OSV evidence
+  whenever a Python wheel manifest is activated
 - `python/application-index.json`, per-application evidence, optional locks, and shared
   content-addressed artifacts for schema-v2 applications. These files contain no
   closed-network Gitea URL or package owner.
@@ -266,7 +268,8 @@ Copy the whole `./airgap-bundle` directory to the closed network, including:
 - `fetch-report.json`
 - Git source metadata
 - Git mirror fetch reports
-- `python-packages/`, `python-seed-manifest.json`, and Python reports when present
+- `python-packages/`, `python-seed-manifest.json`, `python-security-report.json`, and
+  Python reports when present
 - `python/` application evidence, reports, optional locks, and shared artifacts
 
 Do not copy only tarballs. The JSON files are the audit trail and are required by later

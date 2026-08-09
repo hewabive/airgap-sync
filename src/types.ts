@@ -5,6 +5,7 @@ import type { CpythonDistributionPublishReport } from './core/python/distributio
 import type { PythonGenericPublishReport } from './core/python/generic-publisher.js';
 import type { PythonPublishReport } from './core/python/publisher.js';
 import type { PythonResolutionMode } from './core/python/resolution-policy.js';
+import type { PythonSecurityReport } from './core/python/security.js';
 
 export interface PackageIdentity {
   name: string;
@@ -129,6 +130,7 @@ export interface CollectReport {
   outputDir: string;
   python?: PythonFetchReport;
   pythonApplications?: PythonApplicationDownloadReport;
+  pythonSecurity?: PythonSecurityReport;
   cpythonDistributions?: CpythonDistributionDownloadReport;
   registryUrl: string;
   repositoryUpdate: RepositoryUpdateReport;
@@ -437,7 +439,7 @@ export interface BundleManifest {
   packages: ResolvedPackage[];
 }
 
-export interface NpmSecurityAdvisoryFinding extends PackageIdentity {
+export interface PackageSecurityAdvisoryFinding extends PackageIdentity {
   aliases: string[];
   id: string;
   modified?: string;
@@ -445,6 +447,8 @@ export interface NpmSecurityAdvisoryFinding extends PackageIdentity {
   summary?: string;
   type: 'malware' | 'vulnerability';
 }
+
+export type NpmSecurityAdvisoryFinding = PackageSecurityAdvisoryFinding;
 
 export interface NpmStaticSecurityFinding extends PackageIdentity {
   allowed: boolean;

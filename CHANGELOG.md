@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Added fail-closed exact-version PyPI OSV checks. Known `MAL-*` releases now prevent
+  Python candidate activation and wheel/application-evidence publication; verify and
+  publish require fresh evidence bound to the complete wheel manifest, while ordinary
+  vulnerability advisories remain warnings.
 - Added fail-closed npm supply-chain controls: registry SRI/SHA-1 verification,
   schema-v2 SHA-256 manifests, a configurable release-age quarantine, exact-version
   OSV malware checks, lifecycle/non-registry dependency inspection with digest-pinned

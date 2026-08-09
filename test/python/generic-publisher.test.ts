@@ -6,9 +6,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from '../../src/core/fs.js';
 import type { PythonApplicationBundleIndex } from '../../src/core/python/application-bundle.js';
+import type { PythonSeedManifest } from '../../src/core/python/bundle.js';
 import { publishPythonGenericArtifacts } from '../../src/core/python/generic-publisher.js';
 import type { PythonPublishProgressEvent } from '../../src/core/python/publish-progress.js';
 import type { PythonPublicationManifest } from '../../src/core/python/publication-manifest.js';
+import {
+  scanPythonBundleSecurity,
+  writePythonSecurityReport,
+} from '../../src/core/python/security.js';
 
 let bundleDir: string;
 let server: http.Server | undefined;
@@ -81,6 +86,24 @@ async function writeBundle(
   await fs.writeJsonAtomic(path.join(bundleDir, 'python/application-index.json'), index, {
     spaces: 2,
   });
+  const pythonManifest: PythonSeedManifest = {
+    createdAt: '2026-07-27T00:00:00.000Z',
+    packages: [],
+    roots: [],
+    schemaVersion: 1,
+    sourceIndex: 'https://pypi.org/simple/',
+    targetEnvironments: [],
+  };
+  await fs.writeJsonAtomic(path.join(bundleDir, 'python-seed-manifest.json'), pythonManifest, {
+    spaces: 2,
+  });
+  await writePythonSecurityReport(
+    bundleDir,
+    await scanPythonBundleSecurity({
+      advisoryClient: { query: (packages) => Promise.resolve(packages.map(() => [])) },
+      manifest: pythonManifest,
+    })
+  );
   return {
     applications: [
       {
@@ -128,6 +151,20 @@ afterEach(async () => {
 });
 
 describe('publishPythonGenericArtifacts', () => {
+  it('refuses application evidence publication without Python security evidence', async () => {
+    const publicationManifest = await writeBundle();
+    await fs.remove(path.join(bundleDir, 'python-security-report.json'));
+
+    await expect(
+      publishPythonGenericArtifacts({
+        bundleDir,
+        dryRun: true,
+        giteaBaseUrl: 'http://gitea.local',
+        publicationManifest,
+      })
+    ).rejects.toThrow('python-security-report.json is missing or unreadable');
+  });
+
   it('publishes contracts idempotently with Basic authentication', async () => {
     const published = new Map<string, Buffer>();
     const baseUrl = await listen((request, response) => {

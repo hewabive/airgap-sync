@@ -170,12 +170,45 @@ export interface DownloadPythonApplicationPlansOptions {
     selectionId?: string;
     targetId: string;
   }[];
+  validateCandidate?: (candidate: {
+    index: PythonApplicationBundleIndex;
+    manifest: PythonSeedManifest;
+  }) => Promise<void>;
 }
 
 export interface VerifyPythonApplicationBundleResult {
   applications: number;
   artifacts: number;
   errors: string[];
+}
+
+export function pythonApplicationManifestCoverageErrors(
+  index: PythonApplicationBundleIndex,
+  manifest: PythonSeedManifest
+): string[] {
+  const errors: string[] = [];
+  for (const artifact of index.artifacts) {
+    const packageName = artifact.package;
+    if (!packageName) {
+      errors.push(`Python application wheel has no package identity: ${artifact.file}`);
+      continue;
+    }
+    const packageEntry = manifest.packages.find(
+      (pkg) =>
+        normalizePackageName(pkg.name) === normalizePackageName(packageName) &&
+        pkg.version === artifact.version
+    );
+    const file = packageEntry?.files.find((candidate) => candidate.file === artifact.file);
+    const fileMatches =
+      file?.filename === artifact.filename &&
+      file.sha256.toLowerCase() === artifact.sha256.toLowerCase();
+    if (!fileMatches) {
+      errors.push(
+        `Python application wheel is absent from the security manifest: ${packageName}==${artifact.version} ${artifact.file}`
+      );
+    }
+  }
+  return errors;
 }
 
 interface PlannedArtifact {
@@ -1035,6 +1068,19 @@ export async function downloadPythonApplicationPlans(
         kind: 'wheel',
         status: 'error',
       });
+    }
+    if (compatibilityManifest && options.validateCandidate) {
+      try {
+        await options.validateCandidate({ index, manifest: compatibilityManifest });
+      } catch (error) {
+        actions.push({
+          error: `Python security validation failed: ${(error as Error).message}`,
+          file: 'python-security-report.failed.json',
+          id: 'python-security',
+          kind: 'wheel',
+          status: 'error',
+        });
+      }
     }
   }
   const errors = actions.filter((action) => action.status === 'error');

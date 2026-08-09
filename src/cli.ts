@@ -53,6 +53,9 @@ import {
   MemoizedPythonIndexClient,
   normalizeMachineProbeFacts,
   normalizePythonApplicationRecipe,
+  OsvBatchClient,
+  OsvNpmAdvisoryClient,
+  OsvPythonAdvisoryClient,
   packageName,
   packageVersion,
   parseRootSpecs,
@@ -66,7 +69,9 @@ import {
   pruneInactivePythonApplicationPlans,
   publishBundle,
   scanNpmBundleSecurity,
+  scanPythonBundleSecurity,
   summarizeNpmSecurityReport,
+  summarizePythonSecurityReport,
   TarballInspectionCache,
   pruneBundle,
   readBundleInfo,
@@ -102,6 +107,7 @@ import {
   writeGitSourcesManifest,
   writeRegistryMetadataCache,
   writeNpmSecurityReport,
+  writePythonSecurityReport,
   writePublishReport,
   writePruneReport,
   writeWorkspaceSnapshot,
@@ -523,6 +529,7 @@ function collectShouldFail(report: {
   cpythonDistributions?: { errors: unknown[] };
   repositoryUpdate: { errors: unknown[] };
   security?: { ok: boolean };
+  pythonSecurity?: { ok: boolean };
 }): boolean {
   return (
     report.repositoryUpdate.errors.length > 0 ||
@@ -534,7 +541,8 @@ function collectShouldFail(report: {
     report.gitFetch.errors.length > 0 ||
     report.gitManifestScanErrors.length > 0 ||
     report.maxIterationsReached ||
-    report.security?.ok === false
+    report.security?.ok === false ||
+    report.pythonSecurity?.ok === false
   );
 }
 
@@ -572,7 +580,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const unsupported = report.fetch.unsupported.length;
   const npmErrors = report.fetch.errors.length;
   const pythonErrors = report.python?.errors.length ?? 0;
-  const pythonApplicationErrors = report.pythonApplications?.errors.length ?? 0;
+  const pythonApplicationErrors =
+    report.pythonApplications?.errors.filter(
+      (error) => error.id !== 'python-security' || report.pythonSecurity?.ok !== false
+    ).length ?? 0;
   const cpythonDistributionErrors = report.cpythonDistributions?.errors.length ?? 0;
   const gitErrors =
     report.repositoryUpdate.errors.length +
@@ -583,18 +594,24 @@ function formatDownloadSummary(report: CollectReport): string {
     : undefined;
   const securityErrors =
     report.security?.ok === false ? Math.max(1, securitySummary?.blocking ?? 0) : 0;
+  const pythonSecuritySummary = report.pythonSecurity
+    ? summarizePythonSecurityReport(report.pythonSecurity, { maxDetails: 20 })
+    : undefined;
+  const pythonSecurityErrors =
+    report.pythonSecurity?.ok === false ? Math.max(1, pythonSecuritySummary?.blocking ?? 0) : 0;
   const totalErrors =
     npmErrors +
     gitErrors +
     pythonErrors +
     pythonApplicationErrors +
     cpythonDistributionErrors +
-    securityErrors;
+    securityErrors +
+    pythonSecurityErrors;
   const status = failed
     ? red(
         `FAILED Download incomplete: ${String(totalErrors)} errors, ${String(unsupported)} unsupported npm specs, ${String(gitSkipped)} skipped git specs.`
       )
-    : green('OK Download completed: all resolved npm packages and Git mirrors are available.');
+    : green('OK Download completed: all resolved packages and Git mirrors are available.');
   const mode = report.dryRun ? 'dry run, ' : '';
   const downloadedThisRun = report.iterations.reduce(
     (total, iteration) => total + iteration.downloaded,
@@ -644,6 +661,20 @@ function formatDownloadSummary(report: CollectReport): string {
     : report.dryRun
       ? 'NPM security: not run during dry-run.'
       : yellow('NPM security: not run.');
+  const hasPythonPackages = Boolean(report.python ?? report.pythonApplications);
+  const pythonSecurityLine = report.pythonSecurity
+    ? report.pythonSecurity.ok
+      ? green(
+          `Python security: ok (${String(report.pythonSecurity.packageCount)} packages scanned, ${String(pythonSecuritySummary?.warnings ?? 0)} warnings).`
+        )
+      : red(
+          `Python security: FAILED (${String(pythonSecuritySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(pythonSecuritySummary?.scannerErrors ?? 0)} scanner errors, ${String(pythonSecuritySummary?.warnings ?? 0)} warnings).`
+        )
+    : hasPythonPackages
+      ? report.dryRun
+        ? 'Python security: not run during dry-run.'
+        : yellow('Python security: not run.')
+      : undefined;
   const reportsWritten = report.dryRun ? 'no' : 'yes';
   const bundleUpdated = report.wroteBundle ? 'yes' : 'no';
   const lines = [
@@ -653,6 +684,7 @@ function formatDownloadSummary(report: CollectReport): string {
     gitLine,
     ...(pythonLine ? [pythonLine] : []),
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
+    ...(pythonSecurityLine ? [pythonSecurityLine] : []),
     ...(cpythonDistributionsLine ? [cpythonDistributionsLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
@@ -683,6 +715,30 @@ function formatDownloadSummary(report: CollectReport): string {
     );
   }
 
+  if (report.pythonSecurity && pythonSecuritySummary) {
+    lines.push(
+      ...pythonSecuritySummary.details.map((detail) => {
+        const line = `Python security ${detail.level.toUpperCase()}: ${safeConsoleDetail(detail.message)}`;
+        return detail.level === 'error' ? red(line) : yellow(line);
+      })
+    );
+    if (pythonSecuritySummary.omitted > 0) {
+      lines.push(
+        yellow(
+          `Python security: ${String(pythonSecuritySummary.omitted)} more findings omitted from console output.`
+        )
+      );
+    }
+    lines.push(
+      `Python security report: ${path.join(
+        report.outputDir,
+        report.pythonSecurity.ok
+          ? 'python-security-report.json'
+          : 'python-security-report.failed.json'
+      )}`
+    );
+  }
+
   if (report.python?.errors.length) {
     lines.push(
       ...report.python.errors.map((error) => {
@@ -693,9 +749,13 @@ function formatDownloadSummary(report: CollectReport): string {
   }
   if (report.pythonApplications?.errors.length) {
     lines.push(
-      ...report.pythonApplications.errors.map((error) =>
-        red(`Python application artifact error [${error.file}]: ${error.error ?? 'unknown error'}`)
-      )
+      ...report.pythonApplications.errors
+        .filter((error) => error.id !== 'python-security' || report.pythonSecurity?.ok !== false)
+        .map((error) =>
+          red(
+            `Python application artifact error [${error.file}]: ${error.error ?? 'unknown error'}`
+          )
+        )
     );
   }
   if (report.cpythonDistributions?.errors.length) {
@@ -1436,6 +1496,7 @@ const collectPhaseLabels: Record<DownloadProgressEvent['phase'], string> = {
   'npm-fetch': 'resolve/download npm',
   'python-application-fetch': 'prepare Python application artifacts',
   'python-fetch': 'resolve/download Python',
+  'python-security-scan': 'scan Python package security',
   'repository-update': 'update repositories',
   'security-scan': 'scan npm package security',
 };
@@ -4614,6 +4675,9 @@ program
             activeConfig.npmSecurity?.minReleaseAgeDays ??
             defaultNpmSecurityPolicy.minReleaseAgeDays,
         };
+        const osvClient = new OsvBatchClient();
+        const npmAdvisoryClient = new OsvNpmAdvisoryClient(osvClient);
+        const pythonAdvisoryClient = new OsvPythonAdvisoryClient(osvClient);
         const prune =
           !targetSelection && (options.prune === true || config.defaults.download.prune === true);
         const allowApproximatePython = options.allowApproximatePython === true;
@@ -4662,12 +4726,17 @@ program
           ...(pythonIndex ? { pythonIndex } : {}),
           ...(legacyPython.sourceIndex ? { pythonSourceIndex: legacyPython.sourceIndex } : {}),
           pythonResolutionMode: legacyPython.resolutionMode,
+          pythonSecurity: {
+            advisoryClient: pythonAdvisoryClient,
+            policy: { maxReportAgeHours: npmSecurity.maxReportAgeHours },
+          },
           ...(legacyPython.targetEnvironments
             ? { pythonTargetEnvironments: legacyPython.targetEnvironments }
             : {}),
           registry,
           registryUrl,
           security: {
+            advisoryClient: npmAdvisoryClient,
             policy: {
               ...npmSecurity,
             },
@@ -4687,6 +4756,29 @@ program
             partial: targetSelection !== undefined,
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             targets: pythonApplicationPlans,
+            validateCandidate: async ({ manifest: candidateManifest }) => {
+              onDownloadProgress({ phase: 'python-security-scan', status: 'start' });
+              const pythonSecurity = await scanPythonBundleSecurity({
+                advisoryClient: pythonAdvisoryClient,
+                generatedAt: report.generatedAt,
+                manifest: candidateManifest,
+                policy: { maxReportAgeHours: npmSecurity.maxReportAgeHours },
+              });
+              report.pythonSecurity = pythonSecurity;
+              await writePythonSecurityReport(outputDir, pythonSecurity, {
+                failed: !pythonSecurity.ok,
+              });
+              onDownloadProgress({
+                current: pythonSecurity.packageCount,
+                phase: 'python-security-scan',
+                status: pythonSecurity.ok ? 'done' : 'error',
+                total: pythonSecurity.packageCount,
+              });
+              if (!pythonSecurity.ok) {
+                report.wroteBundle = false;
+                throw new Error('known-malware scan did not pass');
+              }
+            },
           });
         }
         if (
@@ -4802,6 +4894,7 @@ program
           options.maxSecurityReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours,
         minReleaseAgeDays: options.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays,
       };
+      const osvClient = new OsvBatchClient();
       const report = await collectBundle({
         dryRun: options.dryRun === true,
         concurrency: options.concurrency,
@@ -4818,9 +4911,14 @@ program
         registry,
         registryUrl,
         security: {
+          advisoryClient: new OsvNpmAdvisoryClient(osvClient),
           policy: {
             ...npmSecurity,
           },
+        },
+        pythonSecurity: {
+          advisoryClient: new OsvPythonAdvisoryClient(osvClient),
+          policy: { maxReportAgeHours: npmSecurity.maxReportAgeHours },
         },
         root,
       });

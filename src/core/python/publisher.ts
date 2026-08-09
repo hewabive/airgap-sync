@@ -10,6 +10,7 @@ import {
 } from './publish-progress.js';
 import { normalizePackageName } from './names.js';
 import { parseWheelFilename } from './wheels.js';
+import { assertPythonSecurityGate } from './security.js';
 
 const registryLookupConcurrency = 8;
 const registryLookupTimeoutMs = 30_000;
@@ -508,6 +509,9 @@ export async function publishPythonBundle(
   options: PublishPythonBundleOptions
 ): Promise<PythonPublishReport> {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
+  await assertPythonSecurityGate(options.bundleDir, manifest, {
+    now: new Date(generatedAt),
+  });
   const dryRun = options.dryRun === true;
   const owner = validateOwner(options.owner);
   const baseUrl = normalizeBaseUrl(options.giteaBaseUrl);

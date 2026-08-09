@@ -38,6 +38,8 @@ been tested with Verdaccio and Gitea:
 - recursive package discovery from nested `package.json` files and supported lockfiles;
 - npm dependency resolution, SRI/SHA-256 validation, release-age quarantine, OSV malware
   checks, lifecycle/non-registry dependency inspection, retries, and pruning;
+- exact-version OSV malware checks for every collected PyPI package, with
+  manifest-bound evidence required before Python publication;
 - platform-aware Python application collection for Windows and glibc Linux x86-64,
   with explicit CPython 3.10–3.13 cells, minimum wheel coverage, inferred glibc
   boundaries, content-addressed storage, and Gitea PyPI publishing;
@@ -300,6 +302,8 @@ three-day release quarantine and a 72-hour security-report lifetime:
 Packages with lifecycle scripts or non-registry dependencies are blocked. A reviewed
 exception must pin the exact downloaded bytes as
 `name@version#sha256:<hex>` in `allowPackages`; a changed tarball no longer matches.
+`maxReportAgeHours` is also the lifetime of Python OSV evidence; Python malware has no
+allow-list escape hatch.
 
 `airgap-sync.secrets.json` is optional. A Gitea token entered during interactive
 first-time setup, or saved later from the menu, is stored there in plaintext on the
@@ -326,6 +330,7 @@ airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
 airgap-bundle/security-report.json      OSV and static npm security evidence
 airgap-bundle/python-seed-manifest.json bundled Python files and target environments
+airgap-bundle/python-security-report.json exact-version PyPI OSV evidence
 airgap-bundle/dist-tags.json            real dist-tag requirements
 airgap-bundle/git-sources.json          Git source metadata
 airgap-bundle/workspace-snapshot.json   targets for later verification
@@ -338,7 +343,8 @@ See [Bundle Format](./docs/bundle-format.md) for the full layout.
 
 `airgap-sync verify ./airgap-bundle` checks bundle consistency: manifests, referenced
 tarballs and wheels, package identity and hashes, a fresh manifest-bound npm security
-report, reports, and Git metadata.
+report, a fresh manifest-bound Python security report when Python packages are present,
+reports, and Git metadata.
 
 Within one download or verify run, each unchanged npm tarball is streamed from disk once:
 SHA-256, registry integrity digests, and the embedded `package.json` are collected in the

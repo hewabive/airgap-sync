@@ -187,6 +187,8 @@ export function downloadReportSucceeded(report: CollectReport): boolean {
     report.gitSources.skipped.length === 0 &&
     report.gitFetch.errors.length === 0 &&
     report.gitManifestScanErrors.length === 0 &&
+    report.security?.ok !== false &&
+    report.pythonSecurity?.ok !== false &&
     !report.maxIterationsReached
   );
 }

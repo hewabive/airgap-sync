@@ -24,6 +24,7 @@ import {
 } from './gitea.js';
 import { publishBundle, type PublishBundleOptions } from './publisher.js';
 import { readPythonSeedManifest, writePythonPublishReport } from './python/bundle.js';
+import { assertPythonSecurityGate } from './python/security.js';
 import {
   publishPythonBundle,
   type PythonPublishAuth,
@@ -41,7 +42,10 @@ import type {
   GitSourcesManifest,
   PublishReport,
 } from '../types.js';
-import { readPythonApplicationBundleIndex } from './python/application-bundle.js';
+import {
+  pythonApplicationManifestCoverageErrors,
+  readPythonApplicationBundleIndex,
+} from './python/application-bundle.js';
 import {
   materializePythonPublication,
   type PythonPublicationManifest,
@@ -301,6 +305,27 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
   const pythonApplicationIndex = await readPythonApplicationBundleIndex(bundleDir);
+  if (pythonApplicationIndex && !pythonManifest) {
+    throw new Error(
+      'Refusing Python publication: python application index has no python-seed-manifest.json'
+    );
+  }
+  if (pythonApplicationIndex && pythonManifest) {
+    const coverageErrors = pythonApplicationManifestCoverageErrors(
+      pythonApplicationIndex,
+      pythonManifest
+    );
+    if (coverageErrors.length > 0) {
+      throw new Error(
+        `Refusing Python publication: ${coverageErrors[0] ?? 'application wheels are not covered by the security manifest'}`
+      );
+    }
+  }
+  if (pythonManifest) {
+    await assertPythonSecurityGate(bundleDir, pythonManifest, {
+      now: new Date(generatedAt),
+    });
+  }
   const cpythonDistributionIndex = await readCpythonDistributionBundleIndex(bundleDir);
   const hasPythonPublication = Boolean(
     pythonManifest ?? pythonApplicationIndex ?? cpythonDistributionIndex

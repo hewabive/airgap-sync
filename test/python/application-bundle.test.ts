@@ -8,6 +8,7 @@ import * as fs from '../../src/core/fs.js';
 import type { ActivePythonApplicationPlan } from '../../src/core/python/active-plan-store.js';
 import {
   downloadPythonApplicationPlans,
+  pythonApplicationManifestCoverageErrors,
   readPythonApplicationBundleIndex,
   type PythonApplicationDownloadProgressEvent,
   verifyPythonApplicationBundle,
@@ -348,6 +349,17 @@ describe('Python application bundle', () => {
       ],
     });
     expect(compatibilityManifest.packages[0]?.files[0]?.file).toContain('python/artifacts/wheels/');
+    expect(pythonApplicationManifestCoverageErrors(index!, compatibilityManifest)).toEqual([]);
+    expect(
+      pythonApplicationManifestCoverageErrors(index!, {
+        ...compatibilityManifest,
+        packages: [],
+      })
+    ).toEqual([
+      expect.stringContaining(
+        'Python application wheel is absent from the security manifest: shared==1.0.0'
+      ),
+    ]);
     expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
     const prerequisitePath = index!.applications[0]!.prerequisiteReportPath;
     const firstPrerequisite = await fs.readFile(path.join(bundleDir, prerequisitePath), 'utf8');
@@ -497,6 +509,40 @@ describe('Python application bundle', () => {
       },
     });
     expect(await verifyPythonApplicationBundle(bundleDir)).toMatchObject({ errors: [] });
+  });
+
+  it('does not activate candidate metadata when Python security validation fails', async () => {
+    const content = wheelBuffer('1.0.0');
+    const source = path.join(tempDir, 'shared-1.0.0-py3-none-any.whl');
+    await fs.writeFile(source, content);
+    const plan = activePlan(
+      createPlan({
+        application: 'first-app',
+        filename: path.basename(source),
+        sha256: createHash('sha256').update(content).digest('hex'),
+        size: content.byteLength,
+        sourceUrl: pathToFileURL(source).toString(),
+      })
+    );
+    const bundleDir = path.join(tempDir, 'security-rejected-bundle');
+
+    const report = await downloadPythonApplicationPlans({
+      bundleDir,
+      targets: [{ activePlan: plan, targetId: plan.manifest.targetId }],
+      validateCandidate: ({ manifest }) => {
+        expect(manifest.packages).toHaveLength(1);
+        return Promise.reject(new Error('MAL-2026-1234'));
+      },
+    });
+
+    expect(report.errors).toEqual([
+      expect.objectContaining({
+        error: 'Python security validation failed: MAL-2026-1234',
+        id: 'python-security',
+      }),
+    ]);
+    expect(await readPythonApplicationBundleIndex(bundleDir)).toBeUndefined();
+    expect(await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json'))).toBe(false);
   });
 
   it('downloads independent application artifacts concurrently', async () => {

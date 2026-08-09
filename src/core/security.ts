@@ -12,6 +12,12 @@ import { semanticDigest } from './canonical-json.js';
 import * as fs from './fs.js';
 import { parseDependencySpec } from './specs.js';
 import { inspectPackageTarball, type TarballInspectionCache } from './tarball.js';
+import {
+  OsvBatchClient,
+  osvFindings,
+  type OsvClient,
+  type OsvVulnerability,
+} from './advisories.js';
 
 export const defaultNpmSecurityPolicy: NpmSecurityPolicy = {
   allowPackages: [],
@@ -37,58 +43,20 @@ export interface NpmSecurityConsoleSummary {
   warnings: number;
 }
 
-interface OsvVulnerability {
-  aliases?: string[];
-  id: string;
-  modified?: string;
-  summary?: string;
-}
-
 export interface NpmAdvisoryClient {
   query(packages: { name: string; version: string }[]): Promise<OsvVulnerability[][]>;
 }
 
 export class OsvNpmAdvisoryClient implements NpmAdvisoryClient {
-  constructor(
-    private readonly url = 'https://api.osv.dev/v1/querybatch',
-    private readonly timeoutMs = 30_000
-  ) {}
+  readonly #client: OsvClient;
 
-  async query(packages: { name: string; version: string }[]): Promise<OsvVulnerability[][]> {
-    const results: OsvVulnerability[][] = [];
-    for (let offset = 0; offset < packages.length; offset += 1000) {
-      results.push(...(await this.queryBatch(packages.slice(offset, offset + 1000))));
-    }
-    return results;
+  constructor(clientOrUrl: OsvClient | string = new OsvBatchClient(), timeoutMs = 30_000) {
+    this.#client =
+      typeof clientOrUrl === 'string' ? new OsvBatchClient(clientOrUrl, timeoutMs) : clientOrUrl;
   }
 
-  private async queryBatch(
-    packages: { name: string; version: string }[]
-  ): Promise<OsvVulnerability[][]> {
-    if (packages.length === 0) return [];
-
-    const response = await fetch(this.url, {
-      body: JSON.stringify({
-        queries: packages.map((pkg) => ({
-          package: { ecosystem: 'npm', name: pkg.name },
-          version: pkg.version,
-        })),
-      }),
-      headers: { 'content-type': 'application/json' },
-      method: 'POST',
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    if (!response.ok) {
-      throw new Error(`OSV query failed with HTTP ${String(response.status)}`);
-    }
-
-    const body = (await response.json()) as {
-      results?: { vulns?: OsvVulnerability[] }[];
-    };
-    if (body.results?.length !== packages.length) {
-      throw new Error('OSV returned an incomplete querybatch response');
-    }
-    return body.results.map((result) => result.vulns ?? []);
+  query(packages: { name: string; version: string }[]): Promise<OsvVulnerability[][]> {
+    return this.#client.query(packages.map((pkg) => ({ ...pkg, ecosystem: 'npm' })));
   }
 }
 
@@ -265,23 +233,7 @@ export async function scanNpmBundleSecurity(
     const advisoryResults = await (options.advisoryClient ?? new OsvNpmAdvisoryClient()).query(
       options.manifest.packages.map(({ name, version }) => ({ name, version }))
     );
-    for (const [index, vulnerabilities] of advisoryResults.entries()) {
-      const pkg = options.manifest.packages[index];
-      if (!pkg) continue;
-      for (const vulnerability of vulnerabilities) {
-        const malware = vulnerability.id.startsWith('MAL-');
-        advisories.push({
-          aliases: vulnerability.aliases ?? [],
-          id: vulnerability.id,
-          ...(vulnerability.modified ? { modified: vulnerability.modified } : {}),
-          name: pkg.name,
-          severity: malware ? 'error' : 'warning',
-          ...(vulnerability.summary ? { summary: vulnerability.summary } : {}),
-          type: malware ? 'malware' : 'vulnerability',
-          version: pkg.version,
-        });
-      }
-    }
+    advisories.push(...osvFindings(options.manifest.packages, advisoryResults));
   } catch (error) {
     errors.push(`OSV: ${(error as Error).message}`);
   }

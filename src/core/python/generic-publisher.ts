@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import * as fs from '../fs.js';
 import {
+  pythonApplicationManifestCoverageErrors,
   readPythonApplicationBundleIndex,
   type PythonApplicationBundleIndex,
 } from './application-bundle.js';
@@ -12,6 +13,8 @@ import {
   type PythonFilePublishProgress,
   type PythonPublishProgressEvent,
 } from './publish-progress.js';
+import { readPythonSeedManifest } from './bundle.js';
+import { assertPythonSecurityGate } from './security.js';
 
 export interface PythonGenericPublishAuth {
   password: string;
@@ -334,6 +337,23 @@ export async function publishPythonGenericArtifacts(
     options.onProgress?.({ current: 0, status: 'done', total: 0 });
     return report;
   }
+  let pythonManifest;
+  try {
+    pythonManifest = await readPythonSeedManifest(bundleDir);
+  } catch (error) {
+    throw new Error(
+      `Refusing Python publication: python-seed-manifest.json is missing or unreadable: ${(error as Error).message}`
+    );
+  }
+  const coverageErrors = pythonApplicationManifestCoverageErrors(index, pythonManifest);
+  if (coverageErrors.length > 0) {
+    throw new Error(
+      `Refusing Python publication: ${coverageErrors[0] ?? 'application wheels are not covered by the security manifest'}`
+    );
+  }
+  await assertPythonSecurityGate(bundleDir, pythonManifest, {
+    now: new Date(generatedAt),
+  });
   let files: GiteaGenericPackageFile[];
   try {
     files = applicationFiles(index, options.publicationManifest).sort(

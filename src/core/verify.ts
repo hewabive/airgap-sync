@@ -20,7 +20,10 @@ import type {
 import type { WorkspaceSnapshot } from './workspace.js';
 import type { PythonFetchReport, PythonSeedManifest } from './python/bundle.js';
 import { verifyPythonBundle } from './python/verify.js';
+import { assertPythonSecurityGate } from './python/security.js';
 import {
+  pythonApplicationManifestCoverageErrors,
+  readPythonApplicationBundleIndex,
   verifyPythonApplicationBundle,
   type PythonApplicationDownloadReport,
 } from './python/application-bundle.js';
@@ -419,6 +422,33 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
           manifest: pythonManifest,
         }))
       );
+      try {
+        const pythonSecurity = await assertPythonSecurityGate(bundleDir, pythonManifest, {
+          now: new Date(generatedAt),
+        });
+        checks.push(
+          check(
+            'python-security',
+            'ok',
+            `OSV security report passed for ${String(pythonSecurity.packageCount)} Python packages`
+          )
+        );
+        const warnings = pythonSecurity.advisories.filter(
+          (finding) => finding.severity === 'warning'
+        );
+        if (warnings.length > 0) {
+          checks.push(
+            check(
+              'python-security-warnings',
+              'warning',
+              `${String(warnings.length)} Python vulnerability advisories require review`,
+              { findings: warnings }
+            )
+          );
+        }
+      } catch (error) {
+        checks.push(check('python-security', 'error', (error as Error).message));
+      }
     } catch (error) {
       checks.push(
         check('python-seed-manifest', 'error', 'python-seed-manifest.json is unreadable', {
@@ -440,7 +470,39 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
     path.join(bundleDir, pythonApplicationIndexPath)
   );
   if (hasPythonApplicationIndex) {
+    if (!hasPythonManifest) {
+      checks.push(
+        check(
+          'python-seed-manifest',
+          'error',
+          'python-seed-manifest.json is required by the Python application bundle'
+        )
+      );
+    }
     try {
+      if (hasPythonManifest) {
+        const [applicationIndex, pythonManifest] = await Promise.all([
+          readPythonApplicationBundleIndex(bundleDir),
+          fs.readJson<PythonSeedManifest>(pythonManifestPath),
+        ]);
+        const coverageErrors = applicationIndex
+          ? pythonApplicationManifestCoverageErrors(applicationIndex, pythonManifest)
+          : [];
+        checks.push(
+          coverageErrors.length === 0
+            ? check(
+                'python-application-security-coverage',
+                'ok',
+                'All Python application wheels are covered by the security manifest'
+              )
+            : check(
+                'python-application-security-coverage',
+                'error',
+                `${String(coverageErrors.length)} Python application wheels are absent from the security manifest`,
+                { errors: coverageErrors }
+              )
+        );
+      }
       const result = await verifyPythonApplicationBundle(bundleDir);
       checks.push(
         result.errors.length === 0

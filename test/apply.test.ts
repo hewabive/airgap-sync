@@ -15,6 +15,11 @@ import type { GitCommandInvocation } from '../src/core/git-fetch.js';
 import type { PythonApplicationBundleIndex } from '../src/core/python/application-bundle.js';
 import { normalizePlatformCoveragePolicy } from '../src/core/python/coverage-policy.js';
 import { createPythonEnvironmentPlan } from '../src/core/python/environment-plan.js';
+import type { PythonSeedManifest } from '../src/core/python/bundle.js';
+import {
+  scanPythonBundleSecurity,
+  writePythonSecurityReport,
+} from '../src/core/python/security.js';
 
 let bundleDir: string;
 
@@ -83,6 +88,20 @@ const noopClient: GiteaClient = {
   repositoryExists: () => Promise.resolve(false),
 };
 
+async function writeCleanPythonSecurityReport(
+  pythonManifest: PythonSeedManifest,
+  generatedAt: string
+): Promise<void> {
+  await writePythonSecurityReport(
+    bundleDir,
+    await scanPythonBundleSecurity({
+      advisoryClient: { query: (packages) => Promise.resolve(packages.map(() => [])) },
+      generatedAt,
+      manifest: pythonManifest,
+    })
+  );
+}
+
 async function writePythonApplicationBundle(): Promise<void> {
   const policy = normalizePlatformCoveragePolicy({
     id: 'windows',
@@ -134,6 +153,18 @@ async function writePythonApplicationBundle(): Promise<void> {
     summary: { applications: 1, artifacts: 0, totalBytes: 0 },
   };
   await fs.writeJson(path.join(bundleDir, 'python/application-index.json'), index, { spaces: 2 });
+  const pythonManifest: PythonSeedManifest = {
+    createdAt: '2026-07-28T00:00:00.000Z',
+    packages: [],
+    roots: [],
+    schemaVersion: 1,
+    sourceIndex: 'https://pypi.org/simple/',
+    targetEnvironments: [],
+  };
+  await fs.writeJson(path.join(bundleDir, 'python-seed-manifest.json'), pythonManifest, {
+    spaces: 2,
+  });
+  await writeCleanPythonSecurityReport(pythonManifest, '2026-07-28T00:00:00.000Z');
 }
 
 describe('applyBundle', () => {
@@ -240,43 +271,43 @@ describe('applyBundle', () => {
   });
 
   it('plans Python publishing when a Python seed manifest is present', async () => {
-    await fs.writeJson(
-      path.join(bundleDir, 'python-seed-manifest.json'),
-      {
-        schemaVersion: 1,
-        createdAt: '2026-07-10T00:00:00.000Z',
-        packages: [
-          {
-            files: [
-              {
-                coreMetadata: {
-                  metadataVersion: '2.4',
-                  name: 'demo-python',
-                  projectUrls: [],
-                  providesExtra: [],
-                  requiresDist: [],
-                  version: '1.0',
-                },
-                environments: ['prod'],
-                file: 'python-packages/demo_python-1.0-py3-none-any.whl',
-                filename: 'demo_python-1.0-py3-none-any.whl',
-                kind: 'wheel',
-                sha256: 'aa'.repeat(32),
-                sourceHashes: { sha256: 'aa'.repeat(32) },
-                url: 'https://files.example/demo_python-1.0-py3-none-any.whl',
+    const pythonManifest: PythonSeedManifest = {
+      schemaVersion: 1,
+      createdAt: '2026-07-10T00:00:00.000Z',
+      packages: [
+        {
+          files: [
+            {
+              coreMetadata: {
+                metadataVersion: '2.4',
+                name: 'demo-python',
+                projectUrls: [],
+                providesExtra: [],
+                requiresDist: [],
+                version: '1.0',
               },
-            ],
-            name: 'demo-python',
-            resolvedFrom: [],
-            version: '1.0',
-          },
-        ],
-        roots: ['demo-python==1.0'],
-        sourceIndex: 'https://pypi.org/simple/',
-        targetEnvironments: [],
-      },
-      { spaces: 2 }
-    );
+              environments: ['prod'],
+              file: 'python-packages/demo_python-1.0-py3-none-any.whl',
+              filename: 'demo_python-1.0-py3-none-any.whl',
+              kind: 'wheel',
+              sha256: 'aa'.repeat(32),
+              sourceHashes: { sha256: 'aa'.repeat(32) },
+              url: 'https://files.example/demo_python-1.0-py3-none-any.whl',
+            },
+          ],
+          name: 'demo-python',
+          resolvedFrom: [],
+          version: '1.0',
+        },
+      ],
+      roots: ['demo-python==1.0'],
+      sourceIndex: 'https://pypi.org/simple/',
+      targetEnvironments: [],
+    };
+    await fs.writeJson(path.join(bundleDir, 'python-seed-manifest.json'), pythonManifest, {
+      spaces: 2,
+    });
+    await writeCleanPythonSecurityReport(pythonManifest, '2026-07-10T00:00:00.000Z');
 
     const progress: ApplyProgressEvent[] = [];
     const report = await applyBundle({

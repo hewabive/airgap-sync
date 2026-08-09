@@ -38,6 +38,7 @@ airgap-bundle/
   seed-manifest.json
   dist-tags.json
   security-report.json
+  python-security-report.json
   registry-metadata-cache.json
   workspace-snapshot.json
   fetch-report.json
@@ -179,6 +180,21 @@ For current `python-app` bundles, this manifest is also a compatibility view ove
 content-addressed wheel paths for the current publisher. The consumer-facing result is
 the set of projects and wheels available from Gitea PyPI, not this manifest or
 `python/application-index.json`.
+
+## python-security-report.json
+
+Records OSV results for each exact normalized PyPI `name==version` in the complete
+`python-seed-manifest.json`. `manifestSha256` binds the report to that manifest.
+Download activation, verification, PyPI publication, and Python application-evidence
+publication require `ok: true`, an exact digest match, complete wheel SHA-256 values,
+and a report within `policy.maxReportAgeHours`. `MAL-*` advisories and scanner failures
+block the report; ordinary vulnerability advisories are warnings.
+When `python/application-index.json` exists, every indexed application wheel must also
+occur in this checked manifest with the same package identity, path, and SHA-256.
+
+A rejected candidate is recorded in `python-security-report.failed.json` and does not
+replace the active Python manifest. The report establishes that OSV had no known
+malware record at scan time; it is not static analysis of wheel contents.
 
 ## python/application-index.json
 

@@ -315,6 +315,13 @@ failures, and prints the path to `security-report.json` or
 `security-report.failed.json`. Console details are bounded; `--json` and the report file
 retain the complete result.
 
+For Python, download queries OSV for every exact normalized PyPI `name==version` in the
+candidate wheel manifest. A `MAL-*` advisory or OSV failure prevents activation and is
+written to `python-security-report.failed.json`; ordinary vulnerabilities are warnings.
+Successful evidence is bound to the complete `python-seed-manifest.json` in
+`python-security-report.json`. The same `--max-security-report-age-hours` value governs
+both npm and Python report freshness.
+
 Tarball hashing and `package.json` inspection use the same stream. An in-memory,
 file-fingerprint-scoped cache reuses that inspection across fixed-point iterations and
 the security scan, so an unchanged tarball is normally read once per download command,
@@ -531,8 +538,9 @@ airgap-sync verify install ./airgap-bundle \
 
 Checks the bundle without running package-manager installs. It validates bundle
 manifests, tarballs, Python wheel identities/hashes and environment coverage, verifies
-`workspace-snapshot.json`, checks Git mirror presence from `git-sources.json`, and
-checks `apply-report.json` when present. The command writes `verify-report.json`.
+fresh manifest-bound npm and Python security evidence, verifies `workspace-snapshot.json`,
+checks Git mirror presence from `git-sources.json`, and checks `apply-report.json` when
+present. The command writes `verify-report.json`.
 
 All npm digest, readability, and identity checks in one `verify` invocation reuse one
 streaming inspection per unchanged tarball. A new invocation deliberately performs a
@@ -685,6 +693,12 @@ and configuration templates to Gitea Generic Packages. Those objects are evidenc
 consumers must not need them to install from PyPI.
 Existing immutable generic objects are skipped only after their downloaded content
 matches the local SHA-256.
+
+Before provisioning Gitea owners or publishing collected wheels or Python application
+evidence, `publish` requires a fresh passing `python-security-report.json` bound to the
+exact `python-seed-manifest.json`. Missing, failed, stale, or mismatched evidence stops
+the operation before network-side changes. A bundle containing only portable CPython
+distribution archives has no PyPI package manifest and does not use this gate.
 
 When `python/distributions/index.json` exists, `publish` independently uploads its
 portable CPython archives as Gitea Generic Packages. Matching remote files are skipped,

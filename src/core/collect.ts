@@ -58,6 +58,12 @@ import { fetchPythonBundle } from './python/fetch.js';
 import { writePythonFetchReport, writePythonSeedManifest } from './python/bundle.js';
 import { preparePythonRootWheels, RootWheelPythonIndex } from './python/root-wheels.js';
 import type { PythonResolutionMode } from './python/resolution-policy.js';
+import {
+  scanPythonBundleSecurity,
+  writePythonSecurityReport,
+  type PythonAdvisoryClient,
+  type PythonSecurityPolicy,
+} from './python/security.js';
 import { scanNpmBundleSecurity, writeNpmSecurityReport } from './security.js';
 import type { NpmSecurityPolicy } from '../types.js';
 import { TarballInspectionCache } from './tarball.js';
@@ -87,6 +93,10 @@ export interface CollectBundleOptions {
   pythonSourceIndex?: string;
   pythonTargetEnvironments?: PythonTargetEnvironmentConfig[];
   pythonTimeoutMs?: number;
+  pythonSecurity?: {
+    advisoryClient?: PythonAdvisoryClient;
+    policy?: Partial<PythonSecurityPolicy>;
+  };
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   registryUrl: string;
@@ -112,6 +122,7 @@ export type CollectProgressPhase =
   | 'git-fetch'
   | 'git-manifest-scan'
   | 'python-fetch'
+  | 'python-security-scan'
   | 'security-scan'
   | 'bundle-write';
 
@@ -1001,6 +1012,31 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
           total: documents.manifest.packages.length,
         });
         if (!security.ok) {
+          wroteBundle = false;
+          report.wroteBundle = false;
+        }
+      }
+      if (pythonResult?.manifest && options.pythonSecurity) {
+        options.onProgress?.({ phase: 'python-security-scan', status: 'start' });
+        const pythonSecurity = await scanPythonBundleSecurity({
+          ...(options.pythonSecurity.advisoryClient
+            ? { advisoryClient: options.pythonSecurity.advisoryClient }
+            : {}),
+          generatedAt,
+          manifest: pythonResult.manifest,
+          ...(options.pythonSecurity.policy ? { policy: options.pythonSecurity.policy } : {}),
+        });
+        report.pythonSecurity = pythonSecurity;
+        await writePythonSecurityReport(outputDir, pythonSecurity, {
+          failed: !pythonSecurity.ok,
+        });
+        options.onProgress?.({
+          current: pythonSecurity.packageCount,
+          phase: 'python-security-scan',
+          status: pythonSecurity.ok ? 'done' : 'error',
+          total: pythonSecurity.packageCount,
+        });
+        if (!pythonSecurity.ok) {
           wroteBundle = false;
           report.wroteBundle = false;
         }

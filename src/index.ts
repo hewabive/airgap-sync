@@ -50,6 +50,7 @@ export {
 export { ensureWorkspacePythonApplicationPlans } from './core/python/workspace-plan-preflight.js';
 export {
   downloadPythonApplicationPlans,
+  pythonApplicationManifestCoverageErrors,
   readPythonApplicationBundleIndex,
   verifyPythonApplicationBundle,
 } from './core/python/application-bundle.js';
@@ -232,6 +233,7 @@ export {
   isBlockedPublishRegistry,
 } from './core/registry.js';
 export { createPublishPlan, publishBundle } from './core/publisher.js';
+export { OsvBatchClient } from './core/advisories.js';
 export {
   assertNpmSecurityGate,
   defaultNpmSecurityPolicy,
@@ -240,6 +242,16 @@ export {
   summarizeNpmSecurityReport,
   writeNpmSecurityReport,
 } from './core/security.js';
+export {
+  assertPythonSecurityGate,
+  defaultPythonSecurityPolicy,
+  failedPythonSecurityReportFileName,
+  OsvPythonAdvisoryClient,
+  pythonSecurityReportFileName,
+  scanPythonBundleSecurity,
+  summarizePythonSecurityReport,
+  writePythonSecurityReport,
+} from './core/python/security.js';
 export { pruneBundle, writePruneReport } from './core/prune.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
@@ -550,6 +562,18 @@ export type {
   PythonPublishAuth,
   PythonPublishReport,
 } from './core/python/publisher.js';
+export type {
+  PythonAdvisoryClient,
+  PythonSecurityConsoleSummary,
+  PythonSecurityPolicy,
+  PythonSecurityReport,
+} from './core/python/security.js';
+export type {
+  OsvClient,
+  OsvEcosystem,
+  OsvPackageQuery,
+  OsvVulnerability,
+} from './core/advisories.js';
 
 export type {
   ApplyBundleReport,
@@ -591,6 +615,7 @@ export type {
   PackageVersionMetadata,
   ParseRootSpecsResult,
   PackageIdentity,
+  PackageSecurityAdvisoryFinding,
   ProjectPackageManifest,
   ProjectPackageManagerEngine,
   PublishActionResult,
