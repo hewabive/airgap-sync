@@ -20,6 +20,7 @@ import type {
   ResolutionError,
   TagRequirement,
   UnsupportedRootPackageRequirement,
+  VulnerabilityResolutionAction,
   VerifyReport,
   VerifyInstallReport,
 } from '../types.js';
@@ -50,6 +51,7 @@ export interface FetchReportOptions {
   skipped: number;
   timings?: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
+  vulnerabilityResolutions?: VulnerabilityResolutionAction[];
   wouldDownloadPackages?: FetchPackageAction[];
 }
 
@@ -134,6 +136,9 @@ export function createFetchReport(options: FetchReportOptions): FetchReport {
       totalMs: 0,
     },
     unsupported: options.unsupported,
+    ...(options.vulnerabilityResolutions
+      ? { vulnerabilityResolutions: options.vulnerabilityResolutions }
+      : {}),
     wouldDownloadPackages: options.wouldDownloadPackages ?? [],
   };
 }

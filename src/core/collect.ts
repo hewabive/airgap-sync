@@ -531,6 +531,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       status: 'start',
     });
     resolution = await fetchSeedBundle({
+      ...(options.security?.advisoryClient
+        ? { advisoryClient: options.security.advisoryClient }
+        : {}),
       download: !dryRun,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       includePeer,
@@ -564,6 +567,8 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       gitRequirements: state.gitRequirements,
       requirements: state.requirements,
       unsupported: state.unsupported,
+      vulnerabilityResolutionPolicy:
+        options.security?.policy?.vulnerabilityResolutionPolicy ?? 'prefer-clean',
     });
     const fetchMs = elapsedMs(fetchIterationStart);
     timings.fetchIterationsMs += fetchMs;
@@ -577,6 +582,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       skipped: resolution.skipped,
       timings: resolution.timings,
       unsupported: resolution.unsupported,
+      ...(resolution.vulnerabilityResolutions
+        ? { vulnerabilityResolutions: resolution.vulnerabilityResolutions }
+        : {}),
       wouldDownloadPackages: resolution.wouldDownloadPackages,
     });
     fetchReports.push(fetch);

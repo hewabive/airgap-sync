@@ -4,6 +4,7 @@ import type {
   FetchTimings,
   GitFetchActionResult,
   GitFetchReport,
+  VulnerabilityResolutionAction,
 } from '../types.js';
 
 function mergeGitFetchStatus(
@@ -130,6 +131,25 @@ function uniqueFetchActions(actions: FetchPackageAction[]): FetchPackageAction[]
   );
 }
 
+function vulnerabilityResolutionKey(action: VulnerabilityResolutionAction): string {
+  return [action.name, action.requiredBy, action.specifier].join('\0');
+}
+
+function uniqueVulnerabilityResolutions(
+  actions: VulnerabilityResolutionAction[]
+): VulnerabilityResolutionAction[] {
+  const byKey = new Map<string, VulnerabilityResolutionAction>();
+  for (const action of actions) {
+    byKey.set(vulnerabilityResolutionKey(action), action);
+  }
+  return [...byKey.values()].sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) ||
+      left.requiredBy.localeCompare(right.requiredBy) ||
+      left.specifier.localeCompare(right.specifier)
+  );
+}
+
 function sumFetchTimings(reports: FetchReport[]): FetchTimings {
   return reports.reduce<FetchTimings>(
     (total, report) => ({
@@ -176,6 +196,9 @@ export function aggregateFetchReports(reports: FetchReport[]): FetchReport | und
   const wouldDownloadPackages = uniqueFetchActions(
     reports.flatMap((report) => report.wouldDownloadPackages)
   );
+  const vulnerabilityResolutions = uniqueVulnerabilityResolutions(
+    reports.flatMap((report) => report.vulnerabilityResolutions ?? [])
+  );
 
   return {
     ...last,
@@ -186,6 +209,7 @@ export function aggregateFetchReports(reports: FetchReport[]): FetchReport | und
         ? last.skipped
         : Math.max(0, last.resolved - downloadedPackages.length),
     timings: sumFetchTimings(reports),
+    ...(vulnerabilityResolutions.length > 0 ? { vulnerabilityResolutions } : {}),
     wouldDownloadPackages,
   };
 }

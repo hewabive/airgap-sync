@@ -15,7 +15,10 @@ import type {
   TagRequirement,
   TagResolutionPolicy,
   UnsupportedRootPackageRequirement,
+  VulnerabilityResolutionAction,
+  VulnerabilityResolutionPolicy,
 } from '../types.js';
+import type { NpmAdvisoryClient } from './security.js';
 import type { RegistryClient } from './registry.js';
 import type { RegistryMetadataCache } from './metadata-cache.js';
 import { resolveRootRequirements } from './resolver.js';
@@ -30,12 +33,15 @@ import {
 import { packageFileName } from './files.js';
 import {
   stableBundledRangeRequirement,
+  stableRangeResolutionKey,
   stableRangeRequirement,
   stableTagRequirement,
   type StableTagResolutionIndex,
 } from './tag-resolution.js';
+import { preferCleanRangeVersions } from './vulnerability-resolution.js';
 
 export interface FetchSeedBundleOptions {
+  advisoryClient?: NpmAdvisoryClient;
   concurrency?: number;
   download?: boolean;
   includePeer?: boolean;
@@ -55,6 +61,11 @@ export interface FetchSeedBundleOptions {
   gitRequirements?: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported?: UnsupportedRootPackageRequirement[];
+  vulnerabilityResolutionPolicy?: VulnerabilityResolutionPolicy;
+}
+
+interface FetchSeedBundlePassOptions extends FetchSeedBundleOptions {
+  rangeVersionOverrides?: Map<string, string>;
 }
 
 export type FetchProgressPhase = 'resolve' | 'download' | 'scan';
@@ -78,6 +89,7 @@ export interface FetchSeedBundleResult extends ResolveRootRequirementsResult {
   skipped: number;
   timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
+  vulnerabilityResolutions?: VulnerabilityResolutionAction[];
   wouldDownload: number;
   wouldDownloadPackages: FetchPackageAction[];
 }
@@ -285,8 +297,8 @@ async function readExistingPackageFiles(outputDir: string): Promise<Set<string>>
   }
 }
 
-export async function fetchSeedBundle(
-  options: FetchSeedBundleOptions
+async function fetchSeedBundlePass(
+  options: FetchSeedBundlePassOptions
 ): Promise<FetchSeedBundleResult> {
   const totalStart = performance.now();
   const shouldDownload = options.download !== false;
@@ -328,6 +340,25 @@ export async function fetchSeedBundle(
   let resolveDrain: (() => void) | undefined;
 
   function rewriteStableRequirement(requirement: RootPackageRequirement): RootPackageRequirement {
+    const vulnerabilityOverride =
+      requirement.type === 'range'
+        ? options.rangeVersionOverrides?.get(stableRangeResolutionKey(requirement))
+        : undefined;
+    if (vulnerabilityOverride) {
+      const exactRequirement: RootPackageRequirement = {
+        name: requirement.name,
+        raw: `${requirement.name}@${vulnerabilityOverride}`,
+        requiredBy: requirement.requiredBy,
+        specifier: vulnerabilityOverride,
+        type: 'version',
+      };
+      originalReasonsByRequirementId.set(
+        requirementId(exactRequirement),
+        resolutionReasonFromRequirement(requirement)
+      );
+      return exactRequirement;
+    }
+
     if (
       rangeResolutionPolicy === 'reuse-stable' &&
       requirement.type === 'range' &&
@@ -745,4 +776,125 @@ export async function fetchSeedBundle(
     status: 'done',
   });
   return result;
+}
+
+function sumFetchTimings(results: FetchSeedBundleResult[]): FetchTimings {
+  return results.reduce<FetchTimings>(
+    (total, result) => ({
+      dependencyScanMs: total.dependencyScanMs + result.timings.dependencyScanMs,
+      downloadMs: total.downloadMs + result.timings.downloadMs,
+      metadataCacheHits: (total.metadataCacheHits ?? 0) + (result.timings.metadataCacheHits ?? 0),
+      metadataCacheMemoryWrites:
+        (total.metadataCacheMemoryWrites ?? 0) + (result.timings.metadataCacheMemoryWrites ?? 0),
+      metadataCachePersisted:
+        (total.metadataCachePersisted ?? false) || (result.timings.metadataCachePersisted ?? false),
+      metadataCacheWrites:
+        (total.metadataCacheWrites ?? 0) + (result.timings.metadataCacheWrites ?? 0),
+      manifestReadMs: total.manifestReadMs + result.timings.manifestReadMs,
+      resolveMs: total.resolveMs + result.timings.resolveMs,
+      resolveWorkerMs:
+        (total.resolveWorkerMs ?? 0) + (result.timings.resolveWorkerMs ?? result.timings.resolveMs),
+      totalMs: total.totalMs + result.timings.totalMs,
+    }),
+    createFetchTimings()
+  );
+}
+
+function uniqueDownloadedPackages(results: FetchSeedBundleResult[]): FetchPackageAction[] {
+  const actions = new Map<string, FetchPackageAction>();
+  for (const action of results.flatMap((result) => result.downloadedPackages)) {
+    const key = [action.name, action.version, action.file].join('\0');
+    actions.set(key, action);
+  }
+  return [...actions.values()].sort(comparePackageIdentity);
+}
+
+export async function fetchSeedBundle(
+  options: FetchSeedBundleOptions
+): Promise<FetchSeedBundleResult> {
+  const rangeVersionOverrides = new Map<string, string>();
+  const vulnerabilityResolutions = new Map<string, VulnerabilityResolutionAction>();
+  const passes: FetchSeedBundleResult[] = [];
+  const preferClean =
+    options.vulnerabilityResolutionPolicy === 'prefer-clean' && options.advisoryClient;
+  const maxPasses = preferClean ? 4 : 1;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const result = await fetchSeedBundlePass({
+      ...options,
+      ...(preferClean ? { download: false } : {}),
+      rangeVersionOverrides,
+    });
+    passes.push(result);
+    if (!preferClean || result.errors.length > 0) {
+      break;
+    }
+
+    let preference;
+    try {
+      preference = await preferCleanRangeVersions({
+        advisoryClient: options.advisoryClient!,
+        ...(options.minReleaseAgeDays === undefined
+          ? {}
+          : { minReleaseAgeDays: options.minReleaseAgeDays }),
+        registry: options.registry,
+        resolved: result.resolved,
+      });
+    } catch {
+      // The final security scan remains fail-closed and records the OSV error.
+      break;
+    }
+
+    let changed = false;
+    for (const action of preference.actions) {
+      const key = stableRangeResolutionKey(action);
+      if (pass < maxPasses - 1 && rangeVersionOverrides.get(key) !== action.toVersion) {
+        rangeVersionOverrides.set(key, action.toVersion);
+        vulnerabilityResolutions.set(key, action);
+        changed = true;
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+
+  if (preferClean && options.download !== false) {
+    passes.push(await fetchSeedBundlePass({ ...options, rangeVersionOverrides }));
+  }
+
+  const final = passes.at(-1)!;
+  const downloadedPackages = uniqueDownloadedPackages(passes);
+  const finalRangeSelections = new Map<string, string>();
+  for (const resolved of final.resolved) {
+    for (const reason of resolved.resolvedFrom ?? []) {
+      if (reason.type === 'range') {
+        finalRangeSelections.set(
+          stableRangeResolutionKey({
+            name: resolved.name,
+            requiredBy: reason.requiredBy,
+            specifier: reason.specifier,
+          }),
+          resolved.version
+        );
+      }
+    }
+  }
+  const actions = [...vulnerabilityResolutions.values()]
+    .sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.requiredBy.localeCompare(right.requiredBy) ||
+        left.specifier.localeCompare(right.specifier)
+    )
+    .filter(
+      (action) => finalRangeSelections.get(stableRangeResolutionKey(action)) === action.toVersion
+    );
+  return {
+    ...final,
+    downloaded: downloadedPackages.length,
+    downloadedPackages,
+    timings: sumFetchTimings(passes),
+    ...(actions.length > 0 ? { vulnerabilityResolutions: actions } : {}),
+  };
 }

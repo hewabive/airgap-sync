@@ -106,6 +106,23 @@ describe('report aggregation', () => {
     ]);
   });
 
+  it('preserves and deduplicates vulnerability resolution actions', () => {
+    const first = {
+      advisoryIds: ['GHSA-demo'],
+      fromVersion: '1.2.0',
+      name: 'demo',
+      requiredBy: 'parent@1.0.0',
+      specifier: '^1.0.0',
+      toVersion: '1.1.0',
+    };
+    const report = aggregateFetchReports([
+      fetchReport({ vulnerabilityResolutions: [first] }),
+      fetchReport({ vulnerabilityResolutions: [first] }),
+    ]);
+
+    expect(report?.vulnerabilityResolutions).toEqual([first]);
+  });
+
   it('preserves Git mirror changes from earlier iterations', () => {
     const report = aggregateGitFetchReports([
       gitFetchReport({

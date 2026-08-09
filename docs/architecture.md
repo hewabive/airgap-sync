@@ -315,6 +315,15 @@ Root range targets are explicit operator requests and are always resolved from t
 source registry. `rangeResolutionPolicy: "refresh"` disables range reuse and lets
 transitive ranges float to the newest currently satisfying versions.
 
+The npm security policy adds a second, narrower decision layer. With the default
+`vulnerabilityResolutionPolicy: "prefer-clean"`, the initially selected unlocked graph
+is queried through OSV before tarball download. For each vulnerable SemVer-range
+selection, up to 20 compatible versions that pass the release-age rule are checked in
+descending order. A finding-free version becomes an exact override for that parent and
+range, and the graph is resolved again; the bounded fixed point uses at most four
+analysis passes. Exact, tag, alias, and lockfile requirements are not rewritten.
+`report-only` bypasses this layer.
+
 `reuse-stable` assumes a single linear update stream where the bundle is the
 authoritative source for registry tag state. npm dist-tags are global per package name,
 not per declaring parent. If Verdaccio is also updated by other tools, by manually

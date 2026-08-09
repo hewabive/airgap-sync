@@ -9,6 +9,7 @@ import type {
   RootPackageRequirement,
 } from '../src/types.js';
 import type { RegistryClient } from '../src/core/registry.js';
+import type { NpmAdvisoryClient } from '../src/core/security.js';
 
 const tarballMocks = vi.hoisted(() => ({
   dependencySpecsFromManifest: vi.fn(),
@@ -102,6 +103,77 @@ describe('fetchSeedBundle', () => {
 
     expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@1.0.0']);
     expect(result.tagRequirements).toEqual([]);
+  });
+
+  it('replaces a vulnerable range selection with the newest OSV-clean compatible version', async () => {
+    const queriedVersions: string[][] = [];
+    const advisoryClient: NpmAdvisoryClient = {
+      query(packages) {
+        queriedVersions.push(packages.map(({ version }) => version));
+        return Promise.resolve(
+          packages.map(({ version }) =>
+            version === '2.0.0' ? [{ id: 'GHSA-demo-vulnerable' }] : []
+          )
+        );
+      },
+    };
+
+    const result = await fetchSeedBundle({
+      advisoryClient,
+      outputDir: '/virtual/seed',
+      registry,
+      requirements: [
+        requirement({
+          raw: 'demo@>=1.0.0',
+          specifier: '>=1.0.0',
+          type: 'range',
+        }),
+      ],
+      vulnerabilityResolutionPolicy: 'prefer-clean',
+    });
+
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@1.0.0']);
+    expect(result.downloadedPackages.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
+      'demo@1.0.0',
+    ]);
+    expect(result.vulnerabilityResolutions).toEqual([
+      {
+        advisoryIds: ['GHSA-demo-vulnerable'],
+        fromVersion: '2.0.0',
+        name: 'demo',
+        requiredBy: 'root',
+        specifier: '>=1.0.0',
+        toVersion: '1.0.0',
+      },
+    ]);
+    expect(queriedVersions).toEqual([['2.0.0'], ['1.0.0'], ['1.0.0']]);
+  });
+
+  it('does not change exact versions or query OSV under report-only resolution', async () => {
+    const query = vi.fn(() => Promise.resolve([[{ id: 'GHSA-demo-vulnerable' }]]));
+    const advisoryClient: NpmAdvisoryClient = {
+      query,
+    };
+
+    const exact = await fetchSeedBundle({
+      advisoryClient,
+      outputDir: '/virtual/seed',
+      registry,
+      requirements: [requirement({})],
+      vulnerabilityResolutionPolicy: 'prefer-clean',
+    });
+    expect(exact.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@1.0.0']);
+    expect(exact.vulnerabilityResolutions).toBeUndefined();
+
+    const reportOnly = await fetchSeedBundle({
+      advisoryClient,
+      outputDir: '/virtual/seed',
+      registry,
+      requirements: [requirement({ raw: 'demo@>=1.0.0', specifier: '>=1.0.0', type: 'range' })],
+      vulnerabilityResolutionPolicy: 'report-only',
+    });
+    expect(reportOnly.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@2.0.0']);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it('adds the upstream latest target for packages resolved by exact version in source latest policy', async () => {

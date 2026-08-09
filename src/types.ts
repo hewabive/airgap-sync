@@ -14,6 +14,7 @@ export type SupportedSpecType = 'version' | 'range' | 'tag' | 'alias';
 export type LatestPolicy = 'bundled' | 'source';
 export type RangeResolutionPolicy = 'refresh' | 'reuse-stable';
 export type TagResolutionPolicy = 'refresh' | 'reuse-stable';
+export type VulnerabilityResolutionPolicy = 'prefer-clean' | 'report-only';
 
 export interface RootPackageRequirement {
   name: string;
@@ -381,6 +382,15 @@ export interface FetchPackageAction extends PackageIdentity {
   type: SupportedSpecType;
 }
 
+export interface VulnerabilityResolutionAction {
+  advisoryIds: string[];
+  fromVersion: string;
+  name: string;
+  requiredBy: string;
+  specifier: string;
+  toVersion: string;
+}
+
 export interface FetchReport {
   downloaded: number;
   downloadedPackages: FetchPackageAction[];
@@ -391,6 +401,7 @@ export interface FetchReport {
   skipped: number;
   timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
+  vulnerabilityResolutions?: VulnerabilityResolutionAction[];
   wouldDownloadPackages: FetchPackageAction[];
 }
 
@@ -459,6 +470,7 @@ export interface NpmSecurityPolicy {
   allowPackages: string[];
   maxReportAgeHours: number;
   minReleaseAgeDays: number;
+  vulnerabilityResolutionPolicy: VulnerabilityResolutionPolicy;
 }
 
 export interface NpmSecurityReport {

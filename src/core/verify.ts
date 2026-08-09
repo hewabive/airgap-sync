@@ -346,17 +346,29 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
             `OSV/static security report passed for ${String(security.packageCount)} npm packages`
           )
         );
-        const warningFindings = [
-          ...security.advisories.filter((finding) => finding.severity === 'warning'),
-          ...security.staticFindings.filter((finding) => finding.severity === 'warning'),
-        ];
-        if (warningFindings.length > 0) {
+        const vulnerabilityFindings = security.advisories.filter(
+          (finding) => finding.severity === 'warning'
+        );
+        if (vulnerabilityFindings.length > 0) {
           checks.push(
             check(
-              'npm-security-warnings',
+              'npm-vulnerability-inventory',
+              'ok',
+              `${String(vulnerabilityFindings.length)} known npm vulnerability findings are recorded in security-report.json`,
+              { findings: vulnerabilityFindings }
+            )
+          );
+        }
+        const staticWarnings = security.staticFindings.filter(
+          (finding) => finding.severity === 'warning'
+        );
+        if (staticWarnings.length > 0) {
+          checks.push(
+            check(
+              'npm-static-warnings',
               'warning',
-              `${String(warningFindings.length)} non-blocking npm security findings require review`,
-              { findings: warningFindings }
+              `${String(staticWarnings.length)} non-blocking npm static findings are recorded`,
+              { findings: staticWarnings }
             )
           );
         }

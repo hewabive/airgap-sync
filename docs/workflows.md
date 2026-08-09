@@ -218,6 +218,14 @@ requests and are resolved from the source registry. Use `--range-resolution-poli
 refresh` when transitive ranges should float to the newest currently satisfying versions
 during this run.
 
+Independently of stable reuse, npm security defaults to
+`vulnerabilityResolutionPolicy: "prefer-clean"`. If a selected unlocked SemVer range
+version has an OSV finding, download checks a bounded set of compatible alternatives
+and uses the newest one with no known findings. This may override an otherwise reusable
+stable range mapping. Exact versions, dist-tags, and lockfile selections stay
+authoritative. Use `"report-only"` when the bundle must preserve the ordinary resolver
+choice and only inventory known vulnerabilities.
+
 Use `reuse-stable` when this workspace is the only source of Verdaccio updates and
 imports are applied in order. Avoid it when the same Verdaccio is updated through other
 paths or by independently generated bundles on different removable drives: reused tag

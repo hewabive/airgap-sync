@@ -274,6 +274,10 @@ repositories populated during `publish`.
 
 Unsupported specs in `fetch-report.json` include `requiredBy`, so Git, file, link, and
 other non-registry specs can be traced back to the package that declared them.
+When OSV-aware range resolution changes a selection, the optional
+`vulnerabilityResolutions` array records the package, declaring parent, SemVer range,
+original and replacement versions, and advisory IDs. It never describes exact, tag, or
+lockfile substitutions because those inputs remain authoritative.
 The report also includes `timings` for registry resolution, tarball download,
 package-manifest reading, dependency scanning, and total fetch time. Phase timings are
 cumulative across parallel workers; `totalMs` is the wall-clock duration.

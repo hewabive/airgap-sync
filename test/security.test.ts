@@ -158,6 +158,12 @@ describe('npm security gate', () => {
       severity: 'warning',
       type: 'vulnerability',
     });
+    expect(summarizeNpmSecurityReport(report)).toMatchObject({
+      details: [],
+      omitted: 0,
+      warningAdvisories: 1,
+      warnings: 1,
+    });
   });
 
   it('fails closed when OSV cannot be queried', async () => {
@@ -227,7 +233,7 @@ describe('npm security gate', () => {
       blocking: 2,
       blockingAdvisories: 1,
       blockingStatic: 0,
-      omitted: 2,
+      omitted: 1,
       scannerErrors: 1,
       warningAdvisories: 1,
       warningStatic: 1,

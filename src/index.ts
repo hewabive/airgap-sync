@@ -601,6 +601,8 @@ export type {
   LatestPolicy,
   RangeResolutionPolicy,
   TagResolutionPolicy,
+  VulnerabilityResolutionAction,
+  VulnerabilityResolutionPolicy,
   PackageMetadata,
   PackageManifest,
   RegistryMetadataCacheManifest,

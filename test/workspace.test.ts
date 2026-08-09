@@ -462,6 +462,7 @@ describe('workspace config', () => {
           allowPackages: ['native-addon@1.0.0#sha256:abc123'],
           maxReportAgeHours: 24,
           minReleaseAgeDays: 7,
+          vulnerabilityResolutionPolicy: 'report-only',
         },
       },
       { spaces: 2 }
@@ -472,6 +473,7 @@ describe('workspace config', () => {
         allowPackages: ['native-addon@1.0.0#sha256:abc123'],
         maxReportAgeHours: 24,
         minReleaseAgeDays: 7,
+        vulnerabilityResolutionPolicy: 'report-only',
       },
     });
   });

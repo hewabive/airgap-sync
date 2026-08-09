@@ -296,10 +296,17 @@ or acknowledges static findings only for those exact bytes.
 `--max-security-report-age-hours` defaults to 72. Workspace defaults can be stored in
 top-level `npmSecurity`.
 
-The normal download summary names blocking and warning package findings, reports scanner
-failures, and prints the path to `security-report.json` or
-`security-report.failed.json`. Console details are bounded; `--json` and the report file
-retain the complete result.
+For unlocked SemVer ranges, `--vulnerability-resolution-policy prefer-clean` is the
+default. Before tarball download it checks the selected graph and tries up to 20 of the
+newest compatible, release-age-eligible versions when a selection has an OSV finding.
+Exact versions, tags, and lockfile selections are never changed. Use `report-only` to
+disable substitutions. Applied substitutions are recorded in `fetch-report.json`.
+
+The normal download summary names blocking findings, aggregates ordinary vulnerability
+counts, reports scanner failures, and prints the path to `security-report.json` or
+`security-report.failed.json`. Per-package ordinary vulnerabilities remain in `--json`
+and the report file instead of being printed as review instructions. Console details
+for blocking and static findings remain bounded.
 
 For Python, download queries OSV for every exact normalized PyPI `name==version` in the
 candidate wheel manifest. A `MAL-*` advisory or OSV failure prevents activation and is
@@ -432,6 +439,8 @@ Supported options:
 --max-security-report-age-hours <hours>
                           Security report lifetime, default 72
 --allow-package <identity> Allow static findings for exact name/version/SHA-256
+--vulnerability-resolution-policy <policy>
+                          Unpinned ranges: prefer-clean or report-only
 --latest-policy <policy>  Latest dist-tag policy: bundled or source
 --tag-resolution-policy <policy>
                           Tag dependency policy: reuse-stable or refresh

@@ -16,6 +16,13 @@
   remain blocking unless approved for exact package bytes.
 - Fixed pnpm workspace discovery so a root `pnpm-lock.yaml` covers nested manifests
   listed in its `importers` section instead of resolving their ranges a second time.
+- Added bounded OSV-aware resolution for unlocked npm SemVer ranges. The default
+  `prefer-clean` policy substitutes a compatible finding-free version before tarball
+  download, records every decision in `fetch-report.json`, and never changes exact,
+  tag, or lockfile selections. `report-only` preserves the previous behavior.
+- Kept ordinary npm vulnerability details in the security report while replacing
+  per-package console review warnings with an aggregate inventory count. Verify now
+  treats that inventory as recorded evidence rather than administrator review work.
 - Combined npm hashing and manifest inspection into one streaming tarball pass and
   reused unchanged results within each download or verify run, reducing removable-media
   reads without persisting trust across commands.

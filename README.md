@@ -294,7 +294,8 @@ three-day release quarantine and a 72-hour security-report lifetime:
   "npmSecurity": {
     "allowPackages": [],
     "maxReportAgeHours": 72,
-    "minReleaseAgeDays": 3
+    "minReleaseAgeDays": 3,
+    "vulnerabilityResolutionPolicy": "prefer-clean"
   }
 }
 ```
@@ -305,6 +306,13 @@ An optional acknowledgement or a reviewed exception pins the exact downloaded by
 `name@version#sha256:<hex>` in `allowPackages`; a changed tarball no longer matches.
 `maxReportAgeHours` is also the lifetime of Python OSV evidence; Python malware has no
 allow-list escape hatch.
+
+For unlocked SemVer ranges, the default `prefer-clean` policy checks the selected graph
+with OSV before downloading tarballs and replaces a vulnerable selection when one of
+the 20 newest compatible, release-age-eligible versions has no known OSV findings.
+Exact versions, tags, and packages selected by lockfiles are never changed. Set
+`vulnerabilityResolutionPolicy` to `report-only` to retain the resolver's original
+selection and record vulnerabilities without attempting compatible substitutions.
 
 `airgap-sync.secrets.json` is optional. A Gitea token entered during interactive
 first-time setup, or saved later from the menu, is stored there in plaintext on the

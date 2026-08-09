@@ -144,6 +144,7 @@ import type {
   TagResolutionPolicy,
   VerifyReport,
   VerifyInstallReport,
+  VulnerabilityResolutionPolicy,
   WorkspaceConfig,
   WorkspacePromptBoolean,
   PythonEnvironmentPlanInput,
@@ -177,6 +178,7 @@ interface FetchOptions {
   retryDelaysMs?: number[];
   tagResolutionPolicy?: TagResolutionPolicy;
   tarballTimeoutMs?: number;
+  vulnerabilityResolutionPolicy?: VulnerabilityResolutionPolicy;
 }
 
 interface PublishOptions {
@@ -241,6 +243,7 @@ interface CollectOptions {
   tagResolutionPolicy?: TagResolutionPolicy;
   target?: number[];
   tarballTimeoutMs?: number;
+  vulnerabilityResolutionPolicy?: VulnerabilityResolutionPolicy;
 }
 
 interface BundlePruneOptions {
@@ -413,6 +416,16 @@ function parseRangeResolutionPolicy(value: string): RangeResolutionPolicy {
 
   throw new Error(
     `Expected range resolution policy to be "refresh" or "reuse-stable"; got: ${value}`
+  );
+}
+
+function parseVulnerabilityResolutionPolicy(value: string): VulnerabilityResolutionPolicy {
+  if (value === 'prefer-clean' || value === 'report-only') {
+    return value;
+  }
+
+  throw new Error(
+    `Expected vulnerability resolution policy to be "prefer-clean" or "report-only"; got: ${value}`
   );
 }
 
@@ -597,6 +610,9 @@ function formatDownloadSummary(report: CollectReport): string {
   const npmLine = report.dryRun
     ? `NPM packages: ${String(report.fetch.resolved)} resolved successfully, dry run only, ${String(npmErrors)} requirement errors.`
     : `NPM packages: ${String(report.fetch.resolved)} resolved successfully (${String(downloadedThisRun)} downloaded, ${String(alreadyOnDisk)} already on disk), ${String(npmErrors)} requirement errors.`;
+  const vulnerabilityResolutionLine = report.fetch.vulnerabilityResolutions?.length
+    ? `NPM vulnerability resolution: ${String(report.fetch.vulnerabilityResolutions.length)} vulnerable range selections replaced with OSV-clean compatible versions.`
+    : undefined;
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
     : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed${newGitCommits > 0 ? `, +${String(newGitCommits)} commits` : ''}, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
@@ -616,10 +632,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const securityLine = report.security
     ? report.security.ok
       ? green(
-          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warningAdvisories ?? 0)} vulnerability warnings, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings, ${String(securitySummary?.approved ?? 0)} approved static findings).`
+          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warningAdvisories ?? 0)} known vulnerabilities recorded, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings, ${String(securitySummary?.approved ?? 0)} approved static findings).`
         )
       : red(
-          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warningAdvisories ?? 0)} vulnerability warnings, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings).`
+          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warningAdvisories ?? 0)} known vulnerabilities recorded, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings).`
         )
     : report.dryRun
       ? 'NPM security: not run during dry-run.'
@@ -643,6 +659,7 @@ function formatDownloadSummary(report: CollectReport): string {
   const lines = [
     status,
     npmLine,
+    ...(vulnerabilityResolutionLine ? [vulnerabilityResolutionLine] : []),
     securityLine,
     gitLine,
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
@@ -1042,6 +1059,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `Source registry: ${config.sourceRegistry}`,
     `npm release quarantine: ${String(config.npmSecurity?.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays)} days`,
     `npm security report TTL: ${String(config.npmSecurity?.maxReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours)} hours`,
+    `npm vulnerability resolution: ${config.npmSecurity?.vulnerabilityResolutionPolicy ?? defaultNpmSecurityPolicy.vulnerabilityResolutionPolicy}`,
     `Target registry: ${config.targetRegistry ?? '(not set)'}`,
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
     ...pythonLines,
@@ -1833,6 +1851,9 @@ function toFetchDryRun(result: FetchSeedBundleResult) {
     gitRequirements: result.gitRequirements,
     skipped: result.skipped,
     wouldDownload: result.wouldDownload,
+    ...(result.vulnerabilityResolutions
+      ? { vulnerabilityResolutions: result.vulnerabilityResolutions }
+      : {}),
     ...toFetchPreview(result),
     unsupported: result.unsupported,
   };
@@ -3949,6 +3970,11 @@ program
     collectOptionalStrings
   )
   .option(
+    '--vulnerability-resolution-policy <policy>',
+    'Unpinned range policy: prefer-clean or report-only',
+    parseVulnerabilityResolutionPolicy
+  )
+  .option(
     '--allow-window-gap',
     'Continue when the last successful full download is older than a configured artifact window'
   )
@@ -4096,6 +4122,10 @@ program
             options.minReleaseAgeDays ??
             activeConfig.npmSecurity?.minReleaseAgeDays ??
             defaultNpmSecurityPolicy.minReleaseAgeDays,
+          vulnerabilityResolutionPolicy:
+            options.vulnerabilityResolutionPolicy ??
+            activeConfig.npmSecurity?.vulnerabilityResolutionPolicy ??
+            defaultNpmSecurityPolicy.vulnerabilityResolutionPolicy,
         };
         const osvClient = new OsvBatchClient();
         const npmAdvisoryClient = new OsvNpmAdvisoryClient(osvClient);
@@ -4296,6 +4326,9 @@ program
         maxReportAgeHours:
           options.maxSecurityReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours,
         minReleaseAgeDays: options.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays,
+        vulnerabilityResolutionPolicy:
+          options.vulnerabilityResolutionPolicy ??
+          defaultNpmSecurityPolicy.vulnerabilityResolutionPolicy,
       };
       const osvClient = new OsvBatchClient();
       const report = await collectBundle({
@@ -4385,6 +4418,11 @@ program
     collectOptionalStrings
   )
   .option(
+    '--vulnerability-resolution-policy <policy>',
+    'Unpinned range policy: prefer-clean or report-only',
+    parseVulnerabilityResolutionPolicy
+  )
+  .option(
     '--latest-policy <policy>',
     'Latest dist-tag policy: bundled or source',
     parseLatestPolicy,
@@ -4444,7 +4482,12 @@ program
       maxReportAgeHours:
         options.maxSecurityReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours,
       minReleaseAgeDays: options.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays,
+      vulnerabilityResolutionPolicy:
+        options.vulnerabilityResolutionPolicy ??
+        defaultNpmSecurityPolicy.vulnerabilityResolutionPolicy,
     };
+    const osvClient = new OsvBatchClient();
+    const npmAdvisoryClient = new OsvNpmAdvisoryClient(osvClient);
 
     if (requirements.length === 0) {
       console.error('Error: no supported package specs to resolve');
@@ -4465,6 +4508,7 @@ program
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
+        advisoryClient: npmAdvisoryClient,
         concurrency: options.concurrency,
         download: false,
         includePeer: options.includePeer === true,
@@ -4482,6 +4526,7 @@ program
         gitRequirements,
         requirements,
         unsupported,
+        vulnerabilityResolutionPolicy: npmSecurity.vulnerabilityResolutionPolicy,
       });
       console.log(JSON.stringify({ options, ...toFetchDryRun(resolution) }, null, 2));
       if (resolution.errors.length > 0) {
@@ -4491,6 +4536,7 @@ program
     }
 
     const resolution = await fetchSeedBundle({
+      advisoryClient: npmAdvisoryClient,
       concurrency: options.concurrency,
       includePeer: options.includePeer === true,
       inspectionCache,
@@ -4507,6 +4553,7 @@ program
       gitRequirements,
       requirements,
       unsupported,
+      vulnerabilityResolutionPolicy: npmSecurity.vulnerabilityResolutionPolicy,
     });
     let success = resolution.errors.length === 0;
 
@@ -4519,6 +4566,7 @@ program
         tagRequirements: resolution.tagRequirements,
       });
       const security = await scanNpmBundleSecurity({
+        advisoryClient: npmAdvisoryClient,
         bundleDir: options.output,
         manifest: documents.manifest,
         inspectionCache,
@@ -4542,6 +4590,9 @@ program
           skipped: resolution.skipped,
           timings: resolution.timings,
           unsupported: resolution.unsupported,
+          ...(resolution.vulnerabilityResolutions
+            ? { vulnerabilityResolutions: resolution.vulnerabilityResolutions }
+            : {}),
           wouldDownloadPackages: resolution.wouldDownloadPackages,
         })
       );

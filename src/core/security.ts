@@ -23,6 +23,7 @@ export const defaultNpmSecurityPolicy: NpmSecurityPolicy = {
   allowPackages: [],
   maxReportAgeHours: 72,
   minReleaseAgeDays: 3,
+  vulnerabilityResolutionPolicy: 'prefer-clean',
 };
 
 type NpmSecurityConsoleDetailLevel = 'error' | 'info' | 'warning';
@@ -133,6 +134,9 @@ function normalizePolicy(policy: Partial<NpmSecurityPolicy> = {}): NpmSecurityPo
       0,
       policy.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays
     ),
+    vulnerabilityResolutionPolicy:
+      policy.vulnerabilityResolutionPolicy ??
+      defaultNpmSecurityPolicy.vulnerabilityResolutionPolicy,
   };
 }
 
@@ -172,10 +176,6 @@ export function summarizeNpmSecurityReport(
         finding.type === 'lifecycle-script'
           ? `Lifecycle script [${findingSubject(finding)}] ${finding.field}: ${finding.value}`
           : `Static warning [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
-    })),
-    ...warningAdvisories.map((finding) => ({
-      level: 'warning' as const,
-      message: `Vulnerability [${findingSubject(finding)}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`,
     })),
     ...approvedStatic.map((finding) => ({
       level: 'info' as const,

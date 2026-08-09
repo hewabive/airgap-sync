@@ -758,6 +758,7 @@ function normalizeNpmSecurityPolicy(value: unknown): NpmSecurityPolicy | undefin
   }
   const maxReportAgeHours = value.maxReportAgeHours ?? 72;
   const minReleaseAgeDays = value.minReleaseAgeDays ?? 3;
+  const vulnerabilityResolutionPolicy = value.vulnerabilityResolutionPolicy ?? 'prefer-clean';
   if (
     typeof maxReportAgeHours !== 'number' ||
     !Number.isInteger(maxReportAgeHours) ||
@@ -772,10 +773,19 @@ function normalizeNpmSecurityPolicy(value: unknown): NpmSecurityPolicy | undefin
   ) {
     throw new Error('npmSecurity.minReleaseAgeDays must be a non-negative integer');
   }
+  if (
+    vulnerabilityResolutionPolicy !== 'prefer-clean' &&
+    vulnerabilityResolutionPolicy !== 'report-only'
+  ) {
+    throw new Error(
+      'npmSecurity.vulnerabilityResolutionPolicy must be "prefer-clean" or "report-only"'
+    );
+  }
   return {
     allowPackages: [...(allowPackages ?? [])],
     maxReportAgeHours,
     minReleaseAgeDays,
+    vulnerabilityResolutionPolicy,
   };
 }
 

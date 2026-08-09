@@ -12,7 +12,16 @@ is unavailable, an exact version has a malware advisory, or static inspection fi
 non-registry dependency. Lifecycle scripts are visible audit warnings, not blockers,
 because many legitimate native and toolchain packages require them. A static
 acknowledgement or exception is bound to the exact package name, version, and SHA-256.
-Ordinary vulnerability advisories also remain visible warnings.
+Ordinary vulnerability advisories remain in the complete security report. Normal
+console output aggregates them instead of assigning package-by-package review work to
+the transfer operator.
+
+For unlocked SemVer ranges, the default `prefer-clean` resolution policy performs a
+bounded OSV-aware preflight and selects a compatible release with no known findings
+when available. It does not rewrite exact versions, dist-tags, or lockfile selections.
+Every substitution records the parent, range, original version, selected version, and
+advisory IDs in `fetch-report.json`. This is a best-effort known-vulnerability
+optimization, not reachability analysis or proof that the selected code is benign.
 
 Hashing and static manifest inspection share one streaming tarball read within a command.
 Results are cached only in memory for unchanged files and never survive the process, so

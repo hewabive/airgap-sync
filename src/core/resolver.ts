@@ -26,7 +26,7 @@ export interface ResolveRootRequirementsOptions {
   now?: Date;
 }
 
-function eligibleVersionNames(
+export function eligibleVersionNames(
   metadata: PackageMetadata,
   options: ResolveRootRequirementsOptions
 ): string[] {
