@@ -312,7 +312,9 @@ with OSV before downloading tarballs and replaces a vulnerable selection when on
 the 20 newest compatible, release-age-eligible versions has no known OSV findings.
 Exact versions, tags, and packages selected by lockfiles are never changed. Set
 `vulnerabilityResolutionPolicy` to `report-only` to retain the resolver's original
-selection and record vulnerabilities without attempting compatible substitutions.
+selection and record vulnerabilities without attempting compatible substitutions. The
+confirmed graph is then downloaded directly; it is not resolved a second time merely
+to materialize its tarballs.
 
 `airgap-sync.secrets.json` is optional. A Gitea token entered during interactive
 first-time setup, or saved later from the menu, is stored there in plaintext on the

@@ -185,8 +185,9 @@ describe('collectBundle', () => {
     expect(progress).toContain('repository-update:start');
     expect(progress).toContain('repository-update:done');
     expect(progress).toContain('manifest-scan:done');
-    expect(progress).toContain('npm-fetch:start');
-    expect(progress).toContain('npm-fetch:done');
+    expect(progress).toContain('npm-resolve:start');
+    expect(progress).toContain('npm-resolve:done');
+    expect(progress).not.toContain('npm-download:start');
     expect(gitCalls).toEqual([
       {
         args: ['status', '--porcelain'],

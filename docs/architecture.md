@@ -322,7 +322,8 @@ selection, up to 20 compatible versions that pass the release-age rule are check
 descending order. A finding-free version becomes an exact override for that parent and
 range, and the graph is resolved again; the bounded fixed point uses at most four
 analysis passes. Exact, tag, alias, and lockfile requirements are not rewritten.
-`report-only` bypasses this layer.
+`report-only` bypasses this layer. Once analysis reaches its final graph, tarballs are
+materialized directly from that graph without an additional resolution pass.
 
 `reuse-stable` assumes a single linear update stream where the bundle is the
 authoritative source for registry tag state. npm dist-tags are global per package name,

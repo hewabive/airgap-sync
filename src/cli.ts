@@ -1424,7 +1424,8 @@ const collectPhaseLabels: Record<DownloadProgressEvent['phase'], string> = {
   'git-manifest-scan': 'scan git manifests',
   'lockfile-scan': 'scan lockfiles',
   'manifest-scan': 'scan package manifests',
-  'npm-fetch': 'resolve/download npm',
+  'npm-download': 'download npm tarballs',
+  'npm-resolve': 'analyze npm dependency graph',
   'python-application-fetch': 'prepare Python application artifacts',
   'python-security-scan': 'scan Python package security',
   'repository-update': 'update repositories',
@@ -1672,7 +1673,7 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
     const applicationArtifactRetry =
       event.phase === 'python-application-fetch' && event.detail?.startsWith('retry ') === true;
     const npmTarballRetry =
-      event.phase === 'npm-fetch' && event.detail?.startsWith('retry ') === true;
+      event.phase === 'npm-download' && event.detail?.startsWith('retry ') === true;
     const shouldLog =
       event.phase === 'python-application-fetch'
         ? !lastLogged.has(key) ||

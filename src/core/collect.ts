@@ -84,7 +84,8 @@ export type CollectProgressPhase =
   | 'repository-update'
   | 'manifest-scan'
   | 'lockfile-scan'
-  | 'npm-fetch'
+  | 'npm-download'
+  | 'npm-resolve'
   | 'git-fetch'
   | 'git-manifest-scan'
   | 'python-security-scan'
@@ -524,12 +525,6 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const iterationStart = performance.now();
     const fetchIterationStart = performance.now();
-    options.onProgress?.({
-      detail: `${String(state.requirements.length)} npm requirements`,
-      iteration,
-      phase: 'npm-fetch',
-      status: 'start',
-    });
     resolution = await fetchSeedBundle({
       ...(options.security?.advisoryClient
         ? { advisoryClient: options.security.advisoryClient }
@@ -545,15 +540,18 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
       ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
       onProgress: (event: FetchProgressEvent) => {
-        const detail = event.detail ?? [event.phase, event.package].filter(Boolean).join(' ');
+        const detail =
+          event.detail ??
+          (event.package ? [event.phase, event.package].filter(Boolean).join(' ') : undefined);
         options.onProgress?.({
           ...(event.bytes === undefined ? {} : { bytes: event.bytes }),
           ...(event.current === undefined ? {} : { current: event.current }),
           ...(detail ? { detail } : {}),
           iteration,
-          phase: 'npm-fetch',
+          phase: event.phase === 'download' ? 'npm-download' : 'npm-resolve',
           ...(event.queue === undefined ? {} : { queue: event.queue }),
           status: event.status,
+          ...(event.total === undefined ? {} : { total: event.total }),
           ...(event.totalBytes === undefined ? {} : { totalBytes: event.totalBytes }),
         });
       },

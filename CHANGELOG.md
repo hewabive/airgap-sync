@@ -19,7 +19,9 @@
 - Added bounded OSV-aware resolution for unlocked npm SemVer ranges. The default
   `prefer-clean` policy substitutes a compatible finding-free version before tarball
   download, records every decision in `fetch-report.json`, and never changes exact,
-  tag, or lockfile selections. `report-only` preserves the previous behavior.
+  tag, or lockfile selections. `report-only` preserves the previous behavior. Graph
+  analysis and tarball materialization now have distinct progress stages, and the final
+  graph is downloaded without a redundant resolution pass.
 - Kept ordinary npm vulnerability details in the security report while replacing
   per-package console review warnings with an aggregate inventory count. Verify now
   treats that inventory as recorded evidence rather than administrator review work.

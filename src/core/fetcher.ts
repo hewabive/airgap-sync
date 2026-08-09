@@ -39,6 +39,7 @@ import {
   type StableTagResolutionIndex,
 } from './tag-resolution.js';
 import { preferCleanRangeVersions } from './vulnerability-resolution.js';
+import { mapConcurrent } from './concurrency.js';
 
 export interface FetchSeedBundleOptions {
   advisoryClient?: NpmAdvisoryClient;
@@ -65,6 +66,7 @@ export interface FetchSeedBundleOptions {
 }
 
 interface FetchSeedBundlePassOptions extends FetchSeedBundleOptions {
+  analysisPass?: number;
   rangeVersionOverrides?: Map<string, string>;
 }
 
@@ -79,6 +81,7 @@ export interface FetchProgressEvent {
   phase: FetchProgressPhase;
   queue?: number;
   status: FetchProgressStatus;
+  total?: number;
   totalBytes?: number;
 }
 
@@ -297,16 +300,14 @@ async function readExistingPackageFiles(outputDir: string): Promise<Set<string>>
   }
 }
 
-async function fetchSeedBundlePass(
+async function resolveSeedBundlePass(
   options: FetchSeedBundlePassOptions
 ): Promise<FetchSeedBundleResult> {
   const totalStart = performance.now();
-  const shouldDownload = options.download !== false;
   const latestPolicy = options.latestPolicy ?? 'bundled';
   const rangeResolutionPolicy = options.rangeResolutionPolicy ?? 'reuse-stable';
   const tagResolutionPolicy = options.tagResolutionPolicy ?? 'reuse-stable';
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 8));
-  const inspectionCache = options.inspectionCache ?? new TarballInspectionCache();
   const stableTagRequirements = new Map<string, TagRequirement>();
   const stablePackageIds = options.stableTagResolutions?.packageIds ?? new Set<string>();
   const stableRequiredBy = new Set([...(options.stableRequiredBy ?? []), ...stablePackageIds]);
@@ -319,9 +320,6 @@ async function fetchSeedBundlePass(
   const resolvedById = new Map<string, ResolvedRootPackage>();
   const tagRequirements = new Set<string>();
   const timings = createFetchTimings();
-  const existingPackageFiles = shouldDownload
-    ? await readExistingPackageFiles(options.outputDir)
-    : new Set<string>();
   const result: FetchSeedBundleResult = {
     downloaded: 0,
     downloadedPackages: [],
@@ -433,6 +431,9 @@ async function fetchSeedBundlePass(
 
   options.onProgress?.({
     current: 0,
+    ...(options.analysisPass === undefined
+      ? {}
+      : { detail: `analysis pass ${String(options.analysisPass)}` }),
     phase: 'resolve',
     queue: queue.length,
     status: 'start',
@@ -530,7 +531,7 @@ async function fetchSeedBundlePass(
     maybeResolveDrain();
   }
 
-  async function processResolvedPackage(resolved: ResolvedRootPackage): Promise<void> {
+  function processResolvedPackage(resolved: ResolvedRootPackage): void {
     if (!latestRequirements.has(resolved.name)) {
       latestRequirements.add(resolved.name);
 
@@ -566,60 +567,7 @@ async function fetchSeedBundlePass(
     try {
       manifest = manifestFromResolvedPackage(resolved);
 
-      if (!alreadyResolved && shouldDownload) {
-        const downloadStart = performance.now();
-        const fetched: DownloadedTarball = await downloadResolvedPackage(
-          resolved,
-          options.outputDir,
-          {
-            existingPackageFiles,
-            inspectionCache,
-            onProgress: ({ downloadedBytes, totalBytes }) => {
-              options.onProgress?.({
-                bytes: downloadedBytes,
-                current: result.downloaded + result.skipped,
-                detail: `download ${id}`,
-                package: id,
-                phase: 'download',
-                queue: queue.length,
-                status: 'progress',
-                ...(totalBytes === undefined ? {} : { totalBytes }),
-              });
-            },
-            onRetry: ({ delayMs, downloadedBytes, error, nextAttempt, totalBytes }) => {
-              const reason = error instanceof Error ? error.message : String(error);
-              options.onProgress?.({
-                bytes: downloadedBytes,
-                current: result.downloaded + result.skipped,
-                detail: `retry ${id}: ${reason}; attempt ${String(nextAttempt)} in ${String(delayMs)}ms`,
-                package: id,
-                phase: 'download',
-                queue: queue.length,
-                status: 'progress',
-                ...(totalBytes === undefined ? {} : { totalBytes }),
-              });
-            },
-            ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
-            ...(options.tarballTimeoutMs ? { timeoutMs: options.tarballTimeoutMs } : {}),
-          }
-        );
-        timings.downloadMs += elapsedMs(downloadStart);
-        resolved.sha256 = fetched.sha256;
-
-        if (fetched.skipped) {
-          result.skipped++;
-        } else {
-          result.downloaded++;
-          result.downloadedPackages.push(fetchPackageAction(resolved, fetched.file));
-        }
-        options.onProgress?.({
-          current: result.downloaded + result.skipped,
-          package: id,
-          phase: 'download',
-          queue: queue.length,
-          status: 'progress',
-        });
-      } else if (!alreadyResolved) {
+      if (!alreadyResolved) {
         result.wouldDownload++;
         result.wouldDownloadPackages.push(fetchPackageAction(resolved));
       }
@@ -671,7 +619,7 @@ async function fetchSeedBundlePass(
       options.onProgress?.({
         current: result.downloaded + result.skipped,
         package: id,
-        phase: shouldDownload ? 'download' : 'scan',
+        phase: 'scan',
         queue: queue.length,
         status: 'error',
       });
@@ -688,7 +636,7 @@ async function fetchSeedBundlePass(
           addTagRequirement(stableTag);
         }
 
-        await processResolvedPackage(cached);
+        processResolvedPackage(cached);
         return;
       }
 
@@ -731,7 +679,9 @@ async function fetchSeedBundlePass(
         }
       }
 
-      await Promise.all(resolution.resolved.map((resolved) => processResolvedPackage(resolved)));
+      for (const resolved of resolution.resolved) {
+        processResolvedPackage(resolved);
+      }
     } catch (error) {
       result.errors.push({
         name: requirement.name,
@@ -771,9 +721,121 @@ async function fetchSeedBundlePass(
   timings.totalMs = elapsedMs(totalStart);
   options.onProgress?.({
     current: result.resolved.length,
+    ...(options.analysisPass === undefined
+      ? {}
+      : { detail: `analysis pass ${String(options.analysisPass)}` }),
     phase: 'resolve',
     queue: 0,
     status: 'done',
+  });
+  return result;
+}
+
+async function materializeResolvedPackages(
+  plan: FetchSeedBundleResult,
+  options: FetchSeedBundleOptions
+): Promise<FetchSeedBundleResult> {
+  const materializeStart = performance.now();
+  const concurrency = Math.max(1, Math.floor(options.concurrency ?? 8));
+  const inspectionCache = options.inspectionCache ?? new TarballInspectionCache();
+  const existingPackageFiles = await readExistingPackageFiles(options.outputDir);
+  const total = plan.resolved.length;
+  let completed = 0;
+  options.onProgress?.({ current: 0, phase: 'download', status: 'start', total });
+
+  const outcomes = await mapConcurrent(plan.resolved, concurrency, async (resolved) => {
+    const id = packageId(resolved);
+    const downloadStart = performance.now();
+    try {
+      const fetched: DownloadedTarball = await downloadResolvedPackage(
+        resolved,
+        options.outputDir,
+        {
+          existingPackageFiles,
+          inspectionCache,
+          onProgress: ({ downloadedBytes, totalBytes }) => {
+            options.onProgress?.({
+              bytes: downloadedBytes,
+              current: completed,
+              detail: `download ${id}`,
+              package: id,
+              phase: 'download',
+              queue: Math.max(0, total - completed),
+              status: 'progress',
+              total,
+              ...(totalBytes === undefined ? {} : { totalBytes }),
+            });
+          },
+          onRetry: ({ delayMs, downloadedBytes, error, nextAttempt, totalBytes }) => {
+            const reason = error instanceof Error ? error.message : String(error);
+            options.onProgress?.({
+              bytes: downloadedBytes,
+              current: completed,
+              detail: `retry ${id}: ${reason}; attempt ${String(nextAttempt)} in ${String(delayMs)}ms`,
+              package: id,
+              phase: 'download',
+              queue: Math.max(0, total - completed),
+              status: 'progress',
+              total,
+              ...(totalBytes === undefined ? {} : { totalBytes }),
+            });
+          },
+          ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+          ...(options.tarballTimeoutMs ? { timeoutMs: options.tarballTimeoutMs } : {}),
+        }
+      );
+      resolved.sha256 = fetched.sha256;
+      return { elapsedMs: elapsedMs(downloadStart), fetched };
+    } catch (error) {
+      return { elapsedMs: elapsedMs(downloadStart), error };
+    } finally {
+      completed++;
+      options.onProgress?.({
+        current: completed,
+        package: id,
+        phase: 'download',
+        queue: Math.max(0, total - completed),
+        status: 'progress',
+        total,
+      });
+    }
+  });
+
+  const result: FetchSeedBundleResult = {
+    ...plan,
+    downloaded: 0,
+    downloadedPackages: [],
+    errors: [...plan.errors],
+    skipped: 0,
+    timings: { ...plan.timings },
+    wouldDownload: 0,
+    wouldDownloadPackages: [],
+  };
+  for (const [index, outcome] of outcomes.entries()) {
+    const resolved = plan.resolved[index]!;
+    result.timings.downloadMs += outcome.elapsedMs;
+    if ('error' in outcome) {
+      result.errors.push({
+        name: resolved.name,
+        raw: resolved.raw,
+        reason: errorMessage(outcome.error),
+        specifier: resolved.specifier,
+        type: resolved.type,
+      });
+    } else if (outcome.fetched.skipped) {
+      result.skipped++;
+    } else {
+      result.downloaded++;
+      result.downloadedPackages.push(fetchPackageAction(resolved, outcome.fetched.file));
+    }
+  }
+  result.downloadedPackages.sort(comparePackageIdentity);
+  result.timings.totalMs += elapsedMs(materializeStart);
+  options.onProgress?.({
+    current: completed,
+    phase: 'download',
+    status: result.errors.length > plan.errors.length ? 'error' : 'done',
+    total,
   });
   return result;
 }
@@ -800,18 +862,10 @@ function sumFetchTimings(results: FetchSeedBundleResult[]): FetchTimings {
   );
 }
 
-function uniqueDownloadedPackages(results: FetchSeedBundleResult[]): FetchPackageAction[] {
-  const actions = new Map<string, FetchPackageAction>();
-  for (const action of results.flatMap((result) => result.downloadedPackages)) {
-    const key = [action.name, action.version, action.file].join('\0');
-    actions.set(key, action);
-  }
-  return [...actions.values()].sort(comparePackageIdentity);
-}
-
 export async function fetchSeedBundle(
   options: FetchSeedBundleOptions
 ): Promise<FetchSeedBundleResult> {
+  const totalStart = performance.now();
   const rangeVersionOverrides = new Map<string, string>();
   const vulnerabilityResolutions = new Map<string, VulnerabilityResolutionAction>();
   const passes: FetchSeedBundleResult[] = [];
@@ -820,9 +874,9 @@ export async function fetchSeedBundle(
   const maxPasses = preferClean ? 4 : 1;
 
   for (let pass = 0; pass < maxPasses; pass++) {
-    const result = await fetchSeedBundlePass({
+    const result = await resolveSeedBundlePass({
       ...options,
-      ...(preferClean ? { download: false } : {}),
+      analysisPass: pass + 1,
       rangeVersionOverrides,
     });
     passes.push(result);
@@ -859,14 +913,10 @@ export async function fetchSeedBundle(
     }
   }
 
-  if (preferClean && options.download !== false) {
-    passes.push(await fetchSeedBundlePass({ ...options, rangeVersionOverrides }));
-  }
-
-  const final = passes.at(-1)!;
-  const downloadedPackages = uniqueDownloadedPackages(passes);
+  const finalPlan = passes.at(-1)!;
+  finalPlan.timings = sumFetchTimings(passes);
   const finalRangeSelections = new Map<string, string>();
-  for (const resolved of final.resolved) {
+  for (const resolved of finalPlan.resolved) {
     for (const reason of resolved.resolvedFrom ?? []) {
       if (reason.type === 'range') {
         finalRangeSelections.set(
@@ -890,11 +940,11 @@ export async function fetchSeedBundle(
     .filter(
       (action) => finalRangeSelections.get(stableRangeResolutionKey(action)) === action.toVersion
     );
+  const result =
+    options.download === false ? finalPlan : await materializeResolvedPackages(finalPlan, options);
   return {
-    ...final,
-    downloaded: downloadedPackages.length,
-    downloadedPackages,
-    timings: sumFetchTimings(passes),
+    ...result,
+    timings: { ...result.timings, totalMs: elapsedMs(totalStart) },
     ...(actions.length > 0 ? { vulnerabilityResolutions: actions } : {}),
   };
 }

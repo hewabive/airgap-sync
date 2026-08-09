@@ -107,6 +107,7 @@ describe('fetchSeedBundle', () => {
 
   it('replaces a vulnerable range selection with the newest OSV-clean compatible version', async () => {
     const queriedVersions: string[][] = [];
+    const progress: string[] = [];
     const advisoryClient: NpmAdvisoryClient = {
       query(packages) {
         queriedVersions.push(packages.map(({ version }) => version));
@@ -120,6 +121,11 @@ describe('fetchSeedBundle', () => {
 
     const result = await fetchSeedBundle({
       advisoryClient,
+      onProgress(event) {
+        if (event.status === 'start') {
+          progress.push(`${event.phase}:${event.detail ?? ''}`);
+        }
+      },
       outputDir: '/virtual/seed',
       registry,
       requirements: [
@@ -147,6 +153,8 @@ describe('fetchSeedBundle', () => {
       },
     ]);
     expect(queriedVersions).toEqual([['2.0.0'], ['1.0.0'], ['1.0.0']]);
+    expect(progress).toEqual(['resolve:analysis pass 1', 'resolve:analysis pass 2', 'download:']);
+    expect(tarballMocks.downloadResolvedPackage).toHaveBeenCalledOnce();
   });
 
   it('does not change exact versions or query OSV under report-only resolution', async () => {
@@ -191,7 +199,7 @@ describe('fetchSeedBundle', () => {
     expect(progress).toContain('resolve:start');
     expect(progress).toContain('resolve:progress');
     expect(progress).toContain('download:progress');
-    expect(progress.at(-1)).toBe('resolve:done');
+    expect(progress.at(-1)).toBe('download:done');
     expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual([
       'demo@1.0.0',
       'demo@2.0.0',
@@ -243,8 +251,7 @@ describe('fetchSeedBundle', () => {
       ],
     });
 
-    expect(progress).toContain('download:error:demo@2.0.0');
-    expect(progress.at(-1)).toBe('resolve:done:');
+    expect(progress.at(-1)).toBe('download:error:');
     expect(result.downloaded).toBe(0);
     expect(result.errors).toEqual([
       {

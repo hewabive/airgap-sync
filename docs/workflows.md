@@ -224,7 +224,9 @@ version has an OSV finding, download checks a bounded set of compatible alternat
 and uses the newest one with no known findings. This may override an otherwise reusable
 stable range mapping. Exact versions, dist-tags, and lockfile selections stay
 authoritative. Use `"report-only"` when the bundle must preserve the ordinary resolver
-choice and only inventory known vulnerabilities.
+choice and only inventory known vulnerabilities. Progress reports graph analysis and
+tarball download as separate stages; the final graph is downloaded without resolving it
+again.
 
 Use `reuse-stable` when this workspace is the only source of Verdaccio updates and
 imports are applied in order. Avoid it when the same Verdaccio is updated through other
