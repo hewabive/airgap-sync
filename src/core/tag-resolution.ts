@@ -4,6 +4,7 @@ import type { BundleManifest, DistTagsManifest, TagRequirement } from '../types.
 import * as fs from './fs.js';
 
 export interface StableTagResolutionIndex {
+  packagePublishedAt?: Map<string, string>;
   packageVersionsByName?: Map<string, string[]>;
   rangeVersions: Map<string, string>;
   packageIds: Set<string>;
@@ -18,6 +19,7 @@ export interface StableRangeResolution {
 }
 
 const emptyStableTagResolutionIndex = (): StableTagResolutionIndex => ({
+  packagePublishedAt: new Map(),
   packageVersionsByName: new Map(),
   rangeVersions: new Map(),
   packageIds: new Set(),
@@ -66,12 +68,25 @@ async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
   }
 }
 
+async function readPackageFiles(bundleDir: string): Promise<Set<string>> {
+  try {
+    const entries = await fs.readdir(path.join(bundleDir, 'packages'));
+    return new Set(entries.map((entry) => path.posix.join('packages', entry)));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return new Set();
+    }
+    throw error;
+  }
+}
+
 export async function readStableTagResolutionIndex(
   bundleDir: string
 ): Promise<StableTagResolutionIndex> {
-  const [manifest, distTags] = await Promise.all([
+  const [manifest, distTags, packageFiles] = await Promise.all([
     readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
     readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
+    readPackageFiles(bundleDir),
   ]);
 
   if (!manifest || !distTags) {
@@ -79,11 +94,16 @@ export async function readStableTagResolutionIndex(
   }
 
   const packageIds = new Set<string>();
+  const packagePublishedAt = new Map<string, string>();
   const packageVersionsByName = new Map<string, string[]>();
   for (const pkg of manifest.packages) {
-    if (await fs.pathExists(path.join(bundleDir, pkg.file))) {
-      packageIds.add(packageId(pkg.name, pkg.version));
+    if (packageFiles.has(pkg.file)) {
+      const id = packageId(pkg.name, pkg.version);
+      packageIds.add(id);
       addPackageVersion(packageVersionsByName, pkg.name, pkg.version);
+      if (pkg.publishedAt) {
+        packagePublishedAt.set(id, pkg.publishedAt);
+      }
     }
   }
 
@@ -118,7 +138,13 @@ export async function readStableTagResolutionIndex(
     }
   }
 
-  return { packageIds, packageVersionsByName, rangeVersions, tagVersions };
+  return {
+    packageIds,
+    packagePublishedAt,
+    packageVersionsByName,
+    rangeVersions,
+    tagVersions,
+  };
 }
 
 export function stableTagRequirement(

@@ -21,7 +21,7 @@ import type {
 import type { NpmAdvisoryClient } from './security.js';
 import type { RegistryClient } from './registry.js';
 import type { RegistryMetadataCache } from './metadata-cache.js';
-import { resolveRootRequirements } from './resolver.js';
+import { isReleaseAgeEligible, resolveRootRequirements } from './resolver.js';
 import * as fs from './fs.js';
 import { parseDependencySpec, parseGitDependencySpec } from './specs.js';
 import {
@@ -467,8 +467,23 @@ async function resolveSeedBundlePass(
       return undefined;
     }
 
-    if ((options.minReleaseAgeDays ?? 0) > 0 && !metadata.publishedAt) {
+    const id = packageId({ name: requirement.name, version: requirement.specifier });
+    const publishedAt =
+      metadata.publishedAt ?? options.stableTagResolutions?.packagePublishedAt?.get(id);
+    if (
+      !isReleaseAgeEligible(publishedAt, {
+        ...(options.minReleaseAgeDays === undefined
+          ? {}
+          : { minReleaseAgeDays: options.minReleaseAgeDays }),
+      })
+    ) {
       return undefined;
+    }
+
+    if (publishedAt && metadata.publishedAt !== publishedAt) {
+      options.metadataCache.set({ ...metadata, publishedAt });
+      timings.metadataCacheMemoryWrites = (timings.metadataCacheMemoryWrites ?? 0) + 1;
+      timings.metadataCacheWrites = (timings.metadataCacheWrites ?? 0) + 1;
     }
 
     timings.metadataCacheHits = (timings.metadataCacheHits ?? 0) + 1;
@@ -484,7 +499,7 @@ async function resolveSeedBundlePass(
       ...(metadata.peerDependenciesMeta
         ? { peerDependenciesMeta: metadata.peerDependenciesMeta }
         : {}),
-      ...(metadata.publishedAt ? { publishedAt: metadata.publishedAt } : {}),
+      ...(publishedAt ? { publishedAt } : {}),
       raw: requirement.raw,
       requiredBy: requirement.requiredBy,
       resolvedVia: 'version',

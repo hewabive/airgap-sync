@@ -900,6 +900,7 @@ describe('fetchSeedBundle', () => {
     const result = await fetchSeedBundle({
       download: false,
       metadataCache,
+      minReleaseAgeDays: 3,
       outputDir: '/virtual/seed',
       registry: {
         getPackageMetadata(name) {
@@ -910,6 +911,10 @@ describe('fetchSeedBundle', () => {
       requirements: [requirement({})],
       stableTagResolutions: {
         packageIds: new Set(['demo@1.0.0', 'dep@1.0.0']),
+        packagePublishedAt: new Map([
+          ['demo@1.0.0', '2020-01-01T00:00:00.000Z'],
+          ['dep@1.0.0', '2020-01-01T00:00:00.000Z'],
+        ]),
         rangeVersions: new Map(),
         tagVersions: new Map(),
       },
@@ -921,6 +926,69 @@ describe('fetchSeedBundle', () => {
       'dep@1.0.0',
     ]);
     expect(result.timings.metadataCacheHits).toBe(2);
+    expect(result.timings.metadataCacheMemoryWrites).toBe(2);
+    expect(
+      metadataCache.toManifest({
+        createdAt: '2026-08-09T00:00:00.000Z',
+        sourceRegistry: 'https://registry.example',
+      }).packages
+    ).toMatchObject({
+      'demo@1.0.0': { publishedAt: '2020-01-01T00:00:00.000Z' },
+      'dep@1.0.0': { publishedAt: '2020-01-01T00:00:00.000Z' },
+    });
+  });
+
+  it('does not reuse cached metadata that violates the current release-age policy', async () => {
+    const requestedNames: string[] = [];
+    const publishedAt = '2999-01-01T00:00:00.000Z';
+    const metadataCache = new RegistryMetadataCache({
+      schemaVersion: 1,
+      createdAt: '2026-05-28T00:00:00.000Z',
+      sourceRegistry: 'https://registry.example',
+      packages: {
+        'demo@1.0.0': {
+          name: 'demo',
+          version: '1.0.0',
+          dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+          publishedAt,
+        },
+      },
+    });
+
+    const result = await fetchSeedBundle({
+      download: false,
+      metadataCache,
+      minReleaseAgeDays: 3,
+      outputDir: '/virtual/seed',
+      registry: {
+        getPackageMetadata(name) {
+          requestedNames.push(name);
+          return Promise.resolve({
+            name,
+            versions: {
+              '1.0.0': {
+                name,
+                version: '1.0.0',
+                dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+                publishedAt,
+              },
+            },
+          });
+        },
+      },
+      requirements: [requirement({})],
+      stableTagResolutions: {
+        packageIds: new Set(['demo@1.0.0']),
+        packagePublishedAt: new Map([['demo@1.0.0', publishedAt]]),
+        rangeVersions: new Map(),
+        tagVersions: new Map(),
+      },
+    });
+
+    expect(requestedNames).toEqual(['demo']);
+    expect(result.resolved).toEqual([]);
+    expect(result.errors[0]?.reason).toContain('newer than the 3 day minimum age');
+    expect(result.timings.metadataCacheHits).toBe(0);
   });
 
   it('refreshes range dependencies when range resolution policy is refresh', async () => {

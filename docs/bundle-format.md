@@ -155,7 +155,11 @@ are already present in the bundle. It is an optimization for repeated downloads:
 `package@version` requirements whose tarballs still exist can be resolved from this
 file instead of issuing another source-registry metadata request. Root tags and ranges,
 and refreshed transitive tags/ranges, still resolve through the source registry so normal
-update discovery is preserved.
+update discovery is preserved. Version entries include their registry publication time
+so the current release-age policy is reapplied when cached metadata is reused. Older
+caches without that field are upgraded from matching exact versions in the active
+`seed-manifest.json`; a missing or too-recent publication time falls back to the source
+registry and remains subject to quarantine.
 
 ## python-seed-manifest.json
 

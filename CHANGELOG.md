@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Fixed repeated npm graph analysis with the default release-age quarantine so stable
+  exact versions reuse cached dependency metadata and publication timestamps instead of
+  querying the source registry again. Existing caches are upgraded from the active seed
+  manifest, and package presence is indexed with one directory read.
 - Added fail-closed exact-version PyPI OSV checks. Known `MAL-*` releases now prevent
   Python candidate activation and wheel/application-evidence publication; verify and
   publish require fresh evidence bound to the complete wheel manifest, while ordinary

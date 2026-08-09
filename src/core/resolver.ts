@@ -26,6 +26,23 @@ export interface ResolveRootRequirementsOptions {
   now?: Date;
 }
 
+export function isReleaseAgeEligible(
+  publishedAt: string | undefined,
+  options: ResolveRootRequirementsOptions
+): boolean {
+  const minReleaseAgeDays = Math.max(0, options.minReleaseAgeDays ?? 0);
+  if (minReleaseAgeDays === 0) {
+    return true;
+  }
+  if (!publishedAt) {
+    return false;
+  }
+
+  const cutoff = (options.now ?? new Date()).getTime() - minReleaseAgeDays * 24 * 60 * 60 * 1000;
+  const publishedTime = Date.parse(publishedAt);
+  return Number.isFinite(publishedTime) && publishedTime <= cutoff;
+}
+
 export function eligibleVersionNames(
   metadata: PackageMetadata,
   options: ResolveRootRequirementsOptions
@@ -35,12 +52,9 @@ export function eligibleVersionNames(
     return Object.keys(metadata.versions);
   }
 
-  const cutoff = (options.now ?? new Date()).getTime() - minReleaseAgeDays * 24 * 60 * 60 * 1000;
   return Object.keys(metadata.versions).filter((version) => {
     const publishedAt = metadata.time?.[version] ?? metadata.versions[version]?.publishedAt;
-    if (!publishedAt) return false;
-    const publishedTime = Date.parse(publishedAt);
-    return Number.isFinite(publishedTime) && publishedTime <= cutoff;
+    return isReleaseAgeEligible(publishedAt, options);
   });
 }
 

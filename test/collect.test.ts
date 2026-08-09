@@ -838,6 +838,87 @@ describe('collectBundle', () => {
     });
   });
 
+  it('upgrades an existing metadata cache from the active seed manifest under quarantine', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    const registryLookup = vi.fn(() => {
+      throw new Error('Unexpected registry lookup');
+    });
+    await fs.ensureDir(path.join(outputDir, 'packages'));
+    await Promise.all([
+      fs.writeFile(path.join(outputDir, 'packages', 'demo-1.0.0.tgz'), ''),
+      fs.writeJson(path.join(outputDir, 'seed-manifest.json'), {
+        schemaVersion: 2,
+        createdAt: '2026-08-08T00:00:00.000Z',
+        sourceRegistry: 'https://registry.example',
+        packages: [
+          {
+            name: 'demo',
+            version: '1.0.0',
+            file: 'packages/demo-1.0.0.tgz',
+            publishedAt: '2020-01-01T00:00:00.000Z',
+            resolvedFrom: [
+              {
+                raw: 'demo@1.0.0',
+                requiredBy: 'lockfile:package-lock.json',
+                specifier: '1.0.0',
+                type: 'version',
+              },
+            ],
+            sha256: 'a'.repeat(64),
+            tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
+          },
+        ],
+      }),
+      fs.writeJson(path.join(outputDir, 'dist-tags.json'), {
+        schemaVersion: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+        sourceRegistry: 'https://registry.example',
+        requirements: [],
+        tags: {},
+      }),
+      fs.writeJson(path.join(outputDir, 'registry-metadata-cache.json'), {
+        schemaVersion: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+        sourceRegistry: 'https://registry.example',
+        packages: {
+          'demo@1.0.0': {
+            name: 'demo',
+            version: '1.0.0',
+            dist: { tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz' },
+          },
+        },
+      }),
+    ]);
+
+    const report = await collectBundle({
+      dryRun: true,
+      generatedAt: '2026-08-09T00:00:00.000Z',
+      initialRequirements: [
+        {
+          name: 'demo',
+          raw: 'demo@1.0.0',
+          requiredBy: 'lockfile:package-lock.json',
+          specifier: '1.0.0',
+          type: 'version',
+        },
+      ],
+      minReleaseAgeDays: 3,
+      outputDir,
+      registry: { getPackageMetadata: registryLookup },
+      registryUrl: 'https://registry.example',
+    });
+
+    expect(registryLookup).not.toHaveBeenCalled();
+    expect(report.fetch).toMatchObject({
+      errors: [],
+      resolved: 1,
+      timings: {
+        metadataCacheHits: 1,
+        metadataCacheMemoryWrites: 1,
+      },
+    });
+  });
+
   it('keeps the last active Git sources manifest after a failed download', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const activeManifest = {

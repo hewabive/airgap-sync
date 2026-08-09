@@ -28,6 +28,7 @@ function cloneVersionMetadata(metadata: PackageVersionMetadata): PackageVersionM
           ),
         }
       : {}),
+    ...(metadata.publishedAt ? { publishedAt: metadata.publishedAt } : {}),
   };
 }
 
