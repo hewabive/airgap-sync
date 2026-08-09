@@ -30,6 +30,7 @@ const ignoredPathParts = new Set([
   'build',
   'coverage',
   'dist',
+  'fixtures',
   'node_modules',
 ]);
 

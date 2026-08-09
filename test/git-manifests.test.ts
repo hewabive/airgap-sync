@@ -337,6 +337,8 @@ describe('readGitSourceManifestRequirements', () => {
       'requirements-dev.txt': 'pytest==8.3.1',
       'uv.lock': 'version = 1\nrevision = 3\npackage = []',
       'pyproject.toml': '[project]\nname = "app"',
+      'test/fixtures/python-project/uv.lock': 'not a real lockfile',
+      'test/fixtures/python-project/requirements.txt': 'fixture-only==1.0.0',
     };
     const result = await readGitSourceManifestRequirements({
       includeDev: true,
