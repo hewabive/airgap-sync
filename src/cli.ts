@@ -40,6 +40,7 @@ import {
   fetchGitSources,
   fetchSeedBundle,
   findMaintainedPythonApplicationRecipe,
+  formatPythonApplicationCoverageLine,
   explainPlatformCoveragePolicy,
   getBuiltInPlatformFamily,
   HttpGiteaClient,
@@ -645,6 +646,9 @@ function formatDownloadSummary(report: CollectReport): string {
       ? `Python applications: ${String(report.pythonApplications.applications.length)} planned, ${String(report.pythonApplications.planned)} artifacts / ${String(report.pythonApplications.incrementalBytes)} incremental bytes, ${String(report.pythonApplications.errors.length)} errors.`
       : `Python applications: ${String(report.pythonApplications.applications.length)} bundled (${String(report.pythonApplications.downloaded)} artifacts downloaded, ${String(report.pythonApplications.reused)} reused from legacy storage, ${String(report.pythonApplications.existing)} already on disk, ${String(report.pythonApplications.totalBytes)} total bytes / ${String(report.pythonApplications.incrementalBytes)} incremental), ${String(report.pythonApplications.errors.length)} errors.`
     : undefined;
+  const pythonApplicationCoverageLine = report.pythonApplications
+    ? formatPythonApplicationCoverageLine(report.pythonApplications.applications)
+    : undefined;
   const cpythonDistributionsLine = report.cpythonDistributions
     ? report.dryRun
       ? `CPython distributions: ${String(report.cpythonDistributions.selected)} selected, ${String(report.cpythonDistributions.planned)} planned, ${String(report.cpythonDistributions.errors.length)} errors.`
@@ -684,6 +688,13 @@ function formatDownloadSummary(report: CollectReport): string {
     gitLine,
     ...(pythonLine ? [pythonLine] : []),
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
+    ...(pythonApplicationCoverageLine
+      ? [
+          pythonApplicationCoverageLine.hasMissingInitialMinors
+            ? yellow(pythonApplicationCoverageLine.text)
+            : pythonApplicationCoverageLine.text,
+        ]
+      : []),
     ...(pythonSecurityLine ? [pythonSecurityLine] : []),
     ...(cpythonDistributionsLine ? [cpythonDistributionsLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,

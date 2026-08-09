@@ -78,6 +78,7 @@ export {
   PythonApplicationPlanningError,
 } from './core/python/application-planner.js';
 export { initialPythonApplicationMinors } from './core/python/application-intent.js';
+export { formatPythonApplicationCoverageLine } from './core/python/application-coverage-summary.js';
 export {
   assertPythonApplicationRecipeCurrent,
   normalizePythonApplicationRecipe,
