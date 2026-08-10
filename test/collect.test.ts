@@ -18,9 +18,18 @@ vi.mock('../src/core/tarball.js', () => ({
   dependencySpecsFromManifest: tarballMocks.dependencySpecsFromManifest,
   downloadResolvedPackage: tarballMocks.downloadResolvedPackage,
   readPackageManifest: tarballMocks.readPackageManifest,
+  readTarballInspectionCache: () =>
+    Promise.resolve({
+      hits: 0,
+      persistentHits: 0,
+      persistentWrites: 0,
+    }),
   TarballInspectionCache: class {
     readonly hits = 0;
+    readonly persistentHits = 0;
+    readonly persistentWrites = 0;
   },
+  writeTarballInspectionCache: vi.fn(),
 }));
 
 let tempDir: string;

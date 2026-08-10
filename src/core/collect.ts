@@ -44,7 +44,11 @@ import type { RepositoryUpdateProgressEvent } from './repos.js';
 import { readStableTagResolutionIndex } from './tag-resolution.js';
 import { scanNpmBundleSecurity, writeNpmSecurityReport } from './security.js';
 import type { NpmSecurityPolicy } from '../types.js';
-import { TarballInspectionCache } from './tarball.js';
+import {
+  readTarballInspectionCache,
+  TarballInspectionCache,
+  writeTarballInspectionCache,
+} from './tarball.js';
 
 export interface CollectBundleOptions {
   concurrency?: number;
@@ -391,7 +395,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const stableTagResolutions = await readStableTagResolutionIndex(outputDir);
   const metadataCache = await readRegistryMetadataCache(outputDir);
   const stableRequiredBy = new Set<string>();
-  const inspectionCache = new TarballInspectionCache();
+  const inspectionCache = dryRun
+    ? new TarballInspectionCache()
+    : await readTarballInspectionCache(outputDir);
 
   const repositoryUpdateStart = performance.now();
   options.onProgress?.({
@@ -821,6 +827,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         sourceRegistry: options.registryUrl,
       });
       reportFetch.timings.metadataCachePersisted = true;
+    }
+    if (inspectionCache.persistentWrites > 0) {
+      await writeTarballInspectionCache(outputDir, inspectionCache, generatedAt);
     }
     const reportWriteStart = performance.now();
     await writeFetchReport(outputDir, reportFetch);

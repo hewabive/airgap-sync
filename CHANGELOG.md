@@ -36,9 +36,10 @@
 - Kept ordinary npm vulnerability details in the security report while replacing
   per-package console review warnings with an aggregate inventory count. Verify now
   treats that inventory as recorded evidence rather than administrator review work.
-- Combined npm hashing and manifest inspection into one streaming tarball pass and
-  reused unchanged results within each download or verify run, reducing removable-media
-  reads without persisting trust across commands.
+- Combined npm hashing and manifest inspection into one streaming tarball pass. Download
+  now persists normalized manifests by tarball SHA-256 and can skip repeated archive
+  decompression after a fresh full-byte SHA/SRI check. Verify and publish ignore this
+  disposable cache and fully inspect archives at their trust boundaries.
 - Made the human-readable download summary identify npm malware, static findings,
   vulnerability warnings, scanner failures, and the full security-report path.
 - Fixed CPython discovery failures caused by oversized GitHub release-list responses.

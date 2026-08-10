@@ -87,6 +87,7 @@ import {
   readDistTagsManifest,
   readRegistryMetadataCache,
   readStableTagResolutionIndex,
+  readTarballInspectionCache,
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
@@ -108,6 +109,7 @@ import {
   writeGitFetchReport,
   writeGitSourcesManifest,
   writeRegistryMetadataCache,
+  writeTarballInspectionCache,
   writeNpmSecurityReport,
   writeNpmSecurityDeltaReport,
   writePythonSecurityReport,
@@ -4681,7 +4683,9 @@ program
     );
     const stableTagResolutions = await readStableTagResolutionIndex(options.output);
     const metadataCache = await readRegistryMetadataCache(options.output);
-    const inspectionCache = new TarballInspectionCache();
+    const inspectionCache = options.dryRun
+      ? new TarballInspectionCache()
+      : await readTarballInspectionCache(options.output);
 
     if (options.dryRun) {
       const resolution = await fetchSeedBundle({
@@ -4797,6 +4801,10 @@ program
       );
     } else {
       console.log(JSON.stringify({ options, unsupported, ...toFetchPreview(resolution) }, null, 2));
+    }
+
+    if (inspectionCache.persistentWrites > 0) {
+      await writeTarballInspectionCache(options.output, inspectionCache);
     }
 
     if (!success) {

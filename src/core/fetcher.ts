@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import type {
+  BundleManifest,
   FetchTimings,
   GitRequirement,
   LatestPolicy,
@@ -295,6 +296,27 @@ async function readExistingPackageFiles(outputDir: string): Promise<Set<string>>
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return new Set();
+    }
+    throw error;
+  }
+}
+
+async function readExistingPackageSha256(
+  outputDir: string
+): Promise<Map<string, { file: string; sha256: string }>> {
+  try {
+    const manifest = await fs.readJson<BundleManifest>(path.join(outputDir, 'seed-manifest.json'));
+    if (manifest.schemaVersion !== 2 || !Array.isArray(manifest.packages)) return new Map();
+    return new Map(
+      manifest.packages.flatMap((pkg) =>
+        typeof pkg.sha256 === 'string' && /^[a-f0-9]{64}$/iu.test(pkg.sha256)
+          ? [[packageId(pkg), { file: pkg.file, sha256: pkg.sha256.toLowerCase() }] as const]
+          : []
+      )
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) {
+      return new Map();
     }
     throw error;
   }
@@ -753,19 +775,27 @@ async function materializeResolvedPackages(
   const materializeStart = performance.now();
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 8));
   const inspectionCache = options.inspectionCache ?? new TarballInspectionCache();
-  const existingPackageFiles = await readExistingPackageFiles(options.outputDir);
+  const initialTarballCacheHits = inspectionCache.persistentHits;
+  const initialTarballCacheWrites = inspectionCache.persistentWrites;
+  const [existingPackageFiles, existingPackageSha256] = await Promise.all([
+    readExistingPackageFiles(options.outputDir),
+    readExistingPackageSha256(options.outputDir),
+  ]);
   const total = plan.resolved.length;
   let completed = 0;
   options.onProgress?.({ current: 0, phase: 'download', status: 'start', total });
 
   const outcomes = await mapConcurrent(plan.resolved, concurrency, async (resolved) => {
     const id = packageId(resolved);
+    const file = path.posix.join('packages', packageFileName(resolved.name, resolved.version));
+    const existingEvidence = existingPackageSha256.get(id);
     const downloadStart = performance.now();
     try {
       const fetched: DownloadedTarball = await downloadResolvedPackage(
         resolved,
         options.outputDir,
         {
+          ...(existingEvidence?.file === file ? { existingSha256: existingEvidence.sha256 } : {}),
           existingPackageFiles,
           inspectionCache,
           onProgress: ({ downloadedBytes, totalBytes }) => {
@@ -845,6 +875,10 @@ async function materializeResolvedPackages(
     }
   }
   result.downloadedPackages.sort(comparePackageIdentity);
+  const tarballCacheHits = inspectionCache.persistentHits - initialTarballCacheHits;
+  const tarballCacheWrites = inspectionCache.persistentWrites - initialTarballCacheWrites;
+  if (tarballCacheHits > 0) result.timings.tarballCacheHits = tarballCacheHits;
+  if (tarballCacheWrites > 0) result.timings.tarballCacheWrites = tarballCacheWrites;
   result.timings.totalMs += elapsedMs(materializeStart);
   options.onProgress?.({
     current: completed,
@@ -871,6 +905,18 @@ function sumFetchTimings(results: FetchSeedBundleResult[]): FetchTimings {
       resolveMs: total.resolveMs + result.timings.resolveMs,
       resolveWorkerMs:
         (total.resolveWorkerMs ?? 0) + (result.timings.resolveWorkerMs ?? result.timings.resolveMs),
+      ...((total.tarballCacheHits ?? 0) + (result.timings.tarballCacheHits ?? 0) > 0
+        ? {
+            tarballCacheHits:
+              (total.tarballCacheHits ?? 0) + (result.timings.tarballCacheHits ?? 0),
+          }
+        : {}),
+      ...((total.tarballCacheWrites ?? 0) + (result.timings.tarballCacheWrites ?? 0) > 0
+        ? {
+            tarballCacheWrites:
+              (total.tarballCacheWrites ?? 0) + (result.timings.tarballCacheWrites ?? 0),
+          }
+        : {}),
       totalMs: total.totalMs + result.timings.totalMs,
     }),
     createFetchTimings()

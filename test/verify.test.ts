@@ -7,6 +7,7 @@ import * as fs from '../src/core/fs.js';
 import { semanticDigest } from '../src/core/canonical-json.js';
 import { defaultNpmSecurityPolicy } from '../src/core/security.js';
 import { runGitCommand } from '../src/core/git-fetch.js';
+import { TarballInspectionCache, writeTarballInspectionCache } from '../src/core/tarball.js';
 import { verifyBundle } from '../src/core/verify.js';
 import type {
   ApplyBundleReport,
@@ -462,6 +463,46 @@ describe('verifyBundle', () => {
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'tarball-integrity', status: 'error' }),
+      ])
+    );
+  });
+
+  it('ignores the persistent download inspection cache at the verify trust boundary', async () => {
+    await writeValidBundle();
+    const tarballPath = path.join(bundleDir, 'packages/demo-1.0.0.tgz');
+    const sha256 = createHash('sha256')
+      .update(await fs.readFile(tarballPath))
+      .digest('hex');
+    await fs.writeJson(
+      path.join(bundleDir, 'seed-manifest.json'),
+      {
+        ...manifest,
+        packages: [{ ...manifest.packages[0]!, sha256 }],
+        schemaVersion: 2,
+      },
+      { spaces: 2 }
+    );
+    await writeTarballInspectionCache(
+      bundleDir,
+      new TarballInspectionCache({
+        schemaVersion: 1,
+        createdAt: '2026-05-21T00:00:00.000Z',
+        inspections: {
+          [sha256]: {
+            manifest: { name: 'wrong-package', version: '9.9.9' },
+            manifestSha256: semanticDigest({ name: 'wrong-package', version: '9.9.9' }),
+          },
+        },
+      })
+    );
+
+    const report = await verifyBundle({ allowLegacyBundle: true, bundleDir });
+
+    expect(report.ok).toBe(true);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'bundle-manifest', status: 'ok' }),
+        expect.objectContaining({ name: 'tarball-integrity', status: 'ok' }),
       ])
     );
   });

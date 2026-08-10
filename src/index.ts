@@ -312,7 +312,10 @@ export {
   downloadResolvedPackage,
   inspectPackageTarball,
   readPackageManifest,
+  readTarballInspectionCache,
+  tarballInspectionCacheFileName,
   TarballInspectionCache,
+  writeTarballInspectionCache,
 } from './core/tarball.js';
 export {
   parseLockfileRequirementsFromContent,
@@ -437,7 +440,11 @@ export {
   setWorkspacePythonApplicationVersionSelection,
 } from './core/workspace.js';
 
-export type { DownloadedTarball } from './core/tarball.js';
+export type {
+  DownloadedTarball,
+  PersistedTarballInspection,
+  TarballInspectionCacheManifest,
+} from './core/tarball.js';
 export type { CanonicalJsonPrimitive, CanonicalJsonValue } from './core/canonical-json.js';
 export type {
   PlanPythonApplicationOptions,

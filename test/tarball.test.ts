@@ -8,7 +8,10 @@ import {
   downloadResolvedPackage,
   inspectPackageTarball,
   readPackageManifest,
+  readTarballInspectionCache,
+  tarballInspectionCacheFileName,
   TarballInspectionCache,
+  writeTarballInspectionCache,
 } from '../src/core/tarball.js';
 import type { ResolvedRootPackage } from '../src/types.js';
 
@@ -73,6 +76,73 @@ describe('readPackageManifest', () => {
     expect(scanned).toBe(downloaded);
     expect(cache.misses).toBe(1);
     expect(cache.hits).toBe(1);
+  });
+
+  it('persists manifests by SHA-256 and reuses them after a fresh full-byte check', async () => {
+    const tarballPath = await createTarball('package');
+    const bytes = await fs.readFile(tarballPath);
+    const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const firstCache = new TarballInspectionCache();
+
+    await inspectPackageTarball(tarballPath, { integrity }, firstCache);
+    await writeTarballInspectionCache(tempDir, firstCache, '2026-08-10T00:00:00.000Z');
+    const secondCache = await readTarballInspectionCache(tempDir);
+    const inspection = await inspectPackageTarball(tarballPath, { integrity, sha256 }, secondCache);
+
+    expect(inspection.manifest).toEqual({ name: '@types/hast', version: '3.0.4' });
+    expect(secondCache.persistentHits).toBe(1);
+    expect(secondCache.persistentWrites).toBe(0);
+    await expect(
+      fs.readJson(path.join(tempDir, tarballInspectionCacheFileName))
+    ).resolves.toMatchObject({
+      schemaVersion: 1,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      inspections: {
+        [sha256]: {
+          manifest: { name: '@types/hast', version: '3.0.4' },
+        },
+      },
+    });
+  });
+
+  it('rejects changed bytes instead of trusting a persisted manifest', async () => {
+    const tarballPath = await createTarball('package');
+    const original = await fs.readFile(tarballPath);
+    const originalSha256 = createHash('sha256').update(original).digest('hex');
+    const firstCache = new TarballInspectionCache();
+    await inspectPackageTarball(tarballPath, {}, firstCache);
+    const secondCache = new TarballInspectionCache(firstCache.toManifest());
+
+    await fs.writeFile(tarballPath, Buffer.concat([original, Buffer.from('changed')]));
+
+    await expect(
+      inspectPackageTarball(tarballPath, { sha256: originalSha256 }, secondCache)
+    ).rejects.toThrow('SHA-256 mismatch');
+    expect(secondCache.persistentHits).toBe(1);
+  });
+
+  it('ignores persisted manifests with a bad checksum and falls back to full inspection', async () => {
+    const tarballPath = await createTarball('package');
+    const bytes = await fs.readFile(tarballPath);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    await fs.writeJson(path.join(tempDir, tarballInspectionCacheFileName), {
+      schemaVersion: 1,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      inspections: {
+        [sha256]: {
+          manifest: { name: 'wrong-package', version: '9.9.9' },
+          manifestSha256: '00'.repeat(32),
+        },
+      },
+    });
+    const cache = await readTarballInspectionCache(tempDir);
+
+    const inspection = await inspectPackageTarball(tarballPath, { sha256 }, cache);
+
+    expect(inspection.manifest).toMatchObject({ name: '@types/hast', version: '3.0.4' });
+    expect(cache.persistentHits).toBe(0);
+    expect(cache.persistentWrites).toBe(1);
   });
 
   it('invalidates cached inspections when a tarball changes', async () => {

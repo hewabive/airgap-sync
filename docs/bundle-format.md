@@ -40,6 +40,7 @@ airgap-bundle/
   python-security-report.json
   python-security-delta.json
   registry-metadata-cache.json
+  npm-tarball-inspection-cache.json
   workspace-snapshot.json
   fetch-report.json
   publish-report.json
@@ -103,11 +104,20 @@ time are retained when supplied. Schema-1 manifests remain readable for diagnost
 but strict verification and npm publication refuse them because their bytes cannot be
 bound to security evidence.
 
-The runtime inspection cache is intentionally not part of the bundle. During one
-download or verify process, SHA-256, required registry digests, and the embedded
-`package.json` are produced by one streaming read and reused while the file fingerprint
-is unchanged. A later process re-reads the content, preserving the transfer and
-publication trust boundaries.
+`npm-tarball-inspection-cache.json` is a disposable download optimization keyed by
+tarball SHA-256. It stores normalized embedded `package.json` data produced by a prior
+full archive inspection. A later download may reuse an entry only when the previous
+schema-v2 seed manifest supplies the same SHA-256; it still streams the current tarball
+in full and verifies that SHA-256 plus the resolved registry SRI/SHA-1. Cache misses,
+new tarballs, and changed tarballs receive a full archive inspection before a cache
+entry is written atomically. Deleting or corrupting the file only causes a full-scan
+fallback.
+
+The cache is not trust evidence and is not used by separate `verify` or `publish`
+commands. Those commands start with an empty in-memory inspection cache and fully read,
+hash, and parse every referenced tarball at their trust boundary. Within any one
+command, those full inspection results are reused while the file fingerprint remains
+unchanged.
 
 ## security-report.json
 
@@ -294,8 +304,10 @@ When OSV-aware range resolution changes a selection, the optional
 original and replacement versions, and advisory IDs. It never describes exact, tag, or
 lockfile substitutions because those inputs remain authoritative.
 The report also includes `timings` for registry resolution, tarball download,
-package-manifest reading, dependency scanning, and total fetch time. Phase timings are
-cumulative across parallel workers; `totalMs` is the wall-clock duration.
+package-manifest reading, dependency scanning, and total fetch time. Optional
+`tarballCacheHits` and `tarballCacheWrites` counters show persistent inspection-cache
+use. Phase timings are cumulative across parallel workers; `totalMs` is the wall-clock
+duration.
 
 Git specs are also summarized separately in `gitRequirements`. Each item records the
 declaring package, package alias/name when present, raw npm spec, hosted provider

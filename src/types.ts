@@ -370,6 +370,8 @@ export interface FetchTimings {
   manifestReadMs: number;
   resolveMs: number;
   resolveWorkerMs?: number;
+  tarballCacheHits?: number;
+  tarballCacheWrites?: number;
   totalMs: number;
 }
 

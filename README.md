@@ -346,6 +346,7 @@ airgap-bundle/python/distributions/     Rolling portable CPython distributions
 airgap-bundle/python/publications/      Closed-side publication manifests and reports
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
+airgap-bundle/npm-tarball-inspection-cache.json disposable download acceleration data
 airgap-bundle/security-report.json      OSV and static npm security evidence
 airgap-bundle/security-delta.json       npm changes from the previous successful scan
 airgap-bundle/python-seed-manifest.json bundled Python application wheels
@@ -366,11 +367,12 @@ tarballs and wheels, package identity and hashes, a fresh manifest-bound npm sec
 report, a fresh manifest-bound Python security report when Python packages are present,
 reports, and Git metadata.
 
-Within one download or verify run, each unchanged npm tarball is streamed from disk once:
-SHA-256, registry integrity digests, and the embedded `package.json` are collected in the
-same pass and reused by later checks. The cache is memory-only and is invalidated from
-file metadata when a tarball changes. A separate `verify` or `publish` command starts a
-fresh full-content check at that trust boundary.
+Within one download run, an npm tarball recorded by the previous schema-v2 manifest is
+still streamed from disk and checked against its SHA-256 and resolved registry integrity.
+When those bytes match, download can reuse its content-addressed cached `package.json`
+instead of decompressing the archive again. New, changed, or uncached tarballs receive
+a full archive inspection. A separate `verify` or `publish` command ignores this
+disposable cache and starts a fresh full-content/archive check at that trust boundary.
 
 `airgap-sync verify install ./airgap-bundle` runs real package-manager installs. For
 Python applications it exposes only bundled wheels through a temporary local Simple

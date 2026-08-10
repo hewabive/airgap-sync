@@ -182,6 +182,7 @@ The download step writes npm metadata and Git source metadata:
 - `dist-tags.json`
 - `workspace-snapshot.json`
 - `fetch-report.json`
+- `npm-tarball-inspection-cache.json` as disposable SHA-256-keyed acceleration data
 - package tarballs under `packages/`
 - local bare Git mirrors under `git-mirrors/`
 - Git source records for offline publish

@@ -24,11 +24,13 @@ Every substitution records the parent, range, original version, selected version
 advisory IDs in `fetch-report.json`. This is a best-effort known-vulnerability
 optimization, not reachability analysis or proof that the selected code is benign.
 
-Hashing and static manifest inspection share one streaming tarball read within a command.
-Results are cached only in memory for unchanged files and never survive the process, so
-an explicit later verify or publish operation reads and validates the transferred bytes
-again. This limits removable-media I/O without treating a previous run as current trust
-evidence.
+Hashing and static manifest inspection share one streaming tarball read on a cache miss.
+Download persists normalized embedded manifests by tarball SHA-256. Reuse requires the
+previous schema-v2 seed manifest to identify the expected SHA-256, then re-hashes the
+current file in full and checks both that digest and resolved registry SRI/SHA-1 before
+using cached manifest data. File metadata alone is never accepted as cross-process
+evidence. An explicit later verify or publish operation ignores the persistent cache and
+fully reads, hashes, and parses the transferred archive again at that trust boundary.
 
 `airgap-sync verify install` runs real package-manager commands for target projects.
 It skips npm, pnpm, and Yarn lifecycle scripts by default. `--run-scripts` is an

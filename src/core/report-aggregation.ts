@@ -167,6 +167,18 @@ function sumFetchTimings(reports: FetchReport[]): FetchTimings {
       resolveMs: total.resolveMs + report.timings.resolveMs,
       resolveWorkerMs:
         (total.resolveWorkerMs ?? 0) + (report.timings.resolveWorkerMs ?? report.timings.resolveMs),
+      ...((total.tarballCacheHits ?? 0) + (report.timings.tarballCacheHits ?? 0) > 0
+        ? {
+            tarballCacheHits:
+              (total.tarballCacheHits ?? 0) + (report.timings.tarballCacheHits ?? 0),
+          }
+        : {}),
+      ...((total.tarballCacheWrites ?? 0) + (report.timings.tarballCacheWrites ?? 0) > 0
+        ? {
+            tarballCacheWrites:
+              (total.tarballCacheWrites ?? 0) + (report.timings.tarballCacheWrites ?? 0),
+          }
+        : {}),
       totalMs: total.totalMs + report.timings.totalMs,
     }),
     {

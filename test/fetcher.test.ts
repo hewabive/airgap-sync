@@ -1,4 +1,7 @@
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from '../src/core/fs.js';
 import { fetchSeedBundle } from '../src/core/fetcher.js';
 import { RegistryMetadataCache } from '../src/core/metadata-cache.js';
 import { stableRangeResolutionKey, stableTagResolutionKey } from '../src/core/tag-resolution.js';
@@ -24,6 +27,8 @@ vi.mock('../src/core/tarball.js', () => ({
   readPackageManifest: tarballMocks.readPackageManifest,
   TarballInspectionCache: class {
     readonly hits = 0;
+    readonly persistentHits = 0;
+    readonly persistentWrites = 0;
   },
 }));
 
@@ -103,6 +108,44 @@ describe('fetchSeedBundle', () => {
 
     expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@1.0.0']);
     expect(result.tagRequirements).toEqual([]);
+  });
+
+  it('passes the previous schema-v2 SHA-256 when checking an existing tarball', async () => {
+    const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-fetcher-'));
+    const sha256 = 'ab'.repeat(32);
+    try {
+      await fs.ensureDir(path.join(outputDir, 'packages'));
+      await fs.writeFile(path.join(outputDir, 'packages/demo-1.0.0.tgz'), 'existing');
+      await fs.writeJson(path.join(outputDir, 'seed-manifest.json'), {
+        schemaVersion: 2,
+        createdAt: '2026-08-10T00:00:00.000Z',
+        sourceRegistry: 'https://registry.example',
+        packages: [
+          {
+            name: 'demo',
+            version: '1.0.0',
+            file: 'packages/demo-1.0.0.tgz',
+            sha256,
+            tarball: 'https://registry.example/demo/-/demo-1.0.0.tgz',
+            resolvedFrom: [],
+          },
+        ],
+      });
+
+      await fetchSeedBundle({
+        outputDir,
+        registry,
+        requirements: [requirement({})],
+      });
+
+      expect(tarballMocks.downloadResolvedPackage).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'demo', version: '1.0.0' }),
+        outputDir,
+        expect.objectContaining({ existingSha256: sha256 })
+      );
+    } finally {
+      await fs.remove(outputDir);
+    }
   });
 
   it('replaces a vulnerable range selection with the newest OSV-clean compatible version', async () => {
