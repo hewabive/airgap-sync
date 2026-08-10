@@ -9,12 +9,13 @@ configured target registries, and can push Git mirrors into Gitea.
 Downloaded npm tarballs are checked against registry SRI/SHA-1 metadata and recorded
 with SHA-256 in a schema-v2 bundle manifest. Download activation fails closed when OSV
 is unavailable, an exact version has a malware advisory, or static inspection finds a
-non-registry dependency. Lifecycle scripts are visible audit warnings, not blockers,
-because many legitimate native and toolchain packages require them. A static
-acknowledgement or exception is bound to the exact package name, version, and SHA-256.
-Ordinary vulnerability advisories remain in the complete security report. Normal
-console output aggregates them instead of assigning package-by-package review work to
-the transfer operator.
+non-registry dependency. Lifecycle scripts are recorded non-blocking findings because
+many legitimate native and toolchain packages require them. A static acknowledgement
+or exception is bound to the exact package name, version, and SHA-256. Ordinary
+vulnerability advisories remain in the complete security report. Normal console output
+shows neutral inventory totals and warns only about vulnerability or unapproved
+lifecycle findings added since the previous successful scan. The first successful scan
+creates a baseline; failed or incomplete scans never advance it or infer resolutions.
 
 For unlocked SemVer ranges, the default `prefer-clean` resolution policy performs a
 bounded OSV-aware preflight and selects a compatible release with no known findings
@@ -43,7 +44,8 @@ inside its temporary environment, but a workspace recipe remains trusted executa
 policy. Review custom recipes before use. Python collection is wheels-only, verifies
 artifact identity and hashes, and queries OSV for every exact normalized PyPI
 `name==version`. A `MAL-*` advisory or OSV failure prevents candidate activation;
-ordinary vulnerability advisories remain visible warnings. Verify and every Python
+ordinary vulnerability advisories remain recorded non-blocking findings. Download
+warns when one is new relative to the previous successful scan. Verify and every Python
 publication path require a fresh passing report bound to the complete
 `python-seed-manifest.json`. Indexed Python application wheels must be present in that
 checked manifest with matching identities and hashes. There is no Python malware

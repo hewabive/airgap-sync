@@ -95,7 +95,11 @@ describe('Python bundle security', () => {
       severity: 'warning',
       type: 'vulnerability',
     });
-    expect(summarizePythonSecurityReport(report)).toMatchObject({ blocking: 0, warnings: 1 });
+    expect(summarizePythonSecurityReport(report)).toMatchObject({
+      blocking: 0,
+      details: [],
+      warnings: 1,
+    });
   });
 
   it('fails closed when OSV cannot be queried', async () => {

@@ -359,16 +359,16 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
             )
           );
         }
-        const staticWarnings = security.staticFindings.filter(
-          (finding) => finding.severity === 'warning'
+        const lifecycleScripts = security.staticFindings.filter(
+          (finding) => finding.type === 'lifecycle-script' && finding.severity === 'warning'
         );
-        if (staticWarnings.length > 0) {
+        if (lifecycleScripts.length > 0) {
           checks.push(
             check(
-              'npm-static-warnings',
-              'warning',
-              `${String(staticWarnings.length)} non-blocking npm static findings are recorded`,
-              { findings: staticWarnings }
+              'npm-lifecycle-inventory',
+              'ok',
+              `${String(lifecycleScripts.length)} npm lifecycle scripts are recorded in security-report.json`,
+              { findings: lifecycleScripts }
             )
           );
         }
@@ -432,16 +432,16 @@ export async function verifyBundle(options: VerifyBundleOptions): Promise<Verify
             `OSV security report passed for ${String(pythonSecurity.packageCount)} Python packages`
           )
         );
-        const warnings = pythonSecurity.advisories.filter(
+        const vulnerabilityFindings = pythonSecurity.advisories.filter(
           (finding) => finding.severity === 'warning'
         );
-        if (warnings.length > 0) {
+        if (vulnerabilityFindings.length > 0) {
           checks.push(
             check(
-              'python-security-warnings',
-              'warning',
-              `${String(warnings.length)} Python vulnerability advisories require review`,
-              { findings: warnings }
+              'python-vulnerability-inventory',
+              'ok',
+              `${String(vulnerabilityFindings.length)} known Python vulnerability findings are recorded in python-security-report.json`,
+              { findings: vulnerabilityFindings }
             )
           );
         }

@@ -147,10 +147,6 @@ export function summarizePythonSecurityReport(
       level: 'error' as const,
       message: `${finding.type === 'malware' ? 'Malware' : 'Advisory'} [${finding.name}==${finding.version}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`,
     })),
-    ...warnings.map((finding) => ({
-      level: 'warning' as const,
-      message: `Vulnerability [${finding.name}==${finding.version}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`,
-    })),
   ];
   const maxDetails = Math.max(0, Math.floor(options.maxDetails ?? 20));
   return {

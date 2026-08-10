@@ -36,7 +36,9 @@ airgap-bundle/
   seed-manifest.json
   dist-tags.json
   security-report.json
+  security-delta.json
   python-security-report.json
+  python-security-delta.json
   registry-metadata-cache.json
   workspace-snapshot.json
   fetch-report.json
@@ -113,10 +115,17 @@ Records the exact-version OSV query and static tarball inspection result. Its
 `manifestSha256` is the canonical SHA-256 of the complete `seed-manifest.json`; publish
 requires `ok: true`, an exact digest match, and a report no older than the policy TTL.
 Malware advisories, scanner errors, and non-registry dependencies block the report.
-Lifecycle scripts and ordinary vulnerability advisories are warnings. Static
-acknowledgements or exceptions record an exact `name@version#sha256:<hex>` approval. A
+Lifecycle scripts and ordinary vulnerability advisories are non-blocking inventory
+findings. Static acknowledgements or exceptions record an exact
+`name@version#sha256:<hex>` approval. A
 failed scan is written as `security-report.failed.json` so it cannot replace previously
 active evidence.
+
+`security-delta.json` compares ordinary vulnerability advisories by package, version,
+type, and advisory ID. It compares unapproved lifecycle scripts by package, version,
+SHA-256, manifest field, and command. The first successful report creates a baseline;
+later reports contain full added and removed findings. A scanner failure makes the
+comparison unavailable instead of claiming that prior findings were resolved.
 
 ## dist-tags.json
 
@@ -182,7 +191,9 @@ Records OSV results for each exact normalized PyPI `name==version` in the comple
 Download activation, verification, PyPI publication, and Python application-evidence
 publication require `ok: true`, an exact digest match, complete wheel SHA-256 values,
 and a report within `policy.maxReportAgeHours`. `MAL-*` advisories and scanner failures
-block the report; ordinary vulnerability advisories are warnings.
+block the report; ordinary vulnerability advisories are non-blocking inventory
+findings. `python-security-delta.json` applies the same baseline and exact-advisory
+comparison rules used for npm vulnerabilities.
 When `python/application-index.json` exists, every indexed application wheel must also
 occur in this checked manifest with the same package identity, path, and SHA-256.
 
@@ -369,7 +380,9 @@ directories under `runs/`.
 
 `runs/download/<run-id>/` contains before/after copies of `seed-manifest.json` and
 `dist-tags.json` when available, the operational reports from that download,
-`package-changes.json`, and `resolution-changes.json`. `package-changes.json` compares
+`package-changes.json`, and `resolution-changes.json`. When security scans run, it also
+preserves the previous active npm/Python security reports, the current successful or
+failed reports, and both delta reports. `package-changes.json` compares
 the before/after seed manifests and lists package versions added to or removed from the
 bundle, including their `resolvedFrom` parents. `resolution-changes.json` summarizes
 npm requirements that were newly mapped, changed to another version, or pruned from the

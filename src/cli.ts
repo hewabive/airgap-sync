@@ -24,6 +24,8 @@ import {
   evaluateDownloadWindowGap,
   configureGitRewrites,
   createPythonEnvironmentPlan,
+  createNpmSecurityDeltaReport,
+  createPythonSecurityDeltaReport,
   createGitSourcesManifest,
   createBundleDocuments,
   createFetchReport,
@@ -52,6 +54,7 @@ import {
   MemoizedPythonIndexClient,
   normalizeMachineProbeFacts,
   normalizePythonApplicationRecipe,
+  npmSecurityDeltaReportFileName,
   OsvBatchClient,
   OsvNpmAdvisoryClient,
   OsvPythonAdvisoryClient,
@@ -62,6 +65,7 @@ import {
   pythonApplicationIntentForVersionSelector,
   pythonApplicationSelectorId,
   pythonApplicationVariantId,
+  pythonSecurityDeltaReportFileName,
   PythonApplicationPlanningError,
   previewWorkspaceMigration,
   probeMachine,
@@ -105,7 +109,9 @@ import {
   writeGitSourcesManifest,
   writeRegistryMetadataCache,
   writeNpmSecurityReport,
+  writeNpmSecurityDeltaReport,
   writePythonSecurityReport,
+  writePythonSecurityDeltaReport,
   writePublishReport,
   writePruneReport,
   writeWorkspaceSnapshot,
@@ -124,6 +130,7 @@ import type {
   ApplyProgressEvent,
   ApplyProgressPhase,
   ApplyBundleReport,
+  BundleStateSnapshot,
   BundleInfo,
   BundlePruneReport,
   CollectReport,
@@ -135,8 +142,10 @@ import type {
   GitOwnerStrategy,
   GitPublishOwnerKind,
   LatestPolicy,
+  NpmSecurityDeltaReport,
   PlatformCoveragePolicy,
   PythonApplicationDownloadProgressEvent,
+  PythonSecurityDeltaReport,
   PublishProgressEvent,
   PublishProgressPhase,
   RangeResolutionPolicy,
@@ -554,7 +563,153 @@ function safeConsoleDetail(value: string, maxLength = 500): string {
   return singleLine.length <= maxLength ? singleLine : `${singleLine.slice(0, maxLength - 1)}…`;
 }
 
-function formatDownloadSummary(report: CollectReport): string {
+interface DownloadSecurityDeltas {
+  npm?: NpmSecurityDeltaReport;
+  python?: PythonSecurityDeltaReport;
+}
+
+async function createDownloadSecurityDeltas(
+  outputDir: string,
+  report: CollectReport,
+  before: BundleStateSnapshot | undefined
+): Promise<DownloadSecurityDeltas> {
+  const deltas: DownloadSecurityDeltas = {
+    ...(report.security
+      ? {
+          npm: createNpmSecurityDeltaReport(report.security, before?.npmSecurityReport),
+        }
+      : {}),
+    ...(report.pythonSecurity
+      ? {
+          python: createPythonSecurityDeltaReport(
+            report.pythonSecurity,
+            before?.pythonSecurityReport
+          ),
+        }
+      : {}),
+  };
+  await Promise.all([
+    ...(deltas.npm ? [writeNpmSecurityDeltaReport(outputDir, deltas.npm)] : []),
+    ...(deltas.python ? [writePythonSecurityDeltaReport(outputDir, deltas.python)] : []),
+  ]);
+  return deltas;
+}
+
+function securityDeltaSuffix(
+  delta: NpmSecurityDeltaReport | PythonSecurityDeltaReport | undefined
+) {
+  if (!delta) return 'change comparison unavailable';
+  if (delta.comparison.status === 'baseline-created') return 'security baseline created';
+  if (delta.comparison.status === 'unavailable') return 'change comparison unavailable';
+  return `${String(delta.summary.added)} new ${delta.summary.added === 1 ? 'finding' : 'findings'}`;
+}
+
+function formatNpmSecurityDeltaLines(bundleDir: string, delta: NpmSecurityDeltaReport): string[] {
+  const lines: string[] = [];
+  if (delta.comparison.status === 'baseline-created') {
+    lines.push(`NPM security changes: baseline created; review the complete security report once.`);
+  } else if (delta.comparison.status === 'unavailable') {
+    lines.push(
+      `NPM security changes: comparison unavailable (${delta.comparison.reason === 'current-scan-incomplete' ? 'the current scan is incomplete' : 'there is no successful baseline'}).`
+    );
+  } else {
+    const addedDetails = [
+      ...delta.advisories.added.map(
+        (finding) =>
+          `New vulnerability [${finding.name}@${finding.version}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`
+      ),
+      ...delta.lifecycleScripts.added.map(
+        (finding) =>
+          `New lifecycle script [${finding.name}@${finding.version}] ${finding.field}: ${finding.value} (approval: ${finding.name}@${finding.version}#sha256:${finding.sha256})`
+      ),
+    ];
+    if (delta.summary.added > 0) {
+      lines.push(
+        yellow(
+          `NPM security WARNING: ${String(delta.summary.added)} new ${delta.summary.added === 1 ? 'finding' : 'findings'} since the previous successful scan (${String(delta.advisories.added.length)} vulnerabilities, ${String(delta.lifecycleScripts.added.length)} lifecycle scripts).`
+        ),
+        ...addedDetails
+          .slice(0, 20)
+          .map((detail) => yellow(`NPM security WARNING: ${safeConsoleDetail(detail)}`))
+      );
+      if (addedDetails.length > 20) {
+        lines.push(
+          yellow(
+            `NPM security: ${String(addedDetails.length - 20)} more new findings omitted from console output.`
+          )
+        );
+      }
+      if (delta.advisories.added.length > 0) {
+        lines.push(
+          `NPM security action: ask the application owner to update the dependency or lockfile, then rerun download.`
+        );
+      }
+      if (delta.lifecycleScripts.added.length > 0) {
+        lines.push(
+          `NPM security action: review new lifecycle commands; if expected, add the exact approval identity to npmSecurity.allowPackages.`
+        );
+      }
+    }
+    if (delta.summary.removed > 0) {
+      lines.push(
+        `NPM security changes: ${String(delta.summary.removed)} findings resolved since the previous successful scan.`
+      );
+    }
+  }
+  lines.push(`NPM security delta: ${path.join(bundleDir, npmSecurityDeltaReportFileName)}`);
+  return lines;
+}
+
+function formatPythonSecurityDeltaLines(
+  bundleDir: string,
+  delta: PythonSecurityDeltaReport
+): string[] {
+  const lines: string[] = [];
+  if (delta.comparison.status === 'baseline-created') {
+    lines.push(
+      `Python security changes: baseline created; review the complete security report once.`
+    );
+  } else if (delta.comparison.status === 'unavailable') {
+    lines.push(
+      `Python security changes: comparison unavailable (${delta.comparison.reason === 'current-scan-incomplete' ? 'the current scan is incomplete' : 'there is no successful baseline'}).`
+    );
+  } else {
+    if (delta.summary.added > 0) {
+      lines.push(
+        yellow(
+          `Python security WARNING: ${String(delta.summary.added)} new ${delta.summary.added === 1 ? 'vulnerability' : 'vulnerabilities'} since the previous successful scan.`
+        ),
+        ...delta.advisories.added
+          .slice(0, 20)
+          .map((finding) =>
+            yellow(
+              `Python security WARNING: ${safeConsoleDetail(`New vulnerability [${finding.name}==${finding.version}] ${finding.id}${finding.summary ? `: ${finding.summary}` : ''}`)}`
+            )
+          ),
+        `Python security action: ask the application owner to update the dependency or lockfile, then rerun download.`
+      );
+      if (delta.advisories.added.length > 20) {
+        lines.push(
+          yellow(
+            `Python security: ${String(delta.advisories.added.length - 20)} more new findings omitted from console output.`
+          )
+        );
+      }
+    }
+    if (delta.summary.removed > 0) {
+      lines.push(
+        `Python security changes: ${String(delta.summary.removed)} findings resolved since the previous successful scan.`
+      );
+    }
+  }
+  lines.push(`Python security delta: ${path.join(bundleDir, pythonSecurityDeltaReportFileName)}`);
+  return lines;
+}
+
+function formatDownloadSummary(
+  report: CollectReport,
+  securityDeltas: DownloadSecurityDeltas = {}
+): string {
   const failed = collectShouldFail(report);
   const gitSkipped = report.gitSources.skipped.length;
   const unsupported = report.fetch.unsupported.length;
@@ -632,10 +787,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const securityLine = report.security
     ? report.security.ok
       ? green(
-          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warningAdvisories ?? 0)} known vulnerabilities recorded, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings, ${String(securitySummary?.approved ?? 0)} approved static findings).`
+          `NPM security: ok (${String(report.security.packageCount)} packages scanned, ${String(securitySummary?.warningAdvisories ?? 0)} known vulnerabilities recorded, ${String(securitySummary?.lifecycleScripts ?? 0)} lifecycle scripts recorded, ${String(securitySummary?.approved ?? 0)} approved static findings, ${securityDeltaSuffix(securityDeltas.npm)}).`
         )
       : red(
-          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warningAdvisories ?? 0)} known vulnerabilities recorded, ${String(securitySummary?.warningStatic ?? 0)} lifecycle warnings).`
+          `NPM security: FAILED (${String(securitySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(securitySummary?.blockingStatic ?? 0)} blocked static findings, ${String(securitySummary?.scannerErrors ?? 0)} scanner errors, ${String(securitySummary?.warningAdvisories ?? 0)} known vulnerabilities recorded, ${String(securitySummary?.lifecycleScripts ?? 0)} lifecycle scripts recorded, ${securityDeltaSuffix(securityDeltas.npm)}).`
         )
     : report.dryRun
       ? 'NPM security: not run during dry-run.'
@@ -644,10 +799,10 @@ function formatDownloadSummary(report: CollectReport): string {
   const pythonSecurityLine = report.pythonSecurity
     ? report.pythonSecurity.ok
       ? green(
-          `Python security: ok (${String(report.pythonSecurity.packageCount)} packages scanned, ${String(pythonSecuritySummary?.warnings ?? 0)} warnings).`
+          `Python security: ok (${String(report.pythonSecurity.packageCount)} packages scanned, ${String(pythonSecuritySummary?.warnings ?? 0)} known vulnerabilities recorded, ${securityDeltaSuffix(securityDeltas.python)}).`
         )
       : red(
-          `Python security: FAILED (${String(pythonSecuritySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(pythonSecuritySummary?.scannerErrors ?? 0)} scanner errors, ${String(pythonSecuritySummary?.warnings ?? 0)} warnings).`
+          `Python security: FAILED (${String(pythonSecuritySummary?.blockingAdvisories ?? 0)} blocking advisories, ${String(pythonSecuritySummary?.scannerErrors ?? 0)} scanner errors, ${String(pythonSecuritySummary?.warnings ?? 0)} known vulnerabilities recorded, ${securityDeltaSuffix(securityDeltas.python)}).`
         )
     : hasPythonPackages
       ? report.dryRun
@@ -699,6 +854,9 @@ function formatDownloadSummary(report: CollectReport): string {
         report.security.ok ? 'security-report.json' : 'security-report.failed.json'
       )}`
     );
+    if (securityDeltas.npm) {
+      lines.push(...formatNpmSecurityDeltaLines(report.outputDir, securityDeltas.npm));
+    }
   }
 
   if (report.pythonSecurity && pythonSecuritySummary) {
@@ -723,6 +881,9 @@ function formatDownloadSummary(report: CollectReport): string {
           : 'python-security-report.failed.json'
       )}`
     );
+    if (securityDeltas.python) {
+      lines.push(...formatPythonSecurityDeltaLines(report.outputDir, securityDeltas.python));
+    }
   }
 
   if (report.pythonApplications?.errors.length) {
@@ -4242,6 +4403,10 @@ program
             targets: cpythonTargets,
           });
         }
+        const securityDeltas =
+          options.dryRun === true
+            ? {}
+            : await createDownloadSecurityDeltas(outputDir, report, beforeState);
         if (options.dryRun !== true) {
           await writeCollectReport(outputDir, report);
         }
@@ -4279,6 +4444,7 @@ program
             bundleDir: outputDir,
             rangeResolutionPolicy,
             report,
+            securityDeltas,
             ...(pruneReport ? { pruneReport } : {}),
             scope: targetSelection ? 'partial' : 'full',
             ...(targetSelection ? { selectedTargetIndexes: targetSelection.selectedIndexes } : {}),
@@ -4293,6 +4459,7 @@ program
               {
                 workspaceSnapshot,
                 ...(pruneReport ? { prune: pruneReport } : {}),
+                securityDeltas,
                 ...report,
               },
               null,
@@ -4300,7 +4467,7 @@ program
             )
           );
         } else {
-          console.log(formatDownloadSummary(report));
+          console.log(formatDownloadSummary(report, securityDeltas));
           if (pruneReport) {
             console.log(formatPruneSummary(pruneReport));
           }
@@ -4355,6 +4522,10 @@ program
         },
         root,
       });
+      const securityDeltas =
+        options.dryRun === true
+          ? {}
+          : await createDownloadSecurityDeltas(outputDir, report, beforeState);
       const pruneReport =
         options.prune === true && options.dryRun !== true
           ? await pruneAfterSuccessfulDownload(report)
@@ -4365,6 +4536,7 @@ program
           bundleDir: outputDir,
           rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
           report,
+          securityDeltas,
           ...(pruneReport ? { pruneReport } : {}),
           tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
         });
@@ -4372,10 +4544,14 @@ program
 
       if (options.json === true) {
         console.log(
-          JSON.stringify({ ...(pruneReport ? { prune: pruneReport } : {}), ...report }, null, 2)
+          JSON.stringify(
+            { ...(pruneReport ? { prune: pruneReport } : {}), securityDeltas, ...report },
+            null,
+            2
+          )
         );
       } else {
-        console.log(formatDownloadSummary(report));
+        console.log(formatDownloadSummary(report, securityDeltas));
         if (pruneReport) {
           console.log(formatPruneSummary(pruneReport));
         }

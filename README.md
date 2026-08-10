@@ -300,10 +300,18 @@ three-day release quarantine and a 72-hour security-report lifetime:
 }
 ```
 
-Lifecycle scripts are reported as audit warnings because their presence is common and
-does not by itself identify malicious code. Non-registry dependencies remain blocking.
+Lifecycle scripts are recorded because their presence is common and does not by itself
+identify malicious code. The normal summary reports the complete inventory count but
+warns only when an unapproved script is new or its exact package bytes or command have
+changed since the previous successful scan. Non-registry dependencies remain blocking.
 An optional acknowledgement or a reviewed exception pins the exact downloaded bytes as
 `name@version#sha256:<hex>` in `allowPackages`; a changed tarball no longer matches.
+Review a new lifecycle command before allowing install scripts to run. If it is
+expected, copy the approval identity printed by `download` into
+`npmSecurity.allowPackages`. For a new ordinary vulnerability, update the owning
+application's dependency or lockfile and rerun download; unresolved findings should be
+routed to that application's maintainer rather than silently accepted by the transfer
+operator.
 `maxReportAgeHours` is also the lifetime of Python OSV evidence; Python malware has no
 allow-list escape hatch.
 
@@ -339,8 +347,10 @@ airgap-bundle/python/publications/      Closed-side publication manifests and re
 airgap-bundle/git-mirrors/              bare Git mirrors
 airgap-bundle/seed-manifest.json        bundled npm package versions
 airgap-bundle/security-report.json      OSV and static npm security evidence
+airgap-bundle/security-delta.json       npm changes from the previous successful scan
 airgap-bundle/python-seed-manifest.json bundled Python application wheels
 airgap-bundle/python-security-report.json exact-version PyPI OSV evidence
+airgap-bundle/python-security-delta.json Python changes from the previous successful scan
 airgap-bundle/dist-tags.json            real dist-tag requirements
 airgap-bundle/git-sources.json          Git source metadata
 airgap-bundle/workspace-snapshot.json   targets for later verification

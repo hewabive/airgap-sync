@@ -6,6 +6,7 @@ import type {
   CollectReport,
   DistTagsManifest,
   FetchPackageAction,
+  NpmSecurityReport,
   TagResolutionPolicy,
   RangeResolutionPolicy,
 } from '../types.js';
@@ -19,17 +20,21 @@ import {
   readCpythonDistributionBundleIndex,
   type CpythonDistributionBundleIndex,
 } from './python/distribution-bundle.js';
+import { pythonSecurityReportFileName, type PythonSecurityReport } from './python/security.js';
+import type { NpmSecurityDeltaReport, PythonSecurityDeltaReport } from './security-delta.js';
 
 export interface BundleStateSnapshot {
   cpythonDistributionIndex?: CpythonDistributionBundleIndex;
   distTags?: DistTagsManifest;
   manifest?: BundleManifest;
+  npmSecurityReport?: NpmSecurityReport;
   packageFiles: Set<string>;
   pythonApplicationDocuments: {
     content: string;
     file: string;
   }[];
   pythonApplicationIndex?: PythonApplicationBundleIndex;
+  pythonSecurityReport?: PythonSecurityReport;
 }
 
 export interface WriteDownloadRunHistoryOptions {
@@ -39,6 +44,10 @@ export interface WriteDownloadRunHistoryOptions {
   pruneReport?: BundlePruneReport;
   rangeResolutionPolicy: RangeResolutionPolicy;
   report: CollectReport;
+  securityDeltas?: {
+    npm?: NpmSecurityDeltaReport;
+    python?: PythonSecurityDeltaReport;
+  };
   scope?: DownloadRunScope;
   selectedTargetIndexes?: number[];
   tagResolutionPolicy: TagResolutionPolicy;
@@ -254,6 +263,104 @@ async function readOptionalJson<T>(filePath: string): Promise<T | undefined> {
   }
 
   return fs.readJson<T>(filePath);
+}
+
+async function readOptionalSuccessfulSecurityReport<T>(
+  filePath: string,
+  validate: (value: unknown) => value is T
+): Promise<T | undefined> {
+  try {
+    const report = await readOptionalJson<unknown>(filePath);
+    return validate(report) ? report : undefined;
+  } catch {
+    // A malformed active report cannot be used as a comparison baseline.
+    return undefined;
+  }
+}
+
+function isSuccessfulNpmSecurityReport(value: unknown): value is NpmSecurityReport {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    value.ok === true &&
+    typeof value.generatedAt === 'string' &&
+    Array.isArray(value.errors) &&
+    value.errors.length === 0 &&
+    Array.isArray(value.advisories) &&
+    Array.isArray(value.staticFindings)
+  );
+}
+
+function isSuccessfulPythonSecurityReport(value: unknown): value is PythonSecurityReport {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    value.ok === true &&
+    typeof value.generatedAt === 'string' &&
+    Array.isArray(value.errors) &&
+    value.errors.length === 0 &&
+    Array.isArray(value.advisories)
+  );
+}
+
+async function readSecurityBaselineFromHistory<T>(options: {
+  activeFileName: string;
+  afterFileName: string;
+  beforeFileName: string;
+  bundleDir: string;
+  failedFileName: string;
+  validate: (value: unknown) => value is T;
+}): Promise<T | undefined> {
+  const historyDir = path.join(options.bundleDir, 'runs', 'download');
+  let entries;
+  try {
+    entries = await fs.readdir(historyDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return readOptionalSuccessfulSecurityReport(
+        path.join(options.bundleDir, options.activeFileName),
+        options.validate
+      );
+    }
+    throw error;
+  }
+
+  let historyHasSecurityEvidence = false;
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  for (const directory of directories) {
+    const runDir = path.join(historyDir, directory);
+    const beforePath = path.join(runDir, options.beforeFileName);
+    const afterPath = path.join(runDir, options.afterFileName);
+    const failedPath = path.join(runDir, options.failedFileName);
+    if (
+      (await fs.pathExists(beforePath)) ||
+      (await fs.pathExists(afterPath)) ||
+      (await fs.pathExists(failedPath))
+    ) {
+      historyHasSecurityEvidence = true;
+    }
+
+    let record: DownloadRunRecord;
+    try {
+      record = normalizeDownloadRunRecord(await fs.readJson(path.join(runDir, 'run.json')));
+    } catch {
+      continue;
+    }
+    const candidatePaths = record.status === 'success' ? [afterPath, beforePath] : [beforePath];
+    for (const candidatePath of candidatePaths) {
+      const report = await readOptionalSuccessfulSecurityReport(candidatePath, options.validate);
+      if (report) return report;
+    }
+  }
+
+  if (historyHasSecurityEvidence) return undefined;
+  return readOptionalSuccessfulSecurityReport(
+    path.join(options.bundleDir, options.activeFileName),
+    options.validate
+  );
 }
 
 async function copyIfExists(source: string, target: string): Promise<void> {
@@ -518,14 +625,37 @@ function createResolutionChanges(
 }
 
 export async function captureBundleState(bundleDir: string): Promise<BundleStateSnapshot> {
-  const [manifest, distTags, packageFiles, pythonApplicationIndex, cpythonDistributionIndex] =
-    await Promise.all([
-      readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
-      readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
-      readPackageFiles(bundleDir),
-      readPythonApplicationBundleIndex(bundleDir, { obsolete: 'ignore' }),
-      readCpythonDistributionBundleIndex(bundleDir),
-    ]);
+  const [
+    manifest,
+    distTags,
+    packageFiles,
+    pythonApplicationIndex,
+    cpythonDistributionIndex,
+    npmSecurityReport,
+    pythonSecurityReport,
+  ] = await Promise.all([
+    readOptionalJson<BundleManifest>(path.join(bundleDir, 'seed-manifest.json')),
+    readOptionalJson<DistTagsManifest>(path.join(bundleDir, 'dist-tags.json')),
+    readPackageFiles(bundleDir),
+    readPythonApplicationBundleIndex(bundleDir, { obsolete: 'ignore' }),
+    readCpythonDistributionBundleIndex(bundleDir),
+    readSecurityBaselineFromHistory({
+      activeFileName: 'security-report.json',
+      afterFileName: 'security-report.after.json',
+      beforeFileName: 'security-report.before.json',
+      bundleDir,
+      failedFileName: 'security-report.failed.json',
+      validate: isSuccessfulNpmSecurityReport,
+    }),
+    readSecurityBaselineFromHistory({
+      activeFileName: pythonSecurityReportFileName,
+      afterFileName: 'python-security-report.after.json',
+      beforeFileName: 'python-security-report.before.json',
+      bundleDir,
+      failedFileName: 'python-security-report.failed.json',
+      validate: isSuccessfulPythonSecurityReport,
+    }),
+  ]);
   const pythonApplicationDocuments = await readPythonApplicationDocuments(
     bundleDir,
     pythonApplicationIndex
@@ -535,9 +665,11 @@ export async function captureBundleState(bundleDir: string): Promise<BundleState
     ...(cpythonDistributionIndex ? { cpythonDistributionIndex } : {}),
     ...(distTags ? { distTags } : {}),
     ...(manifest ? { manifest } : {}),
+    ...(npmSecurityReport ? { npmSecurityReport } : {}),
     packageFiles,
     pythonApplicationDocuments,
     ...(pythonApplicationIndex ? { pythonApplicationIndex } : {}),
+    ...(pythonSecurityReport ? { pythonSecurityReport } : {}),
   };
 }
 
@@ -591,6 +723,20 @@ export async function writeDownloadRunHistory(
     await fs.writeJson(
       path.join(targetDir, 'python-distributions-index.before.json'),
       options.before.cpythonDistributionIndex,
+      { spaces: 2 }
+    );
+  }
+  if (options.before.npmSecurityReport) {
+    await fs.writeJson(
+      path.join(targetDir, 'security-report.before.json'),
+      options.before.npmSecurityReport,
+      { spaces: 2 }
+    );
+  }
+  if (options.before.pythonSecurityReport) {
+    await fs.writeJson(
+      path.join(targetDir, 'python-security-report.before.json'),
+      options.before.pythonSecurityReport,
       { spaces: 2 }
     );
   }
@@ -661,6 +807,40 @@ export async function writeDownloadRunHistory(
   }
 
   await Promise.all(reportCopies);
+  if (options.report.security) {
+    await fs.writeJson(
+      path.join(
+        targetDir,
+        options.report.security.ok ? 'security-report.after.json' : 'security-report.failed.json'
+      ),
+      options.report.security,
+      { spaces: 2 }
+    );
+  }
+  if (options.report.pythonSecurity) {
+    await fs.writeJson(
+      path.join(
+        targetDir,
+        options.report.pythonSecurity.ok
+          ? 'python-security-report.after.json'
+          : 'python-security-report.failed.json'
+      ),
+      options.report.pythonSecurity,
+      { spaces: 2 }
+    );
+  }
+  if (options.securityDeltas?.npm) {
+    await fs.writeJson(path.join(targetDir, 'security-delta.json'), options.securityDeltas.npm, {
+      spaces: 2,
+    });
+  }
+  if (options.securityDeltas?.python) {
+    await fs.writeJson(
+      path.join(targetDir, 'python-security-delta.json'),
+      options.securityDeltas.python,
+      { spaces: 2 }
+    );
+  }
   const afterPythonApplicationIndex = await readPythonApplicationBundleIndex(options.bundleDir, {
     obsolete: 'ignore',
   });

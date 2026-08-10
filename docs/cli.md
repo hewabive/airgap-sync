@@ -289,7 +289,8 @@ the default is three days and `0` disables the delay. Download verifies registry
 SRI/SHA-1, records SHA-256, queries OSV for every exact package/version, and inspects
 each tarball for lifecycle scripts and non-registry dependencies. Any malware finding,
 OSV failure, integrity mismatch, or unapproved non-registry dependency prevents
-activation. Lifecycle scripts are audit warnings and do not block activation.
+activation. Lifecycle scripts are recorded non-blocking findings and do not block
+activation.
 `security-report.failed.json` keeps failed evidence without replacing a previously
 active report. `--allow-package name@version#sha256:<hex>` is repeatable and approves
 or acknowledges static findings only for those exact bytes.
@@ -302,18 +303,23 @@ newest compatible, release-age-eligible versions when a selection has an OSV fin
 Exact versions, tags, and lockfile selections are never changed. Use `report-only` to
 disable substitutions. Applied substitutions are recorded in `fetch-report.json`.
 
-The normal download summary names blocking findings, aggregates ordinary vulnerability
-counts, reports scanner failures, and prints the path to `security-report.json` or
-`security-report.failed.json`. Per-package ordinary vulnerabilities remain in `--json`
-and the report file instead of being printed as review instructions. Console details
-for blocking and static findings remain bounded.
+The normal download summary names blocking findings, reports scanner failures, and
+shows neutral totals for ordinary vulnerabilities and lifecycle scripts. It warns only
+about findings added since the previous successful scan; resolved findings are counted.
+The first successful scan creates a baseline without treating the existing inventory
+as new. `security-delta.json` records added and removed exact findings, and failed or
+incomplete scans do not advance the baseline. Per-package inventories remain in
+`--json` and `security-report.json` or `security-report.failed.json`. New lifecycle
+details include the digest-pinned approval identity. Review the command and add that
+identity to `npmSecurity.allowPackages` only when the exact script is expected.
 
 For Python, download queries OSV for every exact normalized PyPI `name==version` in the
 candidate wheel manifest. A `MAL-*` advisory or OSV failure prevents activation and is
-written to `python-security-report.failed.json`; ordinary vulnerabilities are warnings.
-Successful evidence is bound to the complete `python-seed-manifest.json` in
-`python-security-report.json`. The same `--max-security-report-age-hours` value governs
-both npm and Python report freshness.
+written to `python-security-report.failed.json`; ordinary vulnerabilities are recorded
+non-blocking findings. `python-security-delta.json` warns only when one is new relative
+to the previous successful scan. Successful evidence is bound to the complete
+`python-seed-manifest.json` in `python-security-report.json`. The same
+`--max-security-report-age-hours` value governs both npm and Python report freshness.
 
 Tarball hashing and `package.json` inspection use the same stream. An in-memory,
 file-fingerprint-scoped cache reuses that inspection across fixed-point iterations and
@@ -383,7 +389,8 @@ will not use.
 After a successful non-dry-run download, the latest root reports are copied into
 `airgap-bundle/runs/download/<run-id>/`. That run directory also includes
 `resolution-changes.json`, a compact summary of npm mappings that were added, changed,
-or pruned during the update.
+or pruned during the update, plus security reports before/after and their npm/Python
+deltas when those scans ran.
 
 The online bundle should store Git source identities and local mirrors, not
 Gitea-specific target URLs.

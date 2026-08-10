@@ -129,16 +129,8 @@ describe('npm security gate', () => {
     expect(summarizeNpmSecurityReport(report)).toMatchObject({
       blocking: 0,
       blockingStatic: 0,
-      details: [
-        {
-          level: 'warning',
-          message: 'Lifecycle script [demo@1.0.0] scripts.install: node install.js',
-        },
-        {
-          level: 'warning',
-          message: 'Lifecycle script [demo@1.0.0] scripts.postinstall: node verify.js',
-        },
-      ],
+      details: [],
+      lifecycleScripts: 2,
       warningAdvisories: 0,
       warningStatic: 2,
       warnings: 2,
@@ -233,7 +225,7 @@ describe('npm security gate', () => {
       blocking: 2,
       blockingAdvisories: 1,
       blockingStatic: 0,
-      omitted: 1,
+      omitted: 0,
       scannerErrors: 1,
       warningAdvisories: 1,
       warningStatic: 1,

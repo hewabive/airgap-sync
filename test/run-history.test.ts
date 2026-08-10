@@ -4,6 +4,8 @@ import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   captureBundleState,
+  createNpmSecurityDeltaReport,
+  defaultNpmSecurityPolicy,
   evaluateDownloadWindowGap,
   readLastSuccessfulFullDownload,
   writeDownloadRunHistory,
@@ -13,6 +15,7 @@ import type {
   BundlePruneReport,
   CollectReport,
   DistTagsManifest,
+  NpmSecurityReport,
 } from '../src/types.js';
 
 let bundleDir: string;
@@ -53,6 +56,30 @@ const distTags: DistTagsManifest = {
   requirements: [],
   tags: {},
 };
+
+function npmSecurityReport(generatedAt: string, advisoryId: string): NpmSecurityReport {
+  return {
+    advisories: [
+      {
+        aliases: [],
+        id: advisoryId,
+        name: 'demo',
+        severity: 'warning',
+        type: 'vulnerability',
+        version: '1.0.0',
+      },
+    ],
+    errors: [],
+    generatedAt,
+    manifestSha256: 'manifest',
+    ok: true,
+    packageCount: 2,
+    policy: defaultNpmSecurityPolicy,
+    provider: { name: 'OSV', url: 'https://api.osv.dev/v1/querybatch' },
+    schemaVersion: 1,
+    staticFindings: [],
+  };
+}
 
 function collectReport(bundleDir: string, generatedAt: string): CollectReport {
   return {
@@ -142,6 +169,8 @@ describe('run history', () => {
   it('writes immutable download run snapshots and resolution changes', async () => {
     await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), beforeManifest, { spaces: 2 });
     await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), distTags, { spaces: 2 });
+    const beforeSecurity = npmSecurityReport('2026-05-25T00:00:00.000Z', 'GHSA-before');
+    await fs.writeJson(path.join(bundleDir, 'security-report.json'), beforeSecurity, { spaces: 2 });
     await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
     const before = await captureBundleState(bundleDir);
     const afterManifest: BundleManifest = {
@@ -158,6 +187,10 @@ describe('run history', () => {
       ],
     };
     const report = collectReport(bundleDir, '2026-05-25T00:01:00.000Z');
+    report.security = npmSecurityReport('2026-05-25T00:01:00.000Z', 'GHSA-after');
+    const securityDeltas = {
+      npm: createNpmSecurityDeltaReport(report.security, before.npmSecurityReport),
+    };
     const pruneReport: BundlePruneReport = {
       actions: [
         {
@@ -190,6 +223,7 @@ describe('run history', () => {
       pruneReport,
       rangeResolutionPolicy: 'reuse-stable',
       report,
+      securityDeltas,
       tagResolutionPolicy: 'reuse-stable',
     });
 
@@ -206,6 +240,16 @@ describe('run history', () => {
     await expect(fs.pathExists(path.join(historyDir, 'seed-manifest.after.json'))).resolves.toBe(
       true
     );
+    await expect(
+      fs.readJson(path.join(historyDir, 'security-report.before.json'))
+    ).resolves.toMatchObject({ generatedAt: '2026-05-25T00:00:00.000Z' });
+    await expect(
+      fs.readJson(path.join(historyDir, 'security-report.after.json'))
+    ).resolves.toMatchObject({ generatedAt: '2026-05-25T00:01:00.000Z' });
+    await expect(fs.readJson(path.join(historyDir, 'security-delta.json'))).resolves.toMatchObject({
+      comparison: { status: 'compared' },
+      summary: { added: 1, removed: 1 },
+    });
     await expect(
       fs.readJson(path.join(historyDir, 'resolution-changes.json'))
     ).resolves.toMatchObject({
@@ -277,6 +321,32 @@ describe('run history', () => {
     });
 
     await expect(fs.pathExists(path.join(historyDir, 'prune-report.json'))).resolves.toBe(false);
+  });
+
+  it('does not advance the security baseline after an unsuccessful download', async () => {
+    const activeBefore = npmSecurityReport('2026-05-25T00:00:00.000Z', 'GHSA-before-failed-run');
+    await fs.writeJson(path.join(bundleDir, 'security-report.json'), activeBefore, { spaces: 2 });
+    const before = await captureBundleState(bundleDir);
+    const current = npmSecurityReport('2026-05-25T00:04:00.000Z', 'GHSA-from-failed-run');
+    await fs.writeJson(path.join(bundleDir, 'security-report.json'), current, { spaces: 2 });
+    const report = collectReport(bundleDir, '2026-05-25T00:04:00.000Z');
+    report.security = current;
+    report.wroteBundle = false;
+
+    await writeDownloadRunHistory({
+      before,
+      bundleDir,
+      rangeResolutionPolicy: 'reuse-stable',
+      report,
+      securityDeltas: {
+        npm: createNpmSecurityDeltaReport(current, before.npmSecurityReport),
+      },
+      tagResolutionPolicy: 'reuse-stable',
+    });
+
+    const next = await captureBundleState(bundleDir);
+    expect(next.npmSecurityReport?.generatedAt).toBe('2026-05-25T00:00:00.000Z');
+    expect(next.npmSecurityReport?.advisories[0]?.id).toBe('GHSA-before-failed-run');
   });
 
   it('allows download history to start from an obsolete Python application bundle', async () => {

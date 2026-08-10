@@ -2,6 +2,13 @@
 
 ## 0.1.0
 
+- Added event-based npm and Python security reporting. Complete vulnerability and
+  lifecycle inventories remain in the evidence reports, while normal download output
+  warns only about findings added since the previous successful scan. The first
+  successful scan creates a quiet baseline, resolved findings are counted, exact
+  lifecycle approvals suppress later alerts, and download history preserves security
+  reports before/after together with their deltas. Verify treats both inventories as
+  neutral recorded evidence; blocking findings and scanner failures remain errors.
 - Fixed repeated npm graph analysis with the default release-age quarantine so stable
   exact versions reuse cached dependency metadata and publication timestamps instead of
   querying the source registry again. Existing caches are upgraded from the active seed

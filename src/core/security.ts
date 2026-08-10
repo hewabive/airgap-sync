@@ -39,6 +39,7 @@ export interface NpmSecurityConsoleSummary {
   blockingAdvisories: number;
   blockingStatic: number;
   details: NpmSecurityConsoleDetail[];
+  lifecycleScripts: number;
   omitted: number;
   scannerErrors: number;
   warningAdvisories: number;
@@ -157,6 +158,9 @@ export function summarizeNpmSecurityReport(
     (finding) => finding.severity === 'warning' && !finding.allowed
   );
   const approvedStatic = report.staticFindings.filter((finding) => finding.allowed);
+  const lifecycleScripts = report.staticFindings.filter(
+    (finding) => finding.type === 'lifecycle-script'
+  );
   const detailCandidates: NpmSecurityConsoleDetail[] = [
     ...report.errors.map((error) => ({
       level: 'error' as const,
@@ -170,17 +174,6 @@ export function summarizeNpmSecurityReport(
       level: 'error' as const,
       message: `Blocked static finding [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
     })),
-    ...warningStatic.map((finding) => ({
-      level: 'warning' as const,
-      message:
-        finding.type === 'lifecycle-script'
-          ? `Lifecycle script [${findingSubject(finding)}] ${finding.field}: ${finding.value}`
-          : `Static warning [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
-    })),
-    ...approvedStatic.map((finding) => ({
-      level: 'info' as const,
-      message: `Approved static finding [${findingSubject(finding)}] ${finding.field}: ${finding.message}`,
-    })),
   ];
   const maxDetails = Math.max(0, Math.floor(options.maxDetails ?? 20));
 
@@ -190,6 +183,7 @@ export function summarizeNpmSecurityReport(
     blockingAdvisories: blockingAdvisories.length,
     blockingStatic: blockingStatic.length,
     details: detailCandidates.slice(0, maxDetails),
+    lifecycleScripts: lifecycleScripts.length,
     omitted: Math.max(0, detailCandidates.length - maxDetails),
     scannerErrors: report.errors.length,
     warningAdvisories: warningAdvisories.length,

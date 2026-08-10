@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as tar from 'tar';
 import * as fs from '../src/core/fs.js';
+import { semanticDigest } from '../src/core/canonical-json.js';
+import { defaultNpmSecurityPolicy } from '../src/core/security.js';
 import { runGitCommand } from '../src/core/git-fetch.js';
 import { verifyBundle } from '../src/core/verify.js';
 import type {
@@ -206,7 +208,7 @@ const applyReport: ApplyBundleReport = {
 
 async function writeTarball(
   filePath: string,
-  packageJson: { name: string; version: string }
+  packageJson: { name: string; scripts?: Record<string, string>; version: string }
 ): Promise<void> {
   const rootDir = path.join(bundleDir, 'tarball-root');
   const packageDir = path.join(rootDir, 'package');
@@ -340,6 +342,67 @@ describe('verifyBundle', () => {
       errors: 0,
       warnings: 0,
     });
+  });
+
+  it('treats lifecycle scripts as neutral recorded inventory during verify', async () => {
+    await writeValidBundle();
+    const tarballPath = path.join(bundleDir, 'packages/demo-1.0.0.tgz');
+    await writeTarball(tarballPath, {
+      name: 'demo',
+      scripts: { postinstall: 'node setup.js' },
+      version: '1.0.0',
+    });
+    const sha256 = createHash('sha256')
+      .update(await fs.readFile(tarballPath))
+      .digest('hex');
+    const secureManifest: BundleManifest = {
+      ...manifest,
+      packages: [{ ...manifest.packages[0]!, sha256 }],
+      schemaVersion: 2,
+    };
+    await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), secureManifest, { spaces: 2 });
+    await fs.writeJson(
+      path.join(bundleDir, 'security-report.json'),
+      {
+        advisories: [],
+        errors: [],
+        generatedAt: '2026-05-21T00:02:00.000Z',
+        manifestSha256: semanticDigest(secureManifest),
+        ok: true,
+        packageCount: 1,
+        policy: defaultNpmSecurityPolicy,
+        provider: { name: 'OSV', url: 'https://api.osv.dev/v1/querybatch' },
+        schemaVersion: 1,
+        staticFindings: [
+          {
+            allowed: false,
+            field: 'scripts.postinstall',
+            message: 'demo@1.0.0 declares postinstall lifecycle code',
+            name: 'demo',
+            severity: 'warning',
+            sha256,
+            type: 'lifecycle-script',
+            value: 'node setup.js',
+            version: '1.0.0',
+          },
+        ],
+      },
+      { spaces: 2 }
+    );
+    await fs.writeJson(path.join(bundleDir, 'apply-report.json'), applyReport, { spaces: 2 });
+
+    const report = await verifyBundle({
+      bundleDir,
+      generatedAt: '2026-05-21T00:03:00.000Z',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.summary.warnings).toBe(0);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'npm-lifecycle-inventory', status: 'ok' }),
+      ])
+    );
   });
 
   it('warns when workspace snapshot is missing', async () => {

@@ -209,6 +209,7 @@ export {
   writePublishRunHistory,
 } from './core/run-history.js';
 export type {
+  BundleStateSnapshot,
   DownloadRunRecord,
   DownloadRunScope,
   DownloadRunStatus,
@@ -253,6 +254,21 @@ export {
   summarizePythonSecurityReport,
   writePythonSecurityReport,
 } from './core/python/security.js';
+export {
+  createNpmSecurityDeltaReport,
+  createPythonSecurityDeltaReport,
+  npmSecurityDeltaReportFileName,
+  pythonSecurityDeltaReportFileName,
+  writeNpmSecurityDeltaReport,
+  writePythonSecurityDeltaReport,
+} from './core/security-delta.js';
+export type {
+  NpmSecurityDeltaReport,
+  PythonSecurityDeltaReport,
+  SecurityDeltaComparison,
+  SecurityDeltaComparisonStatus,
+  SecurityFindingChanges,
+} from './core/security-delta.js';
 export { pruneBundle, writePruneReport } from './core/prune.js';
 export { resolveRootRequirementFromMetadata, resolveRootRequirements } from './core/resolver.js';
 export { parseDependencySpec, parseRootSpecs } from './core/specs.js';
