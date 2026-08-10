@@ -118,7 +118,7 @@ Suggested test groups:
 - Python coverage/recipe/planner decisions against captured fixtures;
 - CPython 3.10–3.13 × Windows/Linux x86-64 compatibility-cell expansion;
 - minimum wheel-cover selection, including universal and `abi3` sharing;
-- complete recursive dependency trees down to leaves for every target and cell;
+- complete recursive dependency trees down to leaves for every target and retained cell;
 - plain pip and uv installs against an index populated only from the bundle;
 - additive coexistence of independent bundles in one shared Gitea PyPI owner;
 - target removal and reference-safe pruning of only local bundle artifacts;

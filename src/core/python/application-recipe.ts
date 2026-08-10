@@ -1,6 +1,6 @@
 import type { PythonApplicationIntent } from './application-intent.js';
 import { isValidPackageName, normalizePackageName } from './names.js';
-import { isValidSpecifierSet } from './pep440.js';
+import { isValidSpecifierSet, versionSatisfies } from './pep440.js';
 import { parseRequirement } from './requirements.js';
 
 export interface PythonApplicationRecipeCompatibility {
@@ -305,6 +305,10 @@ export function pythonRecipeIncompatibilityReason(
   intent: PythonApplicationIntent,
   context: PythonRecipeCandidateContext
 ): string | undefined {
+  const requiresPython = recipe?.compatibility?.requiresPython;
+  if (requiresPython && !versionSatisfies(`${context.pythonMinor}.0`, requiresPython)) {
+    return `maintained recipe supports Python ${requiresPython}`;
+  }
   for (const combination of recipe?.compatibility?.incompatibleCombinations ?? []) {
     const matches = Object.entries(combination.when).every(([key, value]) => {
       if (key === 'platformFamilyId') {

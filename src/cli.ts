@@ -828,9 +828,12 @@ function formatDownloadSummary(
     ...(pythonApplicationsLine ? [pythonApplicationsLine] : []),
     ...(pythonApplicationCoverageLine
       ? [
-          pythonApplicationCoverageLine.hasMissingInitialMinors
+          pythonApplicationCoverageLine.hasSkippedPythonMinors
             ? yellow(pythonApplicationCoverageLine.text)
             : pythonApplicationCoverageLine.text,
+          ...pythonApplicationCoverageLine.warningDetails.map((detail) =>
+            yellow(`Python application coverage WARNING: ${safeConsoleDetail(detail)}`)
+          ),
         ]
       : []),
     ...(pythonSecurityLine ? [pythonSecurityLine] : []),
@@ -1365,10 +1368,15 @@ function formatPythonApplicationPlan(plan: PythonEnvironmentPlan): string {
       ...(examples ? [`  compatible distribution examples: ${examples}`] : []),
     ];
   });
+  const skippedPythonLines = (plan.presentation?.skippedPythonMinors ?? []).map(
+    (skipped) =>
+      `Skipped CPython ${skipped.pythonMinor}: ${skipped.reasons.join('; ') || 'no complete dependency tree'}`
+  );
   return [
     `Application: ${plan.application.name} ${plan.application.version}`,
     `Runtime contract: externally provisioned CPython ${plan.preferredPythonMinor ?? 'per platform'}`,
     ...platformLines,
+    ...skippedPythonLines,
     `Locked packages: ${String(packageCount)}`,
     `Wheel variants: ${String(plan.wheels.length)}`,
     'Publication: resolved on the closed-network side',
@@ -1378,15 +1386,17 @@ function formatPythonApplicationPlan(plan: PythonEnvironmentPlan): string {
 
 function formatPythonPlanningError(error: PythonApplicationPlanningError): string {
   const branches = error.rejectedCandidates.slice(0, 8).map((rejection) => {
-    const kind = rejection.reason.startsWith('recipe-incompatible: ')
-      ? rejection.reason.slice('recipe-incompatible: '.length)
-      : rejection.reason.includes('no-wheel')
-        ? 'required binary wheels are unavailable'
-        : rejection.reason.includes('no-solution')
-          ? 'dependencies have no compatible solution'
-          : rejection.reason.includes('tool-failure')
-            ? 'the pinned planner failed'
-            : 'this application/runtime combination is unsupported';
+    const kind = rejection.reason.startsWith('application-incompatible: ')
+      ? rejection.reason.slice('application-incompatible: '.length)
+      : rejection.reason.startsWith('recipe-incompatible: ')
+        ? rejection.reason.slice('recipe-incompatible: '.length)
+        : rejection.reason.includes('no-wheel')
+          ? 'required binary wheels are unavailable'
+          : rejection.reason.includes('no-solution')
+            ? 'dependencies have no compatible solution'
+            : rejection.reason.includes('tool-failure')
+              ? 'the pinned planner failed'
+              : 'this application/runtime combination is unsupported';
     return `- ${rejection.platformFamilyId ?? 'requested coverage'}, Python ${rejection.pythonMinor}, application ${rejection.applicationVersion}: ${kind}`;
   });
   return [

@@ -367,4 +367,166 @@ describe('Python application planner', () => {
       ])
     );
   });
+
+  it('keeps every compatible Python minor and reports incomplete minors', async () => {
+    const result = await planPythonApplication({
+      cacheDir: '/cache',
+      coveragePolicy: normalizePlatformCoveragePolicy({
+        id: 'desktop-x64',
+        platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+      }),
+      createdAt: '2026-07-27T00:00:00.000Z',
+      index: new FixtureIndex(),
+      intent: {
+        ...intent,
+        application: { ...intent.application, version: '==1.0.0' },
+        python: {
+          policy: 'selected',
+          versions: ['3.10', '3.11', '3.12', '3.13'],
+        },
+      },
+      plannerPolicy,
+      resolver: new FixtureResolver(),
+      uvPath: '/tools/uv',
+      workDir: '/work',
+    });
+
+    expect(
+      [...new Set(result.plan.platforms.map((platform) => platform.pythonMinor))].sort()
+    ).toEqual(['3.11', '3.12']);
+    expect(result.plan.presentation?.requestedPythonMinors).toEqual([
+      '3.10',
+      '3.11',
+      '3.12',
+      '3.13',
+    ]);
+    expect(
+      result.plan.presentation?.skippedPythonMinors?.map((skipped) => skipped.pythonMinor)
+    ).toEqual(['3.10', '3.13']);
+    expect(
+      result.plan.presentation?.skippedPythonMinors?.every((skipped) =>
+        skipped.reasons.some((reason) => reason.includes('no wheel'))
+      )
+    ).toBe(true);
+  });
+
+  it('skips a root application Requires-Python mismatch without invoking the resolver', async () => {
+    class RequiresPythonIndex extends FixtureIndex {
+      override getProject(name: string): Promise<PythonProjectIndex> {
+        if (name === 'demo-app') {
+          return Promise.resolve({
+            apiVersion: '1.0',
+            files: [
+              {
+                ...file('demo_app-1.0.0-py3-none-any.whl', '1', 10),
+                requiresPython: '>=3.11',
+              },
+            ],
+            name,
+          });
+        }
+        return super.getProject(name);
+      }
+    }
+    const resolver = new FixtureResolver();
+    const result = await planPythonApplication({
+      cacheDir: '/cache',
+      coveragePolicy: normalizePlatformCoveragePolicy({
+        id: 'desktop-x64',
+        platforms: ['linux-glibc-x86_64'],
+      }),
+      createdAt: '2026-07-27T00:00:00.000Z',
+      index: new RequiresPythonIndex(),
+      intent: {
+        ...intent,
+        application: { ...intent.application, version: '==1.0.0' },
+        python: { policy: 'selected', versions: ['3.10', '3.11'] },
+      },
+      plannerPolicy,
+      resolver,
+      uvPath: '/tools/uv',
+      workDir: '/work',
+    });
+
+    expect(result.plan.presentation?.skippedPythonMinors).toEqual([
+      {
+        pythonMinor: '3.10',
+        reasons: ['application-incompatible: application files require Python >=3.11'],
+      },
+    ]);
+    expect(resolver.requests.some((request) => request.pythonMinor === '3.10')).toBe(false);
+    expect(resolver.requests.some((request) => request.pythonMinor === '3.11')).toBe(true);
+  });
+
+  it('selects the latest application release with at least one complete Python minor', async () => {
+    class PartialLatestResolver extends FixtureResolver {
+      override resolve(request: UvResolveRequest): Promise<UvResolutionEvidence> {
+        this.requests.push(request);
+        if (request.requirement.includes('==2.0.0') && request.pythonMinor === '3.11') {
+          return Promise.reject(new UvResolutionError('no-wheel', 'no Python 3.11 wheel'));
+        }
+        return Promise.resolve(
+          lockEvidence(request.requirement.includes('==2.0.0') ? '2.0.0' : '1.0.0')
+        );
+      }
+    }
+
+    const result = await planPythonApplication({
+      cacheDir: '/cache',
+      coveragePolicy: normalizePlatformCoveragePolicy({
+        id: 'desktop-x64',
+        platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+      }),
+      createdAt: '2026-07-27T00:00:00.000Z',
+      index: new FixtureIndex(),
+      intent: {
+        ...intent,
+        python: { policy: 'selected', versions: ['3.11', '3.12'] },
+      },
+      plannerPolicy,
+      resolver: new PartialLatestResolver(),
+      uvPath: '/tools/uv',
+      workDir: '/work',
+    });
+
+    expect(result.plan.application.version).toBe('2.0.0');
+    expect([...new Set(result.plan.platforms.map((platform) => platform.pythonMinor))]).toEqual([
+      '3.12',
+    ]);
+    expect(
+      result.plan.presentation?.skippedPythonMinors?.map((skipped) => skipped.pythonMinor)
+    ).toEqual(['3.11']);
+    expect(
+      result.plan.presentation?.skippedPythonMinors?.[0]?.reasons.some((reason) =>
+        reason.includes('no-wheel')
+      )
+    ).toBe(true);
+  });
+
+  it('does not treat a planner tool failure as Python incompatibility', async () => {
+    const resolver: PythonApplicationResolver = {
+      resolve: () =>
+        Promise.reject(new UvResolutionError('tool-failure', 'pinned uv could not start')),
+    };
+    await expect(
+      planPythonApplication({
+        cacheDir: '/cache',
+        coveragePolicy: normalizePlatformCoveragePolicy({
+          id: 'desktop-x64',
+          platforms: ['linux-glibc-x86_64'],
+        }),
+        createdAt: '2026-07-27T00:00:00.000Z',
+        index: new FixtureIndex(),
+        intent: {
+          ...intent,
+          application: { ...intent.application, version: '==1.0.0' },
+          python: { policy: 'selected', versions: ['3.11', '3.12'] },
+        },
+        plannerPolicy,
+        resolver,
+        uvPath: '/tools/uv',
+        workDir: '/work',
+      })
+    ).rejects.toMatchObject({ kind: 'tool-failure' });
+  });
 });

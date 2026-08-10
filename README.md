@@ -188,10 +188,11 @@ its coverage with `--coverage`/`--platform` or its runtime with `--python-versio
 `--python`. `target edit --inherit-coverage --inherit-python` removes those overrides
 and returns the application to the workspace defaults.
 
-The envelope is a class of compatible machines, not host inventory. Platform, Python,
-ABI, libc, extras, and artifact-changing features bound what must be transferred.
-Unsupported environments are reported rather than silently omitted. System packages,
-drivers, services, and model weights remain outside the Python dependency bundle.
+The envelope is a class of compatible machines, not host inventory. Platform coverage
+is required, while configured Python minors are candidates: each minor with a complete
+tree on every requested platform is bundled and incompatible minors are reported as
+skipped. System packages, drivers, services, and model weights remain outside the
+Python dependency bundle.
 
 Collection is wheels-only. The implementation brings every selected dependency tree down
 to its leaves, minimizes the union of wheels needed to cover the envelope, and verifies

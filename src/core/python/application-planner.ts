@@ -98,10 +98,13 @@ function orderedPythonMinors(
   intent: PythonApplicationIntent,
   recipe: PythonApplicationRecipe | undefined
 ): string[] {
-  if (intent.python.policy === 'selected') {
-    return intent.python.versions;
-  }
   const preferred = recipe?.compatibility?.preferredPythonMinors ?? [];
+  if (intent.python.policy === 'selected') {
+    const selected = [...new Set(intent.python.versions)];
+    return [...preferred.filter((minor) => selected.includes(minor)), ...selected].filter(
+      (minor, index, all) => all.indexOf(minor) === index
+    );
+  }
   const versionConstraint =
     intent.python.policy === 'constrained' ? intent.python.version : undefined;
   const ordered = [...preferred, ...policy.pythonMinors].filter(
@@ -109,11 +112,7 @@ function orderedPythonMinors(
   );
   return ordered.filter((minor) => {
     const version = `${minor}.0`;
-    return (
-      (!versionConstraint || versionSatisfies(version, versionConstraint)) &&
-      (!recipe?.compatibility?.requiresPython ||
-        versionSatisfies(version, recipe.compatibility.requiresPython))
-    );
+    return !versionConstraint || versionSatisfies(version, versionConstraint);
   });
 }
 
@@ -154,6 +153,36 @@ function applicationVersions(
           versionSatisfies(version, recipe.compatibility.applicationVersions))
     )
     .sort((left, right) => compareVersions(right, left));
+}
+
+function applicationPythonIncompatibilityReason(
+  project: PythonProjectIndex,
+  applicationName: string,
+  applicationVersion: string,
+  pythonMinor: string,
+  cutoff: string | undefined
+): string | undefined {
+  const files = project.files.filter((file) => {
+    if (!indexFileAllowed(file, cutoff)) {
+      return false;
+    }
+    const wheel = parseWheelFilename(file.filename);
+    return (
+      wheel?.normalizedName === normalizePackageName(applicationName) &&
+      compareVersions(wheel.version, applicationVersion) === 0
+    );
+  });
+  if (
+    files.some(
+      (file) => !file.requiresPython || versionSatisfies(`${pythonMinor}.0`, file.requiresPython)
+    )
+  ) {
+    return undefined;
+  }
+  const constraints = [...new Set(files.flatMap((file) => file.requiresPython ?? []))].sort();
+  return constraints.length > 0
+    ? `application files require Python ${constraints.join(' or ')}`
+    : undefined;
 }
 
 export function generatePythonPlannerCandidates(options: {
@@ -292,6 +321,13 @@ interface EnumeratedBranch {
   }[];
 }
 
+class PythonBranchCompatibilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PythonBranchCompatibilityError';
+  }
+}
+
 type VersionedLockedPackage = PythonLockedPackage & { version: string };
 
 function lockedRegistryPackages(lock: PythonLockInput): VersionedLockedPackage[] {
@@ -355,7 +391,7 @@ async function enumerateBranchArtifacts(options: {
       ({ wheel }) => wheelPriorityInEnvironment(wheel, baselineEnvironment) !== undefined
     );
     if (installable.length === 0) {
-      throw new Error(
+      throw new PythonBranchCompatibilityError(
         `${locked.name}==${locked.version} has no wheel for ${options.platformFamilyId} on Python ${options.pythonMinor}${options.glibc ? ` at glibc ${options.glibc}` : ''}`
       );
     }
@@ -547,6 +583,7 @@ function selectMinimumWheelCover(branches: ResolvedBranchArtifacts[]): void {
 
 async function resolveCandidate(
   options: PlanPythonApplicationOptions,
+  rootProject: PythonProjectIndex,
   applicationVersion: string,
   pythonMinor: string,
   rejectedCandidates: PythonPlannerRejection[]
@@ -561,6 +598,21 @@ async function resolveCandidate(
     }
   | undefined
 > {
+  const applicationIncompatibility = applicationPythonIncompatibilityReason(
+    rootProject,
+    options.intent.application.name,
+    applicationVersion,
+    pythonMinor,
+    options.cutoff
+  );
+  if (applicationIncompatibility) {
+    rejectedCandidates.push({
+      applicationVersion,
+      pythonMinor,
+      reason: `application-incompatible: ${applicationIncompatibility}`,
+    });
+    return undefined;
+  }
   const policy = options.plannerPolicy ?? defaultPythonPlannerPolicy;
   const branches: {
     artifacts: EnumeratedBranch;
@@ -636,10 +688,21 @@ async function resolveCandidate(
         };
         break;
       } catch (error) {
+        if (
+          error instanceof UvResolutionError &&
+          error.kind !== 'no-solution' &&
+          error.kind !== 'no-wheel'
+        ) {
+          throw error;
+        }
+        if (
+          !(error instanceof UvResolutionError) &&
+          !(error instanceof PythonBranchCompatibilityError)
+        ) {
+          throw error;
+        }
         const detail =
-          error instanceof UvResolutionError
-            ? `${error.kind}: ${error.message}`
-            : (error as Error).message;
+          error instanceof UvResolutionError ? `${error.kind}: ${error.message}` : error.message;
         baselineFailures.push(`${glibc ? `glibc ${glibc}: ` : ''}${detail}`);
       }
     }
@@ -694,111 +757,117 @@ export async function planPythonApplication(
     const pythonMinors = uniqueCandidates
       .filter((candidate) => candidate.applicationVersion === applicationVersion)
       .map((candidate) => candidate.pythonMinor);
-    const attempts = [pythonMinors];
-    for (const attempt of attempts) {
-      const resolvedBranches: {
-        artifacts: EnumeratedBranch;
-        evidence: UvResolutionEvidence;
-        glibc?: string;
-        platformFamilyId: BuiltInPlatformFamilyId;
-        pythonMinor: string;
-      }[] = [];
-      let complete = true;
-      for (const pythonMinor of attempt) {
-        const resolved = await resolveCandidate(
-          options,
-          applicationVersion,
-          pythonMinor,
-          rejectedCandidates
-        );
-        if (!resolved) {
-          complete = false;
-          break;
-        }
+    const resolvedBranches: {
+      artifacts: EnumeratedBranch;
+      evidence: UvResolutionEvidence;
+      glibc?: string;
+      platformFamilyId: BuiltInPlatformFamilyId;
+      pythonMinor: string;
+    }[] = [];
+    for (const pythonMinor of pythonMinors) {
+      const resolved = await resolveCandidate(
+        options,
+        rootProject,
+        applicationVersion,
+        pythonMinor,
+        rejectedCandidates
+      );
+      if (resolved) {
         resolvedBranches.push(...resolved.branches.map((branch) => ({ ...branch, pythonMinor })));
       }
-      if (!complete) {
-        continue;
-      }
-      selectMinimumWheelCover(resolvedBranches);
-      const families = options.coveragePolicy.platforms.map((id) => {
-        const family = getBuiltInPlatformFamily(id);
-        if (!family) {
-          throw new Error(`Unknown platform family: ${id}`);
-        }
-        return family;
-      });
-      const plan = createPythonEnvironmentPlan({
-        application: {
-          name: normalizePackageName(options.intent.application.name),
-          version: applicationVersion,
-        },
-        coverage: {
-          digest: platformCoveragePolicyDigest(options.coveragePolicy),
-          families,
-          policy: options.coveragePolicy,
-        },
-        createdAt,
-        intent: options.intent,
-        platforms: resolvedBranches.map((branch) => ({
-          packages: branch.artifacts.packages,
-          platformFamilyId: branch.platformFamilyId,
-          pylockPath: pythonPlatformPylockPath(branch.platformFamilyId, branch.pythonMinor),
-          pythonMinor: branch.pythonMinor,
-          rejectedReasons: [],
-          requirementsLockPath: pythonPlatformRequirementsLockPath(
-            branch.platformFamilyId,
-            branch.pythonMinor
-          ),
-          requiresPython: `>=${branch.pythonMinor},<3.${String(Number(branch.pythonMinor.split('.')[1]) + 1)}`,
-          status: 'supported',
-          ...(branch.artifacts.supportBoundary
-            ? { supportBoundary: branch.artifacts.supportBoundary }
-            : {}),
-        })),
-        preferredPythonMinor: attempt[0]!,
-        ...(rejectedCandidates.length > 0
-          ? {
-              presentation: {
-                rejectedCandidateSummaries: rejectedCandidates.map(
-                  (rejection) =>
-                    `${rejection.applicationVersion} / Python ${rejection.pythonMinor}${rejection.platformFamilyId ? ` / ${rejection.platformFamilyId}` : ''}: ${rejection.reason}`
-                ),
-              },
-            }
-          : {}),
-        ...(options.recipe
-          ? {
-              recipe: {
-                digest: semanticDigest(options.recipe),
-                id: options.recipe.id,
-                version: options.recipe.version,
-              },
-            }
-          : {}),
-        resolver: {
-          ...(options.cutoff ? { cutoff: options.cutoff } : {}),
-          engine: 'uv',
-          policyVersion: (options.plannerPolicy ?? defaultPythonPlannerPolicy).version,
-          version: uvToolManifest.version,
-        },
-        schemaVersion: 2,
-        wheels: mergePlanWheels(resolvedBranches),
-      });
-      return {
-        evidence: resolvedBranches.map((branch) => ({
-          ...(branch.glibc ? { glibc: branch.glibc } : {}),
-          platformFamilyId: branch.platformFamilyId,
-          pylock: branch.evidence,
-          pythonMinor: branch.pythonMinor,
-        })),
-        plan,
-        rejectedCandidates,
-      };
     }
+    if (resolvedBranches.length === 0) {
+      continue;
+    }
+    selectMinimumWheelCover(resolvedBranches);
+    const families = options.coveragePolicy.platforms.map((id) => {
+      const family = getBuiltInPlatformFamily(id);
+      if (!family) {
+        throw new Error(`Unknown platform family: ${id}`);
+      }
+      return family;
+    });
+    const plan = createPythonEnvironmentPlan({
+      application: {
+        name: normalizePackageName(options.intent.application.name),
+        version: applicationVersion,
+      },
+      coverage: {
+        digest: platformCoveragePolicyDigest(options.coveragePolicy),
+        families,
+        policy: options.coveragePolicy,
+      },
+      createdAt,
+      intent: options.intent,
+      platforms: resolvedBranches.map((branch) => ({
+        packages: branch.artifacts.packages,
+        platformFamilyId: branch.platformFamilyId,
+        pylockPath: pythonPlatformPylockPath(branch.platformFamilyId, branch.pythonMinor),
+        pythonMinor: branch.pythonMinor,
+        rejectedReasons: [],
+        requirementsLockPath: pythonPlatformRequirementsLockPath(
+          branch.platformFamilyId,
+          branch.pythonMinor
+        ),
+        requiresPython: `>=${branch.pythonMinor},<3.${String(Number(branch.pythonMinor.split('.')[1]) + 1)}`,
+        status: 'supported',
+        ...(branch.artifacts.supportBoundary
+          ? { supportBoundary: branch.artifacts.supportBoundary }
+          : {}),
+      })),
+      preferredPythonMinor: resolvedBranches[0]!.pythonMinor,
+      presentation: {
+        rejectedCandidateSummaries: rejectedCandidates.map(
+          (rejection) =>
+            `${rejection.applicationVersion} / Python ${rejection.pythonMinor}${rejection.platformFamilyId ? ` / ${rejection.platformFamilyId}` : ''}: ${rejection.reason}`
+        ),
+        requestedPythonMinors: pythonMinors,
+        skippedPythonMinors: pythonMinors
+          .filter(
+            (pythonMinor) => !resolvedBranches.some((branch) => branch.pythonMinor === pythonMinor)
+          )
+          .map((pythonMinor) => ({
+            pythonMinor,
+            reasons: rejectedCandidates
+              .filter(
+                (rejection) =>
+                  rejection.applicationVersion === applicationVersion &&
+                  rejection.pythonMinor === pythonMinor
+              )
+              .map((rejection) => rejection.reason),
+          })),
+      },
+      ...(options.recipe
+        ? {
+            recipe: {
+              digest: semanticDigest(options.recipe),
+              id: options.recipe.id,
+              version: options.recipe.version,
+            },
+          }
+        : {}),
+      resolver: {
+        ...(options.cutoff ? { cutoff: options.cutoff } : {}),
+        engine: 'uv',
+        policyVersion: (options.plannerPolicy ?? defaultPythonPlannerPolicy).version,
+        version: uvToolManifest.version,
+      },
+      schemaVersion: 2,
+      wheels: mergePlanWheels(resolvedBranches),
+    });
+    return {
+      evidence: resolvedBranches.map((branch) => ({
+        ...(branch.glibc ? { glibc: branch.glibc } : {}),
+        platformFamilyId: branch.platformFamilyId,
+        pylock: branch.evidence,
+        pythonMinor: branch.pythonMinor,
+      })),
+      plan,
+      rejectedCandidates,
+    };
   }
   throw new PythonApplicationPlanningError(
-    `No application version and Python selection covers every requested cell for ${options.coveragePolicy.platforms.join(', ')}`,
+    `No application version has a complete dependency tree for any requested Python minor on ${options.coveragePolicy.platforms.join(', ')}`,
     rejectedCandidates
   );
 }

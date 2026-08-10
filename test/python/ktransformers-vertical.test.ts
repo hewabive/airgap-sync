@@ -222,7 +222,7 @@ describe('KTransformers vertical slice', () => {
     expect(resolver.requests).toEqual([]);
   });
 
-  it('creates a complete Linux plan for every requested Python minor', async () => {
+  it('creates a complete Linux plan for every compatible Python minor', async () => {
     const resolver = new KTransformersResolver();
     const result = await planPythonApplication({
       cacheDir: '/cache',
@@ -237,6 +237,10 @@ describe('KTransformers vertical slice', () => {
         ...intent,
         coverage: {
           policyId: 'ktransformers-linux-x64',
+        },
+        python: {
+          policy: 'selected',
+          versions: ['3.10', '3.11', '3.12', '3.13'],
         },
       },
       plannerPolicy,
@@ -256,6 +260,17 @@ describe('KTransformers vertical slice', () => {
     });
 
     expect(plan.preferredPythonMinor).toBe('3.11');
+    expect(plan.presentation?.requestedPythonMinors).toEqual(['3.11', '3.12', '3.10', '3.13']);
+    expect(plan.presentation?.skippedPythonMinors).toEqual([
+      {
+        pythonMinor: '3.10',
+        reasons: ['recipe-incompatible: maintained recipe supports Python >=3.11,<3.13'],
+      },
+      {
+        pythonMinor: '3.13',
+        reasons: ['recipe-incompatible: maintained recipe supports Python >=3.11,<3.13'],
+      },
+    ]);
     expect(plan.recipe).toMatchObject({
       id: 'ktransformers-0.6.1.post1',
       version: '2026-07-27',

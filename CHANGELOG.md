@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Python application runtime lists now define candidate CPython minors. Planning keeps
+  every minor with a complete wheels-only dependency tree across all requested
+  platforms, reports incompatible minors as skipped, and still fails on planner,
+  index, or other infrastructure errors.
 - Added workspace-wide Python application coverage and runtime defaults. New
   `python-app` targets inherit both settings unless they declare independent overrides;
   target editing and the interactive menu can restore inheritance explicitly.
@@ -73,9 +77,9 @@
   publish credentials can be saved without visiting the settings menu.
 - Made the collector's pinned uv an internal planning tool; normal application targets
   no longer ask for consumer uv versions or transfer CPython/uv executables.
-- Added repeatable `python-app --python-version` selection and complete matrix planning,
-  defaulting new targets to CPython 3.10–3.13 and retaining one resolved tree per
-  requested platform/Python cell.
+- Added repeatable `python-app --python-version` candidate selection, defaulting new
+  targets to CPython 3.10–3.13 and retaining one resolved tree per compatible
+  platform/Python cell.
 - Added exact compatibility-cell references and minimum practical wheel-cover
   selection so universal and `abi3` wheels are shared while redundant builds are
   omitted.

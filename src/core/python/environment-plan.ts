@@ -36,6 +36,11 @@ export interface PythonPlatformPlan {
 
 export interface PythonEnvironmentPlanPresentation {
   rejectedCandidateSummaries?: string[];
+  requestedPythonMinors?: string[];
+  skippedPythonMinors?: {
+    pythonMinor: string;
+    reasons: string[];
+  }[];
   warnings?: string[];
 }
 

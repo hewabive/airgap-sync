@@ -88,8 +88,10 @@ The normal input is a `python-app` target containing:
 the effective envelope when a target omits `coverage` and `python`. Target fields replace
 their corresponding default independently; lists are not merged. Changing a shared
 default invalidates planning evidence for inheriting targets, while explicit overrides
-remain unchanged. Project metadata such as `Requires-Python` is validated against the
-effective envelope and does not silently narrow it.
+remain unchanged. Python minors in the effective runtime envelope are candidates.
+Project metadata such as `Requires-Python`, recipe policy, dependency resolution, and
+wheel availability may narrow them, with every omission recorded in the plan and final
+download report.
 
 An application-specific recipe may describe package-index choices, required extras,
 known incompatibilities, and diagnostic metadata. Recipes are policy adapters, not
@@ -101,10 +103,12 @@ be collected. Driver installation remains outside `airgap-sync`.
 
 ## Dependency Closure And Target Lifecycle
 
-Python follows the same transfer model as npm. For each application target and every
-declared compatibility cell, the collector resolves one complete recursive dependency
-tree and brings every wheel required by that tree. A successful bundle has no missing
-dependency edge and needs no source index after transfer.
+Python follows the same transfer model as npm. For each application target, the
+collector evaluates every candidate Python minor. A minor is retained only when one
+complete recursive dependency tree exists on every requested platform, and every wheel
+required by those trees is transferred. Incompatible minors are reported and skipped;
+failure to retain any minor rejects the target. A successful bundle has no missing
+dependency edge in any retained cell and needs no source index after transfer.
 
 The collector may use a pinned resolver version to choose that tree. The pin is an
 implementation and tool-integrity detail: it is not a required consumer version, does
@@ -138,7 +142,7 @@ by pip, uv, Poetry, PDM, or another client. In particular, it does not:
   versions.
 
 The guarantee is availability: every bundle contributed by `airgap-sync` contains a
-complete installable tree for its own targets and declared compatibility cells.
+complete installable tree for its own targets and retained compatibility cells.
 Additional packages published by another process are an allowed additive extension of
 the shared registry. Deletion, replacement, or corruption of previously published
 artifacts is outside this guarantee.
@@ -146,11 +150,12 @@ artifacts is outside this guarantee.
 ## Artifact Selection And Size
 
 Only compatible wheels are collected in the normal path. Source distributions and
-automatic PEP 517 builds remain excluded; an absent wheel is a coverage failure or a
-request for an explicitly supplied, reviewed wheel.
+automatic PEP 517 builds remain excluded; an absent wheel rejects that Python minor. If
+no minor remains, it is a target coverage failure or a request for an explicitly
+supplied, reviewed wheel.
 
-The desired artifact set is the smallest set that both covers every cell in the
-declared compatibility envelope and contains the complete dependency trees selected
+The desired artifact set is the smallest set that both covers every retained cell in
+the compatibility envelope and contains the complete dependency trees selected
 for the active targets. This is not the same as downloading every compatible wheel:
 
 - universal and `abi3` wheels should be reused across environment cells;
@@ -220,9 +225,9 @@ normal repository resolution.
 
 The application path now:
 
-- expands an unspecified Python selection to CPython 3.10–3.13;
-- resolves every requested platform/Python compatibility cell with the collector's
-  pinned `uv`;
+- expands an unspecified Python selection to candidate CPython minors 3.10–3.13;
+- retains each Python minor that resolves on every requested platform with the
+  collector's pinned `uv`, while recording incompatible minors as skipped;
 - keeps a minimum practical wheel cover for the resulting trees and deduplicates files
   by content;
 - records exact cell references and checks dependency closure and wheel compatibility

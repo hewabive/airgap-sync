@@ -45,7 +45,7 @@ explicit.
    internal implementation detail. Consumer package-manager versions do not create
    separate application dependency trees.
 7. Every application target must contribute a complete recursive dependency tree for
-   every declared compatibility cell. No dependency edge may rely on the public index
+   every retained compatibility cell. No dependency edge may rely on the public index
    after transfer.
 8. There is no requirement to reproduce the collector's exact graph during consumer
    installation. Standard clients may select any installable graph available in the

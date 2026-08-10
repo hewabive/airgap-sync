@@ -261,6 +261,12 @@ describe('Python application bundle', () => {
         sourceUrl,
       })
     );
+    first.plan.presentation = {
+      requestedPythonMinors: ['3.10', '3.11'],
+      skippedPythonMinors: [
+        { pythonMinor: '3.10', reasons: ['application requires Python >=3.11'] },
+      ],
+    };
     const second = activePlan(
       createPlan({
         application: 'second-app',
@@ -329,6 +335,12 @@ describe('Python application bundle', () => {
       expect.stringContaining('first-app--linux-x64/lock/'),
       expect.stringContaining('second-app--linux-x64/lock/'),
     ]);
+    expect(index?.applications[0]).toMatchObject({
+      requestedPythonMinors: ['3.10', '3.11'],
+      skippedPythonMinors: [
+        { pythonMinor: '3.10', reasons: ['application requires Python >=3.11'] },
+      ],
+    });
     const compatibilityManifest = await fs.readJson<PythonSeedManifest>(
       path.join(bundleDir, 'python-seed-manifest.json')
     );

@@ -96,7 +96,12 @@ export interface PythonApplicationBundleEntry {
   planDiffPath: string;
   planPath: string;
   prerequisiteReportPath: string;
+  requestedPythonMinors?: string[];
   selectionId?: string;
+  skippedPythonMinors?: {
+    pythonMinor: string;
+    reasons: string[];
+  }[];
   targetId: string;
 }
 
@@ -965,7 +970,13 @@ export async function downloadPythonApplicationPlans(
           pythonApplicationPlanDirectory(targetId),
           'prerequisites.json'
         ),
+        ...(activePlan.plan.presentation?.requestedPythonMinors
+          ? { requestedPythonMinors: activePlan.plan.presentation.requestedPythonMinors }
+          : {}),
         ...(selectionId ? { selectionId } : {}),
+        ...(activePlan.plan.presentation?.skippedPythonMinors?.length
+          ? { skippedPythonMinors: activePlan.plan.presentation.skippedPythonMinors }
+          : {}),
         targetId,
       };
     })

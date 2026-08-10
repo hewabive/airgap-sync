@@ -90,17 +90,18 @@ requirements; no separate npm target is needed.
 `python-app` is the normal Python target. By default it inherits both coverage and the
 Python runtime matrix from `python.applicationDefaults`. `--coverage` references a named
 workspace policy; repeatable `--platform` creates target-local coverage instead. Repeat
-`--python-version` to override the inherited minor branches, or use `--python` for an
-advanced target-local constraint. `target edit --inherit-coverage` and
+`--python-version` to override the inherited candidate minors, or use `--python` for an
+advanced target-local candidate constraint. `target edit --inherit-coverage` and
 `--inherit-python` remove the corresponding overrides. The initial maximum supported
-envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64. The implementation
-covers the effective declared range by
-collecting a complete recursive dependency tree for every compatibility cell rather
-than requiring consumers to use its planning lock. Repeat
+envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64. Each Python minor is
+retained only when its complete recursive dependency tree resolves on every requested
+platform; incompatible minors are skipped with reasons, and a target fails when no
+minor remains. Planner and index failures remain fatal. Repeat
 `--include-version` with
 an exact PEP 440 version or `latest` to include alternative application releases in one
-target. Every exact release must satisfy the requested Python/platform matrix; `latest`
-falls back only among stable releases until it finds a complete closure. Exact and
+target. Every exact release must support at least one candidate Python minor; `latest`
+falls back among stable releases until it finds one, then retains every compatible
+minor for that release. Exact and
 latest selectors resolving to the same release produce one bundle variant. `--version`
 retains the single-release constraint workflow and cannot be combined with
 `--include-version`. `--python` cannot be combined with `--python-version`. `--extra`
