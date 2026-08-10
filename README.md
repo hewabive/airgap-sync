@@ -101,8 +101,8 @@ The menu covers the normal workflow:
 - **Publish updates**: publish the bundle into the closed-network registry and Git host.
 - **Verify installs**: run package-manager installs for configured Git targets.
 - **Diagnostics**: inspect, validate, and summarize the bundle.
-- **Settings**: configure endpoints, Python application publication/coverage, defaults,
-  and saved credentials.
+- **Settings**: configure endpoints, Python application publication, shared platform/Python
+  defaults, and saved credentials.
 
 The same workflow can be scripted:
 
@@ -111,9 +111,7 @@ The same workflow can be scripted:
 npm exec -- airgap-sync init
 npm exec -- airgap-sync target add git https://github.com/acme/app.git --branch main
 npm exec -- airgap-sync target add npm eslint@latest
-npm exec -- airgap-sync target add python-app orjson --coverage desktop-x64 \
-  --python-version 3.10 --python-version 3.11 \
-  --python-version 3.12 --python-version 3.13
+npm exec -- airgap-sync target add python-app orjson
 npm exec -- airgap-sync target add cpython-distributions \
   --from-minor 3.10 \
   --platform linux-glibc-x86_64 --platform windows-x86_64 \
@@ -177,18 +175,18 @@ The initial maximum compatibility envelope is deliberately narrow:
 - glibc-based Linux x86-64;
 - wheels from PEP 503/691-compatible indexes.
 
-The normal workspace input remains a Python application plus a bounded platform and
-Python range:
+Python applications inherit the workspace platform and Python matrix by default, so the
+normal target contains only application-specific intent:
 
 ```bash
-npm exec -- airgap-sync target add python-app APP \
-  --coverage desktop-x64 \
-  --python-version 3.10 \
-  --python-version 3.11 \
-  --python-version 3.12 \
-  --python-version 3.13
+npm exec -- airgap-sync target add python-app APP
 npm exec -- airgap-sync download
 ```
+
+The shared envelope is stored under `python.applicationDefaults`. A target may override
+its coverage with `--coverage`/`--platform` or its runtime with `--python-version`/
+`--python`. `target edit --inherit-coverage --inherit-python` removes those overrides
+and returns the application to the workspace defaults.
 
 The envelope is a class of compatible machines, not host inventory. Platform, Python,
 ABI, libc, extras, and artifact-changing features bound what must be transferred.

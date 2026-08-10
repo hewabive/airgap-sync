@@ -79,10 +79,17 @@ artifacts and do not belong in the Python bundle.
 The normal input is a `python-app` target containing:
 
 - the application package and version selection;
-- a named or inline compatibility envelope;
+- optional overrides for the workspace compatibility envelope and Python runtime matrix;
 - selected extras;
 - explicit artifact-changing features;
 - optional reviewed application policy.
+
+`python.applicationDefaults.coverage` and `python.applicationDefaults.runtime` define
+the effective envelope when a target omits `coverage` and `python`. Target fields replace
+their corresponding default independently; lists are not merged. Changing a shared
+default invalidates planning evidence for inheriting targets, while explicit overrides
+remain unchanged. Project metadata such as `Requires-Python` is validated against the
+effective envelope and does not silently narrow it.
 
 An application-specific recipe may describe package-index choices, required extras,
 known incompatibilities, and diagnostic metadata. Recipes are policy adapters, not

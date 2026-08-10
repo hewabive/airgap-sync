@@ -2,6 +2,9 @@
 
 ## 0.1.0
 
+- Added workspace-wide Python application coverage and runtime defaults. New
+  `python-app` targets inherit both settings unless they declare independent overrides;
+  target editing and the interactive menu can restore inheritance explicitly.
 - Added event-based npm and Python security reporting. Complete vulnerability and
   lifecycle inventories remain in the evidence reports, while normal download output
   warns only about findings added since the previous successful scan. The first

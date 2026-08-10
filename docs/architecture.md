@@ -199,8 +199,10 @@ metadata from the source registry without downloading tarballs.
 
 ## Python Application Policy
 
-The normal Python input is a `python-app` target: application intent plus a bounded
-compatibility envelope. The initial maximum envelope is CPython 3.10–3.13 on Windows
+The normal Python input is a `python-app` target: application intent plus an effective
+bounded compatibility envelope. Platform coverage and Python versions normally come
+from workspace `python.applicationDefaults`; target-local fields are independent
+overrides for exceptional applications. The initial maximum envelope is CPython 3.10–3.13 on Windows
 x86-64 and glibc Linux x86-64. A platform family describes artifact compatibility, not
 a distribution name or host record, so collection stays independent from the online
 machine.

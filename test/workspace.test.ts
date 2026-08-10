@@ -71,6 +71,13 @@ describe('workspace config', () => {
       gitOwnerStrategy: 'preserve',
       output: './airgap-bundle',
       python: {
+        applicationDefaults: {
+          coverage: 'desktop-x64',
+          runtime: {
+            policy: 'selected',
+            versions: ['3.10', '3.11', '3.12', '3.13'],
+          },
+        },
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -210,6 +217,13 @@ describe('workspace config', () => {
         type: 'cpython-distributions',
       })
     ).toEqual(['fromMinor', 'platforms', 'latest', 'windowDays']);
+    expect(
+      workspaceTargetEditableFields({
+        application: { extras: [], features: {} },
+        spec: 'orjson',
+        type: 'python-app',
+      })
+    ).toEqual(['coverage', 'python', 'versionSelection']);
 
     await initWorkspace({ workspaceDir: tempDir });
     await addWorkspaceTarget(tempDir, { spec: 'eslint@latest', type: 'npm' });
@@ -306,6 +320,89 @@ describe('workspace config', () => {
         versions: ['3.12', '3.13'],
       },
     });
+  });
+
+  it('inherits workspace Python defaults and can add or clear independent overrides', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.coveragePolicies![0] = {
+      ...config.coveragePolicies![0]!,
+      platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+    };
+    config.python!.applicationDefaults = {
+      coverage: 'desktop-x64',
+      runtime: { policy: 'selected', versions: ['3.11', '3.12'] },
+    };
+    await writeWorkspaceConfig(tempDir, config);
+
+    await addWorkspaceTarget(tempDir, {
+      application: { extras: [], features: {} },
+      spec: 'orjson',
+      type: 'python-app',
+    });
+
+    let current = await readWorkspaceConfig(tempDir);
+    let target = current.targets[0];
+    expect(target).toEqual({
+      application: { extras: [], features: {} },
+      spec: 'orjson',
+      type: 'python-app',
+    });
+    if (target?.type !== 'python-app') throw new Error('Expected a python-app target');
+    expect(resolveWorkspacePythonApplication(current, target)).toMatchObject({
+      coveragePolicy: {
+        platforms: ['windows-x86_64', 'linux-glibc-x86_64'],
+      },
+      intent: {
+        python: { policy: 'selected', versions: ['3.11', '3.12'] },
+      },
+    });
+
+    await editWorkspaceTarget(tempDir, 1, {
+      coverage: {
+        platforms: ['linux-glibc-x86_64'],
+        version: 1,
+        wheelStrategy: 'minimum-cover',
+      },
+      python: { policy: 'selected', versions: ['3.12'] },
+    });
+    current = await readWorkspaceConfig(tempDir);
+    target = current.targets[0];
+    expect(target).toMatchObject({
+      coverage: { platforms: ['linux-glibc-x86_64'] },
+      python: { policy: 'selected', versions: ['3.12'] },
+    });
+    if (target?.type !== 'python-app') throw new Error('Expected a python-app target');
+    expect(resolveWorkspacePythonApplication(current, target).intent.python).toEqual({
+      policy: 'selected',
+      versions: ['3.12'],
+    });
+
+    await editWorkspaceTarget(tempDir, 1, { coverage: null, python: null });
+    target = (await readWorkspaceConfig(tempDir)).targets[0];
+    expect(target).not.toHaveProperty('coverage');
+    expect(target).not.toHaveProperty('python');
+  });
+
+  it('treats inherited and equivalent explicit coverage as the same application selection', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      application: { extras: [], features: {} },
+      spec: 'orjson',
+      type: 'python-app',
+    });
+
+    await expect(
+      addWorkspaceTarget(tempDir, {
+        application: {
+          extras: [],
+          features: {},
+          versionSelection: { selectors: [{ type: 'exact', version: '3.0.0' }] },
+        },
+        coverage: 'desktop-x64',
+        spec: 'orjson',
+        type: 'python-app',
+      })
+    ).rejects.toThrow('update its version selection instead');
   });
 
   it('normalizes exact/latest application version selectors', async () => {
@@ -749,6 +846,13 @@ describe('workspace config', () => {
         },
       ],
       python: {
+        applicationDefaults: {
+          coverage: 'desktop-x64',
+          runtime: {
+            policy: 'selected',
+            versions: ['3.10', '3.11', '3.12', '3.13'],
+          },
+        },
         planner: {
           engine: 'uv',
           version: '0.11.16',
@@ -771,10 +875,6 @@ describe('workspace config', () => {
             features: {},
           },
           coverage: 'desktop-x64',
-          python: {
-            policy: 'selected',
-            versions: ['3.10', '3.11', '3.12', '3.13'],
-          },
           spec: 'ktransformers',
           type: 'python-app',
         },
@@ -1009,5 +1109,30 @@ describe('workspace config', () => {
     );
 
     await expect(readWorkspaceConfig(tempDir)).rejects.toThrow('unknown coverage policy: missing');
+  });
+
+  it('rejects an unknown workspace default coverage policy', async () => {
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      {
+        coveragePolicies: [],
+        output: './airgap-bundle',
+        python: {
+          applicationDefaults: {
+            coverage: 'missing',
+            runtime: { policy: 'selected', versions: ['3.12'] },
+          },
+          sourceIndex: 'https://pypi.org/simple/',
+        },
+        schemaVersion: 2,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [],
+      },
+      { spaces: 2 }
+    );
+
+    await expect(readWorkspaceConfig(tempDir)).rejects.toThrow(
+      'python.applicationDefaults references unknown coverage policy: missing'
+    );
   });
 });

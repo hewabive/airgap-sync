@@ -24,7 +24,22 @@ maintained workspace-local application recipes, and the default directories:
 airgap-bundle/
 ```
 
-The default config uses `https://registry.npmjs.org` and `./airgap-bundle`.
+The default config uses `https://registry.npmjs.org`, `./airgap-bundle`, and this shared
+Python application envelope:
+
+```json
+{
+  "python": {
+    "applicationDefaults": {
+      "coverage": "desktop-x64",
+      "runtime": {
+        "policy": "selected",
+        "versions": ["3.10", "3.11", "3.12", "3.13"]
+      }
+    }
+  }
+}
+```
 
 ## target
 
@@ -33,10 +48,11 @@ airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add npm eslint@latest
 
 # Normal Python application workflow.
-airgap-sync target add python-app orjson \
+airgap-sync target add python-app orjson
+
+# Target-local compatibility overrides when an application differs from the workspace.
+airgap-sync target add python-app windows-tool \
   --platform windows-x86_64 \
-  --platform linux-glibc-x86_64 \
-  --python-version 3.10 \
   --python-version 3.11 \
   --python-version 3.12 \
   --python-version 3.13
@@ -55,6 +71,10 @@ airgap-sync target edit <index> --branch release
 airgap-sync target edit <index> \
   --include-version 0.25.1 --include-version latest
 airgap-sync target edit <index> \
+  --coverage desktop-x64 \
+  --python-version 3.11 --python-version 3.12
+airgap-sync target edit <index> --inherit-coverage --inherit-python
+airgap-sync target edit <index> \
   --from-minor 3.11 \
   --platform windows-x86_64 --platform linux-glibc-x86_64 \
   --latest 2 --window-days 30
@@ -67,11 +87,14 @@ package specs. Git projects that pin pnpm through `packageManager` or
 `devEngines.packageManager` automatically contribute `pnpm` and `@pnpm/exe` bootstrap
 requirements; no separate npm target is needed.
 
-`python-app` is the normal Python target. `--coverage` references a named workspace
-policy; repeatable `--platform` creates target-local coverage instead. The initial
-maximum supported envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
-Repeat `--python-version` to request exact minor branches; omitting both Python options
-selects 3.10, 3.11, 3.12, and 3.13. The implementation covers the declared range by
+`python-app` is the normal Python target. By default it inherits both coverage and the
+Python runtime matrix from `python.applicationDefaults`. `--coverage` references a named
+workspace policy; repeatable `--platform` creates target-local coverage instead. Repeat
+`--python-version` to override the inherited minor branches, or use `--python` for an
+advanced target-local constraint. `target edit --inherit-coverage` and
+`--inherit-python` remove the corresponding overrides. The initial maximum supported
+envelope is CPython 3.10–3.13 on Windows and glibc Linux x86-64. The implementation
+covers the effective declared range by
 collecting a complete recursive dependency tree for every compatibility cell rather
 than requiring consumers to use its planning lock. Repeat
 `--include-version` with
@@ -80,8 +103,8 @@ target. Every exact release must satisfy the requested Python/platform matrix; `
 falls back only among stable releases until it finds a complete closure. Exact and
 latest selectors resolving to the same release produce one bundle variant. `--version`
 retains the single-release constraint workflow and cannot be combined with
-`--include-version`. `--python` remains an advanced single-runtime version constraint
-and cannot be combined with `--python-version`. `--extra` selects package extras,
+`--include-version`. `--python` cannot be combined with `--python-version`. `--extra`
+selects package extras,
 `--feature name=value` records explicit application variants, and `--recipe` selects
 reviewed workspace-local compatibility policy. Known maintained applications may
 receive an installed recipe automatically.
@@ -106,7 +129,7 @@ adding a new one. Supplying an option for the wrong type is an error.
 | ----------------------- | -------------------------------------------------------------------- |
 | `git`                   | branch                                                               |
 | `npm`                   | none                                                                 |
-| `python-app`            | exact/`latest` application version selectors                         |
+| `python-app`            | coverage/Python overrides and exact/`latest` version selectors       |
 | `cpython-distributions` | lower minor, platform set, latest-patch depth, provider-build window |
 
 `target set-python-app-versions` remains a deprecated compatibility alias. New scripts

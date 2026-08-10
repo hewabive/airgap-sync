@@ -45,9 +45,7 @@ airgap-sync target add git https://github.com/acme/app.git --branch main
 airgap-sync target add git https://github.com/acme/service.git
 airgap-sync target add npm eslint@latest
 airgap-sync target add npm typescript@latest
-airgap-sync target add python-app orjson --coverage desktop-x64 \
-  --python-version 3.10 --python-version 3.11 \
-  --python-version 3.12 --python-version 3.13
+airgap-sync target add python-app orjson
 airgap-sync target add cpython-distributions --from-minor 3.10 \
   --platform windows-x86_64 --platform linux-glibc-x86_64 \
   --latest 1 --window-days 365
@@ -63,8 +61,8 @@ Operators who prefer prompts can run:
 airgap-sync
 ```
 
-The menu covers target management, endpoint configuration, Python compatibility
-coverage/publication, online download, offline publish, verification, and bundle info.
+The menu covers target management, endpoint configuration, shared Python compatibility
+defaults/publication, online download, offline publish, verification, and bundle info.
 The initial Python ceiling is CPython 3.10–3.13 on Windows and glibc Linux x86-64.
 
 The target list is stored in `airgap-sync.json`. It is intentionally editable JSON, so

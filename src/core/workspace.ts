@@ -93,8 +93,8 @@ export interface WorkspacePythonApplicationTarget {
     version?: string;
     versionSelection?: PythonApplicationVersionSelection;
   };
-  coverage: InlinePlatformCoveragePolicy | string;
-  python: PythonRuntimePolicy;
+  coverage?: InlinePlatformCoveragePolicy | string;
+  python?: PythonRuntimePolicy;
   spec: string;
   type: 'python-app';
 }
@@ -107,17 +107,21 @@ export type WorkspaceTarget =
 
 export type WorkspaceTargetEditableField =
   | 'branch'
+  | 'coverage'
   | 'fromMinor'
   | 'latest'
   | 'platforms'
+  | 'python'
   | 'versionSelection'
   | 'windowDays';
 
 export interface WorkspaceTargetEdit {
   branch?: string | null;
+  coverage?: InlinePlatformCoveragePolicy | string | null;
   fromMinor?: string;
   latest?: number;
   platforms?: BuiltInPlatformFamilyId[];
+  python?: PythonRuntimePolicy | null;
   versionSelection?: PythonApplicationVersionSelection;
   windowDays?: number;
 }
@@ -144,6 +148,10 @@ export interface WorkspaceDefaults {
 }
 
 export interface WorkspacePythonConfig {
+  applicationDefaults?: {
+    coverage: InlinePlatformCoveragePolicy | string;
+    runtime: PythonRuntimePolicy;
+  };
   applicationArtifactOwner?: string;
   planner: {
     engine: 'uv';
@@ -279,6 +287,13 @@ function createDefaultWorkspaceConfig(): WorkspaceConfig {
     gitOwnerStrategy: 'preserve',
     output: defaultWorkspaceOutputDir,
     python: {
+      applicationDefaults: {
+        coverage: 'desktop-x64',
+        runtime: {
+          policy: 'selected',
+          versions: [...initialPythonApplicationMinors],
+        },
+      },
       planner: {
         engine: 'uv',
         version: workspacePythonPlannerVersion,
@@ -352,6 +367,13 @@ function normalizePythonRuntimePolicy(value: unknown): PythonRuntimePolicy {
     policy: 'constrained',
     version: value.version.trim(),
   };
+}
+
+function normalizePythonApplicationCoverage(value: unknown): InlinePlatformCoveragePolicy | string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return normalizeInlinePlatformCoveragePolicy(value);
 }
 
 function normalizeStringMap(value: unknown, description: string): Record<string, string> {
@@ -470,12 +492,8 @@ function normalizePythonApplicationTarget(
   }
   extras = [...new Set(extras)].sort();
 
-  let coverage: InlinePlatformCoveragePolicy | string;
-  if (typeof value.coverage === 'string' && value.coverage.trim()) {
-    coverage = value.coverage.trim();
-  } else {
-    coverage = normalizeInlinePlatformCoveragePolicy(value.coverage);
-  }
+  const coverage =
+    value.coverage === undefined ? undefined : normalizePythonApplicationCoverage(value.coverage);
 
   return {
     application: {
@@ -487,8 +505,8 @@ function normalizePythonApplicationTarget(
       ...(version ? { version } : {}),
       ...(versionSelection ? { versionSelection } : {}),
     },
-    coverage,
-    python: normalizePythonRuntimePolicy(value.python),
+    ...(coverage ? { coverage } : {}),
+    ...(value.python !== undefined ? { python: normalizePythonRuntimePolicy(value.python) } : {}),
     spec: parsed.requirement.normalizedName,
     type: 'python-app',
   };
@@ -807,9 +825,21 @@ function normalizeCoveragePolicies(value: unknown): PlatformCoveragePolicy[] {
   return policies;
 }
 
-function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
+function normalizeWorkspacePythonConfig(
+  value: unknown,
+  defaultCoverage: InlinePlatformCoveragePolicy | string
+): WorkspacePythonConfig {
   if (!isRecord(value)) {
     throw new Error('python settings must be an object');
+  }
+  const applicationDefaults =
+    value.applicationDefaults === undefined
+      ? {}
+      : isRecord(value.applicationDefaults)
+        ? value.applicationDefaults
+        : undefined;
+  if (!applicationDefaults) {
+    throw new Error('python.applicationDefaults must be an object');
   }
   const sourceIndex = normalizeHttpUrl(
     optionalString(value.sourceIndex) ?? defaultWorkspacePythonSourceIndex,
@@ -842,6 +872,10 @@ function normalizeWorkspacePythonConfig(value: unknown): WorkspacePythonConfig {
   }
 
   return {
+    applicationDefaults: {
+      coverage: normalizePythonApplicationCoverage(applicationDefaults.coverage ?? defaultCoverage),
+      runtime: normalizePythonRuntimePolicy(applicationDefaults.runtime),
+    },
     ...(applicationArtifactOwner ? { applicationArtifactOwner } : {}),
     planner: {
       engine: 'uv',
@@ -878,7 +912,27 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       'python-app and cpython-distributions targets require workspace schemaVersion 2'
     );
   }
+  const defaultApplicationCoverage: InlinePlatformCoveragePolicy | string = coveragePolicies[0]
+    ?.id ?? {
+    platforms: ['linux-glibc-x86_64'],
+    version: 1,
+    wheelStrategy: 'minimum-cover',
+  };
+  const python =
+    schemaVersion === 2 &&
+    (value.python !== undefined || targets.some((target) => target.type === 'python-app'))
+      ? normalizeWorkspacePythonConfig(value.python ?? {}, defaultApplicationCoverage)
+      : undefined;
   const coveragePolicyIds = new Set(coveragePolicies.map((policy) => policy.id));
+  if (
+    python &&
+    typeof python.applicationDefaults?.coverage === 'string' &&
+    !coveragePolicyIds.has(python.applicationDefaults.coverage)
+  ) {
+    throw new Error(
+      `python.applicationDefaults references unknown coverage policy: ${python.applicationDefaults.coverage}`
+    );
+  }
   const pythonApplicationSelections = new Set<string>();
   for (const target of targets) {
     if (
@@ -889,7 +943,11 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       throw new Error(`python-app target references unknown coverage policy: ${target.coverage}`);
     }
     if (target.type === 'python-app') {
-      const selection = `${target.spec}\0${semanticDigest(target.coverage)}`;
+      const effectiveCoverage = target.coverage ?? python?.applicationDefaults?.coverage;
+      if (!effectiveCoverage) {
+        throw new Error(`python-app target ${target.spec} has no application coverage`);
+      }
+      const selection = `${target.spec}\0${semanticDigest(effectiveCoverage)}`;
       if (pythonApplicationSelections.has(selection)) {
         throw new Error(
           `Duplicate python-app target for ${target.spec} and the same coverage; combine its version selectors`
@@ -925,11 +983,6 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
       ? value.pythonResolutionMode === 'approximate'
         ? 'approximate'
         : 'locked-only'
-      : undefined;
-  const python =
-    schemaVersion === 2 &&
-    (value.python !== undefined || targets.some((target) => target.type === 'python-app'))
-      ? normalizeWorkspacePythonConfig(value.python ?? {})
       : undefined;
   const gitOwnerStrategy: GitOwnerStrategy =
     value.gitOwnerStrategy === 'authenticated-user' || value.gitOwnerStrategy === 'fixed-owner'
@@ -1024,16 +1077,28 @@ export function resolveWorkspacePythonApplication(
   if (!parsed.ok || parsed.requirement.url || parsed.requirement.marker) {
     throw new Error(`Invalid python-app target: ${target.spec}`);
   }
+  const coverage =
+    target.coverage ??
+    config.python?.applicationDefaults?.coverage ??
+    config.coveragePolicies?.[0]?.id;
+  if (!coverage) {
+    throw new Error(`Python application ${target.spec} has no configured coverage`);
+  }
   const coveragePolicy =
-    typeof target.coverage === 'string'
-      ? config.coveragePolicies?.find((policy) => policy.id === target.coverage)
+    typeof coverage === 'string'
+      ? config.coveragePolicies?.find((policy) => policy.id === coverage)
       : {
-          id: `inline-${platformCoveragePolicyDigest(target.coverage).slice(0, 12)}`,
-          ...target.coverage,
+          id: `inline-${platformCoveragePolicyDigest(coverage).slice(0, 12)}`,
+          ...coverage,
         };
   if (!coveragePolicy) {
-    throw new Error(`Unknown coverage policy: ${target.coverage as string}`);
+    throw new Error(`Unknown coverage policy: ${coverage as string}`);
   }
+  const python = target.python ??
+    config.python?.applicationDefaults?.runtime ?? {
+      policy: 'selected' as const,
+      versions: [...initialPythonApplicationMinors],
+    };
   const versionSelection = target.application.versionSelection ?? {
     selectors: [
       {
@@ -1052,11 +1117,8 @@ export function resolveWorkspacePythonApplication(
         ...(target.application.recipe ? { recipe: target.application.recipe } : {}),
         ...(target.application.version ? { version: target.application.version } : {}),
       },
-      coverage:
-        typeof target.coverage === 'string'
-          ? { policyId: target.coverage }
-          : { inline: target.coverage },
-      python: target.python,
+      coverage: typeof coverage === 'string' ? { policyId: coverage } : { inline: coverage },
+      python,
       source: {
         ...(config.python?.sourceIndex ? { indexUrl: config.python.sourceIndex } : {}),
         type: 'pypi',
@@ -1102,6 +1164,17 @@ export function previewWorkspaceConfigMigration(config: WorkspaceConfig): Worksp
     ...(hasLegacyPythonIntent
       ? {
           python: {
+            applicationDefaults: {
+              coverage: {
+                platforms: ['linux-glibc-x86_64'],
+                version: 1,
+                wheelStrategy: 'minimum-cover',
+              },
+              runtime: {
+                policy: 'selected',
+                versions: [...initialPythonApplicationMinors],
+              },
+            },
             planner: {
               engine: 'uv',
               version: workspacePythonPlannerVersion,
@@ -1162,6 +1235,7 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   return normalizeWorkspaceConfig({
     ...normalized,
     python: {
+      applicationDefaults: normalized.python!.applicationDefaults!,
       planner: normalized.python!.planner,
       publication: defaultPythonPublicationProfile(),
       sourceIndex: normalized.python!.sourceIndex,
@@ -1307,9 +1381,11 @@ function targetKey(target: WorkspaceTarget): string {
 
 const workspaceTargetEditFields: WorkspaceTargetEditableField[] = [
   'branch',
+  'coverage',
   'fromMinor',
   'latest',
   'platforms',
+  'python',
   'versionSelection',
   'windowDays',
 ];
@@ -1325,7 +1401,7 @@ export function workspaceTargetEditableFields(
     case 'npm':
       return [];
     case 'python-app':
-      return ['versionSelection'];
+      return ['coverage', 'python', 'versionSelection'];
   }
 }
 
@@ -1343,6 +1419,10 @@ export async function addWorkspaceTarget(
   const normalizedTarget = normalizeWorkspaceTarget(target);
   const id = targetKey(normalizedTarget);
   const exists = config.targets.some((existing) => targetKey(existing) === id);
+  const effectiveCoverage =
+    normalizedTarget.type === 'python-app'
+      ? (normalizedTarget.coverage ?? config.python?.applicationDefaults?.coverage)
+      : undefined;
   if (
     !exists &&
     normalizedTarget.type === 'python-app' &&
@@ -1350,7 +1430,8 @@ export async function addWorkspaceTarget(
       (existing) =>
         existing.type === 'python-app' &&
         existing.spec === normalizedTarget.spec &&
-        semanticDigest(existing.coverage) === semanticDigest(normalizedTarget.coverage)
+        semanticDigest(existing.coverage ?? config.python?.applicationDefaults?.coverage) ===
+          semanticDigest(effectiveCoverage)
     )
   ) {
     throw new Error(
@@ -1422,14 +1503,31 @@ export async function editWorkspaceTarget(
       break;
     }
     case 'python-app': {
-      candidate = {
+      const applicationTarget: WorkspacePythonApplicationTarget = {
         ...current,
         application: {
           ...current.application,
-          versionSelection: edit.versionSelection!,
         },
       };
-      delete candidate.application.version;
+      if (edit.versionSelection !== undefined) {
+        applicationTarget.application.versionSelection = edit.versionSelection;
+        delete applicationTarget.application.version;
+      }
+      if (edit.coverage !== undefined) {
+        if (edit.coverage === null) {
+          delete applicationTarget.coverage;
+        } else {
+          applicationTarget.coverage = edit.coverage;
+        }
+      }
+      if (edit.python !== undefined) {
+        if (edit.python === null) {
+          delete applicationTarget.python;
+        } else {
+          applicationTarget.python = edit.python;
+        }
+      }
+      candidate = applicationTarget;
       break;
     }
     case 'npm':
@@ -1574,8 +1672,8 @@ export function createWorkspaceSnapshot(
       if (target.type === 'python-app') {
         return {
           application: target.application,
-          coverage: target.coverage,
-          python: target.python,
+          ...(target.coverage ? { coverage: target.coverage } : {}),
+          ...(target.python ? { python: target.python } : {}),
           spec: target.spec,
           type: target.type,
         };

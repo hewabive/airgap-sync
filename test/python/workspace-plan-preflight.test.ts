@@ -30,10 +30,6 @@ function applicationTarget(spec = 'demo'): WorkspacePythonApplicationTarget {
       extras: [],
       features: {},
     },
-    coverage: 'desktop-x64',
-    python: {
-      policy: 'auto',
-    },
     spec,
     type: 'python-app',
   };
@@ -141,6 +137,33 @@ describe('workspace Python application plan preflight', () => {
     expect(plannerCalled).toBe(false);
     expect(result.plannedTargetIndexes).toEqual([]);
     expect(result.targets[0]?.activePlan).toBe(stored);
+  });
+
+  it('replans an inherited target when workspace Python defaults change', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    let stored = activePlanFor(config, target);
+    config.python!.applicationDefaults!.runtime = {
+      policy: 'selected',
+      versions: ['3.12'],
+    };
+
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      planTargets: (indexes) => {
+        expect(indexes).toEqual([1]);
+        stored = activePlanFor(config, target);
+        return Promise.resolve();
+      },
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+
+    expect(result.plannedTargetIndexes).toEqual([1]);
+    expect(result.targets[0]?.activePlan.plan.intent.python).toEqual({
+      policy: 'selected',
+      versions: ['3.12'],
+    });
   });
 
   it('replans when application intent changed', async () => {

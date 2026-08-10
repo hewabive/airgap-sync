@@ -163,6 +163,7 @@ import type {
   PythonApplicationVersionSelection,
   PythonEnvironmentPlan,
   PythonPublicationProfile,
+  PythonRuntimePolicy,
   WorkspacePythonApplicationTarget,
   WorkspaceTargetEdit,
 } from './index.js';
@@ -292,10 +293,15 @@ interface TargetCpythonDistributionsOptions {
 interface TargetEditOptions {
   branch?: string;
   clearBranch?: boolean;
+  coverage?: string;
   fromMinor?: string;
   includeVersion?: string[];
+  inheritCoverage?: boolean;
+  inheritPython?: boolean;
   latest?: number;
   platform?: string[];
+  python?: string;
+  pythonVersion?: string[];
   windowDays?: number;
 }
 
@@ -1162,6 +1168,17 @@ function formatTargetList(targets: WorkspaceConfig['targets']): string {
     .join('\n');
 }
 
+function formatPythonRuntimePolicy(policy: PythonRuntimePolicy | undefined): string {
+  if (!policy) {
+    return 'workspace default';
+  }
+  return policy.policy === 'selected'
+    ? policy.versions.join(', ')
+    : policy.policy === 'constrained'
+      ? policy.version
+      : 'auto';
+}
+
 function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
   const value =
     target.type === 'cpython-distributions'
@@ -1170,12 +1187,14 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
         ? `git ${target.url}${target.branch ? ` (${target.branch})` : ''}`
         : `${target.type} ${target.spec}`;
   const pythonApplicationRuntime =
+    target.type === 'python-app' ? formatPythonRuntimePolicy(target.python) : undefined;
+  const pythonApplicationCoverage =
     target.type === 'python-app'
-      ? target.python.policy === 'selected'
-        ? target.python.versions.join(', ')
-        : target.python.policy === 'constrained'
-          ? target.python.version
-          : 'auto'
+      ? typeof target.coverage === 'string'
+        ? target.coverage
+        : target.coverage
+          ? target.coverage.platforms.join(', ')
+          : 'workspace default'
       : undefined;
   const pythonApplicationVersions =
     target.type === 'python-app'
@@ -1193,11 +1212,18 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
           ? `latest (${target.application.version})`
           : 'latest'
       : undefined;
-  return `${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
+  return `${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationCoverage ? ` [coverage: ${pythonApplicationCoverage}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
-  const defaultCoverage = config.coveragePolicies?.[0];
+  const defaultCoverageSelection =
+    config.python?.applicationDefaults?.coverage ?? config.coveragePolicies?.[0]?.id;
+  const defaultCoverage =
+    typeof defaultCoverageSelection === 'string'
+      ? config.coveragePolicies?.find((policy) => policy.id === defaultCoverageSelection)
+      : defaultCoverageSelection;
+  const defaultCoverageId =
+    typeof defaultCoverageSelection === 'string' ? defaultCoverageSelection : undefined;
   const publication = config.python?.publication ?? defaultPythonPublicationProfile();
   const publicationOwner = (owner: PythonPublicationProfile['owner']): string =>
     owner.strategy === 'authenticated-user' ? 'authenticated user' : `${owner.kind} ${owner.name}`;
@@ -1212,9 +1238,10 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
       : []),
     `Default application coverage: ${
       defaultCoverage
-        ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
+        ? `${defaultCoverageId ? `${defaultCoverageId} ` : ''}(${defaultCoverage.platforms.join(', ')})`
         : '(not set)'
     }`,
+    `Default Python runtime: ${formatPythonRuntimePolicy(config.python?.applicationDefaults?.runtime)}`,
     `Python planner: ${config.python?.planner.engine ?? 'uv'} ${config.python?.planner.version ?? '(not set)'}`,
   ];
   return [
@@ -2476,10 +2503,18 @@ async function configureApplicationCoverage(
   if (config.schemaVersion !== 2) {
     throw new Error('Python application coverage requires workspace schemaVersion 2');
   }
-  const current = config.coveragePolicies?.[0];
+  const configuredCoverage = config.python?.applicationDefaults?.coverage;
+  const current =
+    typeof configuredCoverage === 'string'
+      ? config.coveragePolicies?.find((policy) => policy.id === configuredCoverage)
+      : undefined;
+  const currentPlatforms =
+    typeof configuredCoverage === 'object'
+      ? configuredCoverage.platforms
+      : (current?.platforms ?? config.coveragePolicies?.[0]?.platforms);
   const currentChoice =
-    current?.platforms.length === 1
-      ? current.platforms[0] === 'windows-x86_64'
+    currentPlatforms?.length === 1
+      ? currentPlatforms[0] === 'windows-x86_64'
         ? 'windows'
         : 'linux'
       : 'both';
@@ -2487,14 +2522,83 @@ async function configureApplicationCoverage(
     await ask(rl, 'Python application platforms (both/windows/linux)', currentChoice)
   );
   const policy: PlatformCoveragePolicy = {
-    id: current?.id ?? 'desktop-x64',
+    id: current?.id ?? config.coveragePolicies?.[0]?.id ?? 'desktop-x64',
     platforms,
     version: 1,
     wheelStrategy: 'minimum-cover',
   };
+  const policies = config.coveragePolicies ?? [];
+  const policyExists = policies.some((candidate) => candidate.id === policy.id);
   const nextConfig: WorkspaceConfig = {
     ...config,
-    coveragePolicies: [policy, ...(config.coveragePolicies?.slice(1) ?? [])],
+    coveragePolicies: policyExists
+      ? policies.map((candidate) => (candidate.id === policy.id ? policy : candidate))
+      : [policy, ...policies],
+    python: {
+      ...config.python,
+      applicationDefaults: {
+        coverage: policy.id,
+        runtime: config.python?.applicationDefaults?.runtime ?? {
+          policy: 'selected',
+          versions: [...initialPythonApplicationMinors],
+        },
+      },
+      planner: config.python?.planner ?? {
+        engine: 'uv',
+        version: workspacePythonPlannerVersion,
+      },
+      sourceIndex: config.python?.sourceIndex ?? defaultPythonSourceIndex,
+    },
+  };
+  await saveWorkspaceConfig(workspaceDir, nextConfig);
+  return nextConfig;
+}
+
+async function configureApplicationPythonRuntime(
+  workspaceDir: string,
+  rl: ReadlineInterface,
+  config: WorkspaceConfig
+): Promise<WorkspaceConfig> {
+  if (config.schemaVersion !== 2) {
+    throw new Error('Python application defaults require workspace schemaVersion 2');
+  }
+  const current = config.python?.applicationDefaults?.runtime ?? {
+    policy: 'selected' as const,
+    versions: [...initialPythonApplicationMinors],
+  };
+  const answer = await ask(
+    rl,
+    'Default Python minor versions (comma-separated)',
+    current.policy === 'selected'
+      ? current.versions.join(', ')
+      : initialPythonApplicationMinors.join(', ')
+  );
+  const versions = splitMenuValues(answer);
+  if (versions.length === 0) {
+    throw new Error('At least one default Python minor version is required');
+  }
+  const nextConfig: WorkspaceConfig = {
+    ...config,
+    python: {
+      ...config.python,
+      applicationDefaults: {
+        coverage: config.python?.applicationDefaults?.coverage ??
+          config.coveragePolicies?.[0]?.id ?? {
+            platforms: ['linux-glibc-x86_64'],
+            version: 1,
+            wheelStrategy: 'minimum-cover',
+          },
+        runtime: {
+          policy: 'selected',
+          versions,
+        },
+      },
+      planner: config.python?.planner ?? {
+        engine: 'uv',
+        version: workspacePythonPlannerVersion,
+      },
+      sourceIndex: config.python?.sourceIndex ?? defaultPythonSourceIndex,
+    },
   };
   await saveWorkspaceConfig(workspaceDir, nextConfig);
   return nextConfig;
@@ -2562,6 +2666,7 @@ async function configurePythonApplicationPublication(
   const nextConfig: WorkspaceConfig = {
     ...config,
     python: {
+      ...config.python,
       planner: config.python?.planner ?? {
         engine: 'uv',
         version: workspacePythonPlannerVersion,
@@ -2719,11 +2824,15 @@ async function configureInitialWorkspace(
     withConnections.schemaVersion === 2
       ? await configureApplicationCoverage(workspaceDir, rl, withConnections)
       : withConnections;
+  const withPythonDefaults =
+    withPythonSettings.schemaVersion === 2
+      ? await configureApplicationPythonRuntime(workspaceDir, rl, withPythonSettings)
+      : withPythonSettings;
   console.log('Configure download defaults.');
   const withDownloadDefaults = await configureDownloadDefaults(
     workspaceDir,
     rl,
-    withPythonSettings
+    withPythonDefaults
   );
   console.log('Configure publish defaults.');
   const withPublishDefaults = await configurePublishDefaults(
@@ -2881,11 +2990,37 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
       return;
     }
     case 'python-app': {
-      console.log('Leave the next answer empty to keep the current version selection.');
+      console.log(
+        `Coverage override: ${
+          typeof target.coverage === 'string'
+            ? target.coverage
+            : target.coverage
+              ? target.coverage.platforms.join(', ')
+              : '(workspace default)'
+        }`
+      );
+      console.log(`Python override: ${formatPythonRuntimePolicy(target.python)}`);
       const versions = splitMenuValues(
         await ask(rl, 'New application versions (comma-separated exact versions or latest)')
       );
-      if (versions.length === 0) {
+      const coverage = await ask(rl, 'Coverage override (empty keeps current, "-" inherits)');
+      const python = await ask(
+        rl,
+        'Python override (comma-separated minors, empty keeps current, "-" inherits)'
+      );
+      const pythonVersions = splitMenuValues(python);
+      const pythonArgs =
+        python === '-'
+          ? ['--inherit-python']
+          : pythonVersions.length > 0 &&
+              pythonVersions.every((version) => /^3\.\d+$/u.test(version))
+            ? pythonVersions.flatMap((version) => ['--python-version', version])
+            : python
+              ? ['--python', python]
+              : [];
+      const coverageArgs =
+        coverage === '-' ? ['--inherit-coverage'] : coverage ? ['--coverage', coverage] : [];
+      if (versions.length === 0 && coverageArgs.length === 0 && pythonArgs.length === 0) {
         console.log('No target changes requested.');
         return;
       }
@@ -2896,6 +3031,8 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
           indexValue,
           workspaceDir,
           ...versions.flatMap((version) => ['--include-version', version]),
+          ...coverageArgs,
+          ...pythonArgs,
         ],
         workspaceDir
       );
@@ -2954,12 +3091,12 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
       }
       case '4': {
         let config = await readMenuWorkspace(workspaceDir, rl);
-        if (!config.coveragePolicies?.[0]) {
+        if (!config.python?.applicationDefaults?.coverage) {
           console.log('Configure platform coverage for Python applications.');
           config = await configureApplicationCoverage(workspaceDir, rl, config);
         }
         const coveragePolicyIds = config.coveragePolicies?.map((policy) => policy.id) ?? [];
-        const defaultCoverage = coveragePolicyIds[0];
+        const defaultCoverage = config.python?.applicationDefaults?.coverage;
         if (!defaultCoverage) {
           throw new Error('Python application coverage was not configured');
         }
@@ -2972,19 +3109,12 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
           .filter(Boolean);
         const coverage = await ask(
           rl,
-          `Platform coverage policy (${coveragePolicyIds.join('/')})`,
-          defaultCoverage
+          `Coverage override (${coveragePolicyIds.join('/')}; empty uses workspace default)`,
+          ''
         );
-        const pythonVersions = (
-          await ask(
-            rl,
-            'Python minor versions (comma-separated)',
-            initialPythonApplicationMinors.join(', ')
-          )
-        )
-          .split(',')
-          .map((version) => version.trim())
-          .filter(Boolean);
+        const pythonVersions = splitMenuValues(
+          await ask(rl, 'Python versions override (comma-separated; empty uses workspace default)')
+        );
         if (spec) {
           await runSelfCommand(
             [
@@ -2993,8 +3123,7 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
               'python-app',
               spec,
               workspaceDir,
-              '--coverage',
-              coverage,
+              ...(coverage ? ['--coverage', coverage] : []),
               ...applicationVersions.flatMap((version) => ['--include-version', version]),
               ...pythonVersions.flatMap((version) => ['--python-version', version]),
             ],
@@ -3037,7 +3166,14 @@ async function configurePythonSettingsMenu(
 ): Promise<void> {
   for (;;) {
     const config = await readMenuWorkspace(workspaceDir, rl);
-    const defaultCoverage = config.coveragePolicies?.[0];
+    const defaultCoverageSelection =
+      config.python?.applicationDefaults?.coverage ?? config.coveragePolicies?.[0]?.id;
+    const defaultCoverage =
+      typeof defaultCoverageSelection === 'string'
+        ? config.coveragePolicies?.find((policy) => policy.id === defaultCoverageSelection)
+        : defaultCoverageSelection;
+    const defaultCoverageId =
+      typeof defaultCoverageSelection === 'string' ? defaultCoverageSelection : undefined;
     const publication = config.python?.publication ?? defaultPythonPublicationProfile();
     const publicationOwner =
       publication.owner.strategy === 'authenticated-user'
@@ -3067,13 +3203,17 @@ async function configurePythonSettingsMenu(
     console.log(
       `Default coverage: ${
         defaultCoverage
-          ? `${defaultCoverage.id} (${defaultCoverage.platforms.join(', ')})`
+          ? `${defaultCoverageId ? `${defaultCoverageId} ` : ''}(${defaultCoverage.platforms.join(', ')})`
           : '(not set)'
       }`
+    );
+    console.log(
+      `Default Python runtime: ${formatPythonRuntimePolicy(config.python?.applicationDefaults?.runtime)}`
     );
     console.log('Actions:');
     console.log('1. Configure source and publication');
     console.log('2. Configure default platform coverage');
+    console.log('3. Configure default Python versions');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -3087,6 +3227,10 @@ async function configurePythonSettingsMenu(
       case '2':
         await configureApplicationCoverage(workspaceDir, rl, config);
         console.log('Saved Python application coverage.');
+        break;
+      case '3':
+        await configureApplicationPythonRuntime(workspaceDir, rl, config);
+        console.log('Saved default Python versions.');
         break;
       default:
         console.log('Unknown menu item.');
@@ -3735,7 +3879,7 @@ targetAddCommand
   .description('Add a Python application with broad platform coverage')
   .argument('<spec>', 'Python application package requirement')
   .argument('[workspace]', 'Workspace directory', '.')
-  .option('--coverage <id>', 'Workspace coverage policy (defaults to the first policy)')
+  .option('--coverage <id>', 'Override the workspace default coverage policy')
   .option(
     '--platform <family>',
     'Inline platform family; repeat for additional families',
@@ -3760,7 +3904,7 @@ targetAddCommand
   .option('--python <specifier>', 'Advanced Python version constraint')
   .option(
     '--python-version <minor>',
-    'Exact Python minor to support; repeat for multiple versions',
+    'Override the workspace Python minors; repeat for multiple versions',
     collectStrings,
     []
   )
@@ -3786,10 +3930,14 @@ targetAddCommand
               version: 1 as const,
               wheelStrategy: 'minimum-cover' as const,
             }
-          : (options.coverage ?? config.coveragePolicies?.[0]?.id);
-      if (!coverage) {
+          : options.coverage;
+      if (
+        !coverage &&
+        !config.python?.applicationDefaults?.coverage &&
+        !config.coveragePolicies?.[0]
+      ) {
         throw new Error(
-          'No Python application coverage is configured; use --platform or add a coverage policy'
+          'No default Python application coverage is configured; use --platform or --coverage'
         );
       }
       const maintainedRecipe =
@@ -3809,25 +3957,21 @@ targetAddCommand
             ? { versionSelection: parsePythonApplicationVersionSelection(options.includeVersion!) }
             : {}),
         },
-        coverage,
-        python:
-          (options.pythonVersion?.length ?? 0) > 0
-            ? { policy: 'selected', versions: options.pythonVersion! }
-            : options.python
-              ? { policy: 'constrained', version: options.python }
-              : { policy: 'selected', versions: [...initialPythonApplicationMinors] },
+        ...(coverage ? { coverage } : {}),
+        ...((options.pythonVersion?.length ?? 0) > 0
+          ? { python: { policy: 'selected' as const, versions: options.pythonVersion! } }
+          : options.python
+            ? { python: { policy: 'constrained' as const, version: options.python } }
+            : {}),
         spec,
         type: 'python-app',
       };
       const result = await addWorkspaceTarget(workspace, target);
+      const resolved = resolveWorkspacePythonApplication(result.config, target);
       console.log(
         `${result.added ? 'Added' : 'Already configured'} target: ${formatTargetValue(target)}\nCoverage: ${
-          typeof coverage === 'string' ? coverage : coverage.platforms.join(', ')
-        }\nPython runtime: ${
-          (options.pythonVersion?.length ?? 0) > 0
-            ? options.pythonVersion!.join(', ')
-            : (options.python ?? initialPythonApplicationMinors.join(', '))
-        }${
+          resolved.coveragePolicy.id
+        } (${resolved.coveragePolicy.platforms.join(', ')})\nPython runtime: ${formatPythonRuntimePolicy(resolved.intent.python)}${
           recipe ? `\nRecipe: ${recipe}` : ''
         }\nTotal targets: ${String(result.config.targets.length)}`
       );
@@ -4019,7 +4163,10 @@ targetCommand
   .argument('[workspace]', 'Workspace directory', '.')
   .option('--branch <name>', 'Replace a Git target branch')
   .option('--clear-branch', 'Remove an explicit Git target branch')
+  .option('--coverage <id>', 'Override a Python application coverage policy')
   .option('--from-minor <version>', 'Replace the lowest CPython minor')
+  .option('--inherit-coverage', 'Use workspace default coverage for a Python application')
+  .option('--inherit-python', 'Use workspace default Python versions for an application')
   .option(
     '--platform <id>',
     'Replace CPython platform families; repeat for additional families',
@@ -4036,14 +4183,34 @@ targetCommand
     'Replace Python application exact/latest selectors; repeat for alternatives',
     collectOptionalStrings
   )
+  .option('--python <specifier>', 'Override a Python application runtime constraint')
+  .option(
+    '--python-version <minor>',
+    'Override Python application minors; repeat for multiple versions',
+    collectOptionalStrings
+  )
   .action(async (index: string, workspace: string, options: TargetEditOptions) => {
     try {
       if (options.branch !== undefined && options.clearBranch === true) {
         throw new Error('Use either --branch or --clear-branch, not both');
       }
+      if (options.coverage !== undefined && options.inheritCoverage === true) {
+        throw new Error('Use either --coverage or --inherit-coverage, not both');
+      }
+      if (options.python !== undefined && options.pythonVersion !== undefined) {
+        throw new Error('Use either --python or --python-version, not both');
+      }
+      if (
+        options.inheritPython === true &&
+        (options.python !== undefined || options.pythonVersion !== undefined)
+      ) {
+        throw new Error('Use a Python override or --inherit-python, not both');
+      }
       const edit: WorkspaceTargetEdit = {
         ...(options.branch !== undefined ? { branch: options.branch } : {}),
         ...(options.clearBranch === true ? { branch: null } : {}),
+        ...(options.coverage !== undefined ? { coverage: options.coverage } : {}),
+        ...(options.inheritCoverage === true ? { coverage: null } : {}),
         ...(options.fromMinor !== undefined ? { fromMinor: options.fromMinor } : {}),
         ...(options.includeVersion !== undefined
           ? { versionSelection: parsePythonApplicationVersionSelection(options.includeVersion) }
@@ -4052,6 +4219,12 @@ targetCommand
         ...(options.platform !== undefined
           ? { platforms: parsePythonApplicationPlatforms(options.platform) }
           : {}),
+        ...(options.pythonVersion !== undefined
+          ? { python: { policy: 'selected' as const, versions: options.pythonVersion } }
+          : options.python !== undefined
+            ? { python: { policy: 'constrained' as const, version: options.python } }
+            : {}),
+        ...(options.inheritPython === true ? { python: null } : {}),
         ...(options.windowDays !== undefined ? { windowDays: options.windowDays } : {}),
       };
       const result = await editWorkspaceTarget(workspace, parsePositiveInteger(index), edit);
