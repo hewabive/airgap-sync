@@ -168,6 +168,7 @@ import type {
   WorkspaceTargetEdit,
 } from './index.js';
 import { validatePythonIndexUrl } from './menu/python-settings.js';
+import { validateDownloadInvocation } from './cli-validation.js';
 
 const defaultDistTagConcurrency = 4;
 const defaultPublishConcurrency = 4;
@@ -4372,6 +4373,7 @@ program
   .option('--json', 'Print the full JSON report instead of the concise summary')
   .action(async (root: string | undefined, options: CollectOptions) => {
     try {
+      validateDownloadInvocation(root, options.target);
       if (!root) {
         const workspaceDir = process.cwd();
         const config = await readWorkspaceConfig(workspaceDir);
