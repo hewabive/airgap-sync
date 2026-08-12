@@ -96,7 +96,7 @@ export type CollectProgressPhase =
   | 'security-scan'
   | 'bundle-write';
 
-export type CollectProgressStatus = 'start' | 'progress' | 'done' | 'error';
+export type CollectProgressStatus = 'start' | 'progress' | 'done' | 'warning' | 'error';
 
 export interface CollectProgressEvent {
   current?: number;
@@ -589,6 +589,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
       ...(resolution.vulnerabilityResolutions
         ? { vulnerabilityResolutions: resolution.vulnerabilityResolutions }
         : {}),
+      warnings: resolution.warnings,
       wouldDownloadPackages: resolution.wouldDownloadPackages,
     });
     fetchReports.push(fetch);

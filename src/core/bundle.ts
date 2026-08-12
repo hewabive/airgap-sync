@@ -18,6 +18,7 @@ import type {
   ResolvedPackage,
   ResolvedRootPackage,
   ResolutionError,
+  ResolutionWarning,
   TagRequirement,
   UnsupportedRootPackageRequirement,
   VulnerabilityResolutionAction,
@@ -52,6 +53,7 @@ export interface FetchReportOptions {
   timings?: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
   vulnerabilityResolutions?: VulnerabilityResolutionAction[];
+  warnings?: ResolutionWarning[];
   wouldDownloadPackages?: FetchPackageAction[];
 }
 
@@ -139,6 +141,7 @@ export function createFetchReport(options: FetchReportOptions): FetchReport {
     ...(options.vulnerabilityResolutions
       ? { vulnerabilityResolutions: options.vulnerabilityResolutions }
       : {}),
+    ...(options.warnings && options.warnings.length > 0 ? { warnings: options.warnings } : {}),
     wouldDownloadPackages: options.wouldDownloadPackages ?? [],
   };
 }

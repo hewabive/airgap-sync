@@ -223,6 +223,43 @@ describe('createFetchReport', () => {
       wouldDownloadPackages: [],
     });
   });
+
+  it('records release-age warnings with requirement provenance', () => {
+    expect(
+      createFetchReport({
+        downloaded: 1,
+        errors: [],
+        generatedAt: '2026-08-12T00:00:00.000Z',
+        gitRequirements: [],
+        resolved: 1,
+        skipped: 0,
+        unsupported: [],
+        warnings: [
+          {
+            code: 'release-age-bypass',
+            minReleaseAgeDays: 3,
+            name: 'tsx',
+            publishedAt: '2026-08-10T03:41:31.093Z',
+            raw: 'tsx@4.23.12',
+            reason: 'fresh exact lockfile version',
+            requiredBy: 'lockfile:80.74.26.190/hewabive/shturval/package-lock.json',
+            specifier: '4.23.12',
+            type: 'version',
+            version: '4.23.12',
+          },
+        ],
+      })
+    ).toMatchObject({
+      errors: [],
+      warnings: [
+        {
+          name: 'tsx',
+          requiredBy: 'lockfile:80.74.26.190/hewabive/shturval/package-lock.json',
+          version: '4.23.12',
+        },
+      ],
+    });
+  });
 });
 
 describe('dependencySpecsFromManifest', () => {

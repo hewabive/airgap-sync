@@ -405,6 +405,7 @@ describe('run history', () => {
       name: 'demo',
       raw: 'demo@latest',
       reason: 'offline',
+      requiredBy: 'root',
       specifier: 'latest',
       type: 'tag',
     });

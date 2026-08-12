@@ -265,7 +265,7 @@ describe('readGitSourceManifestRequirements', () => {
       {
         name: '@ungap/structured-clone',
         raw: '@ungap/structured-clone@1.3.0',
-        requiredBy: 'lockfile:tools/ui/package-lock.json',
+        requiredBy: 'lockfile:github.com/owner/repo/tools/ui/package-lock.json',
         specifier: '1.3.0',
         type: 'version',
       },
@@ -414,7 +414,7 @@ describe('readGitSourceManifestRequirements', () => {
       {
         name: 'better-sqlite3',
         raw: 'better-sqlite3@12.10.0',
-        requiredBy: 'lockfile:pnpm-lock.yaml',
+        requiredBy: 'lockfile:github.com/owner/repo/pnpm-lock.yaml',
         specifier: '12.10.0',
         type: 'version',
       },

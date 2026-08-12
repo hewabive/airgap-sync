@@ -301,6 +301,7 @@ describe('fetchSeedBundle', () => {
         name: 'demo',
         raw: 'demo@latest',
         reason: 'permanent failure',
+        requiredBy: 'root',
         specifier: 'latest',
         type: 'tag',
       },
@@ -981,8 +982,9 @@ describe('fetchSeedBundle', () => {
     });
   });
 
-  it('does not reuse cached metadata that violates the current release-age policy', async () => {
+  it('refreshes cached metadata and warns without blocking a fresh exact version', async () => {
     const requestedNames: string[] = [];
+    const warnings: string[] = [];
     const publishedAt = '2999-01-01T00:00:00.000Z';
     const metadataCache = new RegistryMetadataCache({
       schemaVersion: 1,
@@ -1002,6 +1004,9 @@ describe('fetchSeedBundle', () => {
       download: false,
       metadataCache,
       minReleaseAgeDays: 3,
+      onProgress(event) {
+        if (event.status === 'warning') warnings.push(event.detail ?? '');
+      },
       outputDir: '/virtual/seed',
       registry: {
         getPackageMetadata(name) {
@@ -1029,8 +1034,17 @@ describe('fetchSeedBundle', () => {
     });
 
     expect(requestedNames).toEqual(['demo']);
-    expect(result.resolved).toEqual([]);
-    expect(result.errors[0]?.reason).toContain('newer than the 3 day minimum age');
+    expect(result.resolved.map((pkg) => `${pkg.name}@${pkg.version}`)).toEqual(['demo@1.0.0']);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: 'release-age-bypass',
+        name: 'demo',
+        requiredBy: 'root',
+        version: '1.0.0',
+      }),
+    ]);
+    expect(warnings).toEqual([expect.stringContaining('demo@1.0.0 required by root')]);
     expect(result.timings.metadataCacheHits).toBe(0);
   });
 

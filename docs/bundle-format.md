@@ -178,7 +178,9 @@ update discovery is preserved. Version entries include their registry publicatio
 so the current release-age policy is reapplied when cached metadata is reused. Older
 caches without that field are upgraded from matching exact versions in the active
 `seed-manifest.json`; a missing or too-recent publication time falls back to the source
-registry and remains subject to quarantine.
+registry. A fresh exact requirement is retained with a release-age warning because
+substituting another version would no longer satisfy its lockfile; the warning and its
+`requiredBy` origin are persisted in `fetch-report.json`.
 
 ## python-seed-manifest.json
 

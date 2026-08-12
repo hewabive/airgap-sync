@@ -433,6 +433,7 @@ describe('verifyBundle', () => {
             name: 'demo',
             raw: 'demo@latest',
             reason: 'not found',
+            requiredBy: 'root',
             specifier: 'latest',
             type: 'tag',
           },

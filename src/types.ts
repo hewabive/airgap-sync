@@ -340,14 +340,29 @@ export interface ResolutionError {
   name: string;
   raw: string;
   reason: string;
+  requiredBy: string;
   specifier: string;
   type: SupportedSpecType;
+}
+
+export interface ResolutionWarning {
+  code: 'release-age-bypass';
+  minReleaseAgeDays: number;
+  name: string;
+  publishedAt?: string;
+  raw: string;
+  reason: string;
+  requiredBy: string;
+  specifier: string;
+  type: SupportedSpecType;
+  version: string;
 }
 
 export interface ResolveRootRequirementsResult {
   resolved: ResolvedRootPackage[];
   errors: ResolutionError[];
   tagRequirements: TagRequirement[];
+  warnings: ResolutionWarning[];
 }
 
 export interface ResolvedPackage extends PackageIdentity {
@@ -404,6 +419,7 @@ export interface FetchReport {
   timings: FetchTimings;
   unsupported: UnsupportedRootPackageRequirement[];
   vulnerabilityResolutions?: VulnerabilityResolutionAction[];
+  warnings?: ResolutionWarning[];
   wouldDownloadPackages: FetchPackageAction[];
 }
 

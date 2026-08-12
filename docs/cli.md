@@ -308,13 +308,16 @@ Failed downloads write diagnostic reports but do not replace the active
 the workspace download, including Python application artifact transfer, completes
 successfully.
 
-npm releases younger than `--min-release-age-days` are quarantined before selection;
-the default is three days and `0` disables the delay. Download verifies registry
-SRI/SHA-1, records SHA-256, queries OSV for every exact package/version, and inspects
-each tarball for lifecycle scripts and non-registry dependencies. Any malware finding,
-OSV failure, integrity mismatch, or unapproved non-registry dependency prevents
-activation. Lifecycle scripts are recorded non-blocking findings and do not block
-activation.
+npm releases younger than `--min-release-age-days` are quarantined during selection;
+the default is three days and `0` disables the delay. Tags and SemVer ranges fall back
+to the newest eligible compatible release. An exact lockfile version cannot be changed
+without breaking reproducibility, so it remains selected and produces a non-blocking
+warning naming its origin. The same fallback applies when a tag or range has no eligible
+compatible version. Download verifies registry SRI/SHA-1, records SHA-256, queries OSV
+for every exact package/version, and inspects each tarball for lifecycle scripts and
+non-registry dependencies. Any malware finding, OSV failure, integrity mismatch, or
+unapproved non-registry dependency prevents activation. Lifecycle scripts and
+release-age fallbacks are recorded non-blocking findings and do not block activation.
 `security-report.failed.json` keeps failed evidence without replacing a previously
 active report. `--allow-package name@version#sha256:<hex>` is repeatable and approves
 or acknowledges static findings only for those exact bytes.

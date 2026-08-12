@@ -269,7 +269,7 @@ export async function readGitSourceManifestRequirements(
       parseLockfileRequirementsFromContent(
         path.basename(lockfilePath),
         content,
-        `lockfile:${lockfilePath}`
+        `lockfile:${path.posix.join(options.source.id, lockfilePath)}`
       )
   );
   return {

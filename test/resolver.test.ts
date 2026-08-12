@@ -220,15 +220,46 @@ describe('resolveRootRequirementFromMetadata', () => {
     expect(result.tagRequirement?.version).toBe('1.0.0');
   });
 
-  it('blocks a fresh exact version during the release-age quarantine', () => {
+  it('keeps a fresh exact version and records a release-age warning', () => {
     const result = resolveRootRequirementFromMetadata(
-      requirement({ raw: 'demo@1.2.0', specifier: '1.2.0', type: 'version' }),
+      requirement({
+        raw: 'demo@1.2.0',
+        requiredBy: 'lockfile:github.com/acme/app/package-lock.json',
+        specifier: '1.2.0',
+        type: 'version',
+      }),
       { ...metadata, time: { '1.2.0': '2026-08-08T00:00:00.000Z' } },
       { minReleaseAgeDays: 3, now: new Date('2026-08-09T00:00:00.000Z') }
     );
 
-    expect(result.resolved).toBeUndefined();
-    expect(result.error?.reason).toContain('newer than the 3 day minimum age');
+    expect(result.error).toBeUndefined();
+    expect(result.resolved?.version).toBe('1.2.0');
+    expect(result.warning).toMatchObject({
+      code: 'release-age-bypass',
+      minReleaseAgeDays: 3,
+      name: 'demo',
+      publishedAt: '2026-08-08T00:00:00.000Z',
+      requiredBy: 'lockfile:github.com/acme/app/package-lock.json',
+      version: '1.2.0',
+    });
+    expect(result.warning?.reason).toContain('No eligible version can preserve this requirement');
+  });
+
+  it('keeps the newest compatible release with a warning when a range has no mature option', () => {
+    const result = resolveRootRequirementFromMetadata(
+      requirement({ raw: 'demo@^1.0.0', specifier: '^1.0.0', type: 'range' }),
+      {
+        ...metadata,
+        time: {
+          '1.0.0': '2026-08-08T00:00:00.000Z',
+          '1.2.0': '2026-08-08T12:00:00.000Z',
+        },
+      },
+      { minReleaseAgeDays: 3, now: new Date('2026-08-09T00:00:00.000Z') }
+    );
+
+    expect(result.resolved?.version).toBe('1.2.0');
+    expect(result.warning).toMatchObject({ code: 'release-age-bypass', version: '1.2.0' });
   });
 
   it('preserves alias metadata while resolving the target package', () => {
@@ -269,6 +300,7 @@ describe('resolveRootRequirementFromMetadata', () => {
       name: 'demo',
       raw: 'demo@next',
       reason: 'Tag "next" does not exist',
+      requiredBy: 'root',
       specifier: 'next',
       type: 'tag',
     });
@@ -297,6 +329,7 @@ describe('resolveRootRequirements', () => {
       errors: [],
       resolved: [{ name: 'demo', version: '1.2.0' }],
       tagRequirements: [{ name: 'demo', tag: 'latest', version: '1.2.0' }],
+      warnings: [],
     });
   });
 });

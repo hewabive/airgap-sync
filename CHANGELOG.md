@@ -2,6 +2,11 @@
 
 ## 0.1.0
 
+- Made the npm release-age policy availability-safe. Exact lockfile versions and other
+  requirements without an eligible compatible alternative are now bundled with a clear
+  non-blocking warning instead of failing the entire download. Resolution diagnostics
+  include the originating parent, repository, and lockfile and are preserved in
+  `fetch-report.json`.
 - Python application runtime lists now define candidate CPython minors. Planning keeps
   every minor with a complete wheels-only dependency tree across all requested
   platforms, reports incompatible minors as skipped, and still fails on planner,

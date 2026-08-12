@@ -12,6 +12,7 @@ import type {
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
   ResolutionReason,
+  ResolutionWarning,
   RootPackageRequirement,
   TagRequirement,
   TagResolutionPolicy,
@@ -72,7 +73,7 @@ interface FetchSeedBundlePassOptions extends FetchSeedBundleOptions {
 }
 
 export type FetchProgressPhase = 'resolve' | 'download' | 'scan';
-export type FetchProgressStatus = 'start' | 'progress' | 'done' | 'error';
+export type FetchProgressStatus = 'start' | 'progress' | 'done' | 'warning' | 'error';
 
 export interface FetchProgressEvent {
   bytes?: number;
@@ -197,6 +198,21 @@ function compareUnsupportedRequirement(
   right: UnsupportedRootPackageRequirement
 ): number {
   return unsupportedId(left).localeCompare(unsupportedId(right));
+}
+
+function resolutionWarningId(warning: ResolutionWarning): string {
+  return [
+    warning.code,
+    warning.requiredBy,
+    warning.name,
+    warning.version,
+    warning.specifier,
+    warning.type,
+  ].join('\0');
+}
+
+function compareResolutionWarning(left: ResolutionWarning, right: ResolutionWarning): number {
+  return resolutionWarningId(left).localeCompare(resolutionWarningId(right));
 }
 
 function unsupportedId(requirement: UnsupportedRootPackageRequirement): string {
@@ -352,6 +368,7 @@ async function resolveSeedBundlePass(
     tagRequirements: [],
     timings,
     unsupported: [...(options.unsupported ?? [])],
+    warnings: [],
     wouldDownload: 0,
     wouldDownloadPackages: [],
   };
@@ -650,6 +667,7 @@ async function resolveSeedBundlePass(
         name: resolved.name,
         raw: resolved.raw,
         reason: errorMessage(error),
+        requiredBy: resolved.requiredBy,
         specifier: resolved.specifier,
         type: resolved.type,
       });
@@ -688,11 +706,24 @@ async function resolveSeedBundlePass(
       timings.resolveWorkerMs = (timings.resolveWorkerMs ?? 0) + resolveMs;
       result.errors.push(...resolution.errors);
       if (resolution.errors.length > 0) {
+        const diagnostic = resolution.errors[0]!;
         options.onProgress?.({
+          detail: `${diagnostic.raw} required by ${diagnostic.requiredBy}: ${diagnostic.reason}`,
           package: requirement.raw,
           phase: 'resolve',
           queue: queue.length,
           status: 'error',
+        });
+      }
+
+      result.warnings.push(...resolution.warnings);
+      for (const warning of resolution.warnings) {
+        options.onProgress?.({
+          detail: `${warning.raw} required by ${warning.requiredBy}: ${warning.reason}`,
+          package: warning.raw,
+          phase: 'resolve',
+          queue: queue.length,
+          status: 'warning',
         });
       }
 
@@ -720,14 +751,17 @@ async function resolveSeedBundlePass(
         processResolvedPackage(resolved);
       }
     } catch (error) {
+      const reason = errorMessage(error);
       result.errors.push({
         name: requirement.name,
         raw: requirement.raw,
-        reason: errorMessage(error),
+        reason,
+        requiredBy: requirement.requiredBy,
         specifier: requirement.specifier,
         type: requirement.type,
       });
       options.onProgress?.({
+        detail: `${requirement.raw} required by ${requirement.requiredBy}: ${reason}`,
         package: requirement.raw,
         phase: 'resolve',
         queue: queue.length,
@@ -754,6 +788,7 @@ async function resolveSeedBundlePass(
   result.tagRequirements.sort(compareTagRequirement);
   result.gitRequirements.sort(compareGitRequirement);
   result.unsupported.sort(compareUnsupportedRequirement);
+  result.warnings.sort(compareResolutionWarning);
 
   timings.totalMs = elapsedMs(totalStart);
   options.onProgress?.({
@@ -864,6 +899,7 @@ async function materializeResolvedPackages(
         name: resolved.name,
         raw: resolved.raw,
         reason: errorMessage(outcome.error),
+        requiredBy: resolved.requiredBy,
         specifier: resolved.specifier,
         type: resolved.type,
       });

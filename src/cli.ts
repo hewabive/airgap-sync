@@ -723,6 +723,7 @@ function formatDownloadSummary(
   const gitSkipped = report.gitSources.skipped.length;
   const unsupported = report.fetch.unsupported.length;
   const npmErrors = report.fetch.errors.length;
+  const npmResolutionWarnings = report.fetch.warnings ?? [];
   const pythonApplicationErrors =
     report.pythonApplications?.errors.filter(
       (error) => error.id !== 'python-security' || report.pythonSecurity?.ok !== false
@@ -777,6 +778,11 @@ function formatDownloadSummary(
   const vulnerabilityResolutionLine = report.fetch.vulnerabilityResolutions?.length
     ? `NPM vulnerability resolution: ${String(report.fetch.vulnerabilityResolutions.length)} vulnerable range selections replaced with OSV-clean compatible versions.`
     : undefined;
+  const releaseAgeWarningLine = npmResolutionWarnings.length
+    ? yellow(
+        `NPM release-age WARNING: ${String(npmResolutionWarnings.length)} exact or otherwise non-substitutable requirements were bundled before meeting the configured minimum release age.`
+      )
+    : undefined;
   const gitLine = report.dryRun
     ? `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.planned)} planned, ${String(report.gitFetch.errors.length)} errors.`
     : `Git mirrors: ${String(report.gitFetch.totalRepositories)} total, ${String(report.gitFetch.cloned)} cloned, ${String(changedGitMirrors)} changed${newGitCommits > 0 ? `, +${String(newGitCommits)} commits` : ''}, ${String(report.gitFetch.unchanged)} unchanged${unknownGitMirrors > 0 ? `, ${String(unknownGitMirrors)} checked` : ''}, ${String(report.gitFetch.errors.length)} errors.`;
@@ -823,6 +829,7 @@ function formatDownloadSummary(
   const lines = [
     status,
     npmLine,
+    ...(releaseAgeWarningLine ? [releaseAgeWarningLine] : []),
     ...(vulnerabilityResolutionLine ? [vulnerabilityResolutionLine] : []),
     securityLine,
     gitLine,
@@ -841,6 +848,44 @@ function formatDownloadSummary(
     ...(cpythonDistributionsLine ? [cpythonDistributionsLine] : []),
     `Bundle: ${report.outputDir} (${mode}bundle updated: ${bundleUpdated}, reports written: ${reportsWritten}).`,
   ];
+
+  if (npmResolutionWarnings.length > 0) {
+    lines.push(
+      ...npmResolutionWarnings
+        .slice(0, 20)
+        .map((warning) =>
+          yellow(
+            `NPM release-age WARNING [${warning.name}@${warning.version}, required by ${warning.requiredBy}]: ${safeConsoleDetail(warning.reason)}`
+          )
+        )
+    );
+    if (npmResolutionWarnings.length > 20) {
+      lines.push(
+        yellow(
+          `NPM release-age: ${String(npmResolutionWarnings.length - 20)} more warnings omitted from console output; see fetch-report.json.`
+        )
+      );
+    }
+  }
+
+  if (report.fetch.errors.length > 0) {
+    lines.push(
+      ...report.fetch.errors
+        .slice(0, 20)
+        .map((error) =>
+          red(
+            `NPM resolution ERROR [${error.raw}, required by ${error.requiredBy}]: ${safeConsoleDetail(error.reason)}`
+          )
+        )
+    );
+    if (report.fetch.errors.length > 20) {
+      lines.push(
+        red(
+          `NPM resolution: ${String(report.fetch.errors.length - 20)} more errors omitted from console output; see fetch-report.json.`
+        )
+      );
+    }
+  }
 
   if (report.security && securitySummary) {
     lines.push(
@@ -1861,6 +1906,13 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
       return;
     }
 
+    if (event.status === 'warning') {
+      const detail = event.detail ? ` ${event.detail}` : '';
+      console.error(yellow(`${prefix} ${label}: WARNING${detail}`));
+      recordOutput(key);
+      return;
+    }
+
     if (event.current === undefined) {
       return;
     }
@@ -2044,6 +2096,7 @@ function toFetchPreview(result: ResolveRootRequirementsResult) {
     })),
     errors: result.errors,
     tagRequirements: result.tagRequirements,
+    warnings: result.warnings,
   };
 }
 
@@ -4959,6 +5012,7 @@ program
           ...(resolution.vulnerabilityResolutions
             ? { vulnerabilityResolutions: resolution.vulnerabilityResolutions }
             : {}),
+          warnings: resolution.warnings,
           wouldDownloadPackages: resolution.wouldDownloadPackages,
         })
       );
@@ -4967,6 +5021,14 @@ program
           createdAt: new Date().toISOString(),
           sourceRegistry: options.registry,
         });
+      }
+
+      for (const warning of resolution.warnings) {
+        console.error(
+          yellow(
+            `[fetch] NPM release-age WARNING [${warning.name}@${warning.version}, required by ${warning.requiredBy}]: ${safeConsoleDetail(warning.reason)}`
+          )
+        );
       }
 
       console.log(
@@ -4978,6 +5040,7 @@ program
             resolved: resolution.resolved.length,
             timings: resolution.timings,
             tagRequirements: resolution.tagRequirements.length,
+            warnings: resolution.warnings,
             security,
           },
           null,

@@ -24,6 +24,12 @@ Every substitution records the parent, range, original version, selected version
 advisory IDs in `fetch-report.json`. This is a best-effort known-vulnerability
 optimization, not reachability analysis or proof that the selected code is benign.
 
+The minimum release-age policy is a preference rather than an availability gate. Tags
+and ranges use an older eligible compatible version when possible. Exact lockfile
+versions, and requirements with no eligible alternative, are retained with an explicit
+origin-bearing warning so that the transferred repository remains installable. Those
+packages still pass the same byte-integrity, OSV malware, and static inspection gates.
+
 Hashing and static manifest inspection share one streaming tarball read on a cache miss.
 Download persists normalized embedded manifests by tarball SHA-256. Reuse requires the
 previous schema-v2 seed manifest to identify the expected SHA-256, then re-hashes the

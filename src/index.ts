@@ -644,6 +644,7 @@ export type {
   RepositoryUpdateStatus,
   ResolutionError,
   ResolutionReason,
+  ResolutionWarning,
   ResolveRootRequirementsResult,
   ResolvedRootPackage,
   RootPackageRequirement,

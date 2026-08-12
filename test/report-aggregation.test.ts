@@ -128,6 +128,26 @@ describe('report aggregation', () => {
     expect(report?.vulnerabilityResolutions).toEqual([first]);
   });
 
+  it('preserves and deduplicates release-age warnings across iterations', () => {
+    const warning = {
+      code: 'release-age-bypass' as const,
+      minReleaseAgeDays: 3,
+      name: 'tsx',
+      raw: 'tsx@4.23.12',
+      reason: 'fresh exact lockfile version',
+      requiredBy: 'lockfile:github.com/acme/app/package-lock.json',
+      specifier: '4.23.12',
+      type: 'version' as const,
+      version: '4.23.12',
+    };
+    const report = aggregateFetchReports([
+      fetchReport({ warnings: [warning] }),
+      fetchReport({ warnings: [warning] }),
+    ]);
+
+    expect(report?.warnings).toEqual([warning]);
+  });
+
   it('preserves Git mirror changes from earlier iterations', () => {
     const report = aggregateGitFetchReports([
       gitFetchReport({

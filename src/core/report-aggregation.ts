@@ -4,6 +4,7 @@ import type {
   FetchTimings,
   GitFetchActionResult,
   GitFetchReport,
+  ResolutionWarning,
   VulnerabilityResolutionAction,
 } from '../types.js';
 
@@ -150,6 +151,27 @@ function uniqueVulnerabilityResolutions(
   );
 }
 
+function resolutionWarningKey(warning: ResolutionWarning): string {
+  return [
+    warning.code,
+    warning.requiredBy,
+    warning.name,
+    warning.version,
+    warning.specifier,
+    warning.type,
+  ].join('\0');
+}
+
+function uniqueResolutionWarnings(warnings: ResolutionWarning[]): ResolutionWarning[] {
+  const byKey = new Map<string, ResolutionWarning>();
+  for (const warning of warnings) {
+    byKey.set(resolutionWarningKey(warning), warning);
+  }
+  return [...byKey.values()].sort((left, right) =>
+    resolutionWarningKey(left).localeCompare(resolutionWarningKey(right))
+  );
+}
+
 function sumFetchTimings(reports: FetchReport[]): FetchTimings {
   return reports.reduce<FetchTimings>(
     (total, report) => ({
@@ -211,6 +233,7 @@ export function aggregateFetchReports(reports: FetchReport[]): FetchReport | und
   const vulnerabilityResolutions = uniqueVulnerabilityResolutions(
     reports.flatMap((report) => report.vulnerabilityResolutions ?? [])
   );
+  const warnings = uniqueResolutionWarnings(reports.flatMap((report) => report.warnings ?? []));
 
   return {
     ...last,
@@ -222,6 +245,7 @@ export function aggregateFetchReports(reports: FetchReport[]): FetchReport | und
         : Math.max(0, last.resolved - downloadedPackages.length),
     timings: sumFetchTimings(reports),
     ...(vulnerabilityResolutions.length > 0 ? { vulnerabilityResolutions } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     wouldDownloadPackages,
   };
 }

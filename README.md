@@ -314,6 +314,13 @@ operator.
 `maxReportAgeHours` is also the lifetime of Python OSV evidence; Python malware has no
 allow-list escape hatch.
 
+The release-age delay filters tags and SemVer ranges while an older compatible release
+is available. If an exact version from a lockfile is younger than the delay, or a tag or
+range has no eligible compatible alternative, airgap-sync keeps the resolved version so
+the bundle remains installable and emits a non-blocking warning with the originating
+repository, lockfile, or parent. Integrity, OSV, malware, and static package checks still
+apply normally. These warnings are also recorded in `fetch-report.json`.
+
 For unlocked SemVer ranges, the default `prefer-clean` policy checks the selected graph
 with OSV before downloading tarballs and replaces a vulnerable selection when one of
 the 20 newest compatible, release-age-eligible versions has no known OSV findings.
