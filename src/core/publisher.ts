@@ -663,7 +663,20 @@ export async function publishBundle(
   if (options.allowLegacyBundle !== true) {
     await assertNpmSecurityGate(options.bundleDir, manifest);
   }
-  throwIfInvalidBundle(await validateBundle(options.bundleDir, manifest, distTags));
+  throwIfInvalidBundle(
+    await validateBundle(options.bundleDir, manifest, distTags, {
+      concurrency: normalizeConcurrency(options.publishConcurrency, defaultPublishConcurrency),
+      onProgress(event) {
+        options.onProgress?.({
+          current: event.current,
+          package: event.package,
+          phase: 'validate',
+          status: 'progress',
+          total: event.total,
+        });
+      },
+    })
+  );
   options.onProgress?.({ phase: 'validate', status: 'done' });
   timings.validateMs = elapsedMs(validateStart);
 

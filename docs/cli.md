@@ -516,7 +516,7 @@ Supported options:
 ```text
 -r, --registry <url>      Target registry URL
 --dist-tag-concurrency <n> Concurrent npm dist-tag operations, default 4
---publish-concurrency <n> Concurrent npm publish operations, default 4
+--publish-concurrency <n> Concurrent npm tarball validation/publish operations, default 4
 --no-skip-existing        Attempt to publish versions that already exist
 --dry-run                 Print planned operations without publishing
 ```
@@ -524,8 +524,8 @@ Supported options:
 Current behavior publishes tarballs with a temporary tag, then restores the required
 tags from `dist-tags.json`. Before running npm publish commands, it requires a fresh
 passing `security-report.json` bound to the exact schema-v2 manifest, revalidates every
-tarball SHA-256/SRI, and validates internal manifest consistency. Legacy schema-v1
-bundles are refused.
+tarball SHA-256/SRI with bounded concurrency, and validates internal manifest
+consistency. Legacy schema-v1 bundles are refused.
 
 ## info
 
@@ -750,7 +750,7 @@ Supported options:
 --skip-git-provision      Skip Git repository provisioning; package-owner provisioning still runs
 --no-skip-existing        Attempt to publish npm versions that already exist
 --dist-tag-concurrency <n> Concurrent npm dist-tag operations, default 4
---publish-concurrency <n> Concurrent npm publish operations, default 4
+--publish-concurrency <n> Concurrent npm tarball validation/publish operations, default 4
 --configure-git-global    Write Git URL rewrite rules into global Git config
 --dry-run                 Print planned publish operations without publishing or pushing
 ```

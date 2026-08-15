@@ -3,6 +3,8 @@ import * as fs from './fs.js';
 import type { BundleManifest, DistTagsManifest } from '../types.js';
 import { inspectPackageTarball, type TarballInspectionCache } from './tarball.js';
 
+const defaultTarballValidationConcurrency = 4;
+
 export type BundleValidationSeverity = 'error';
 
 export interface BundleValidationIssue {
@@ -37,64 +39,113 @@ function isSafeBundleFile(file: string): boolean {
   );
 }
 
-async function validateTarballs(
-  bundleDir: string,
-  manifest: BundleManifest,
-  inspectionCache?: TarballInspectionCache
-): Promise<BundleValidationIssue[]> {
-  const issues: BundleValidationIssue[] = [];
+function isMissingFileError(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
+}
 
-  for (const pkg of manifest.packages) {
-    if (!isSafeBundleFile(pkg.file)) {
-      issues.push(
-        issue(
-          'unsafe-package-file',
-          `${packageId(pkg)} references an unsafe package file path: ${pkg.file}`
-        )
-      );
-      continue;
-    }
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
 
-    if (!(await fs.pathExists(path.join(bundleDir, pkg.file)))) {
-      issues.push(issue('missing-tarball', `${packageId(pkg)} tarball is missing: ${pkg.file}`));
-      continue;
-    }
-
-    if (manifest.schemaVersion === 2) {
-      if (!pkg.sha256) {
-        issues.push(issue('missing-sha256', `${packageId(pkg)} has no SHA-256 digest`));
-        continue;
-      }
-      try {
-        const inspection = await inspectPackageTarball(
-          path.join(bundleDir, pkg.file),
-          pkg,
-          inspectionCache
-        );
-        if (inspection.manifest.name !== pkg.name || inspection.manifest.version !== pkg.version) {
-          issues.push(
-            issue(
-              'tarball-metadata-mismatch',
-              `${packageId(pkg)} tarball contains ${inspection.manifest.name}@${inspection.manifest.version}`
-            )
-          );
-        }
-      } catch (error) {
-        issues.push(
-          issue('registry-integrity-mismatch', `${packageId(pkg)}: ${(error as Error).message}`)
-        );
-      }
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      const item = items[currentIndex];
+      if (item === undefined) continue;
+      results[currentIndex] = await mapper(item);
     }
   }
 
-  return issues;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => worker())
+  );
+  return results;
+}
+
+async function validateTarballs(
+  bundleDir: string,
+  manifest: BundleManifest,
+  options: {
+    concurrency: number;
+    inspectionCache?: TarballInspectionCache;
+    onProgress?: (current: number, pkg: BundleManifest['packages'][number]) => void;
+  }
+): Promise<BundleValidationIssue[]> {
+  let completed = 0;
+  const packageIssues = await mapWithConcurrency(
+    manifest.packages,
+    options.concurrency,
+    async (pkg): Promise<BundleValidationIssue[]> => {
+      const issues: BundleValidationIssue[] = [];
+      if (!isSafeBundleFile(pkg.file)) {
+        issues.push(
+          issue(
+            'unsafe-package-file',
+            `${packageId(pkg)} references an unsafe package file path: ${pkg.file}`
+          )
+        );
+      } else if (manifest.schemaVersion === 2) {
+        if (!pkg.sha256) {
+          issues.push(
+            (await fs.pathExists(path.join(bundleDir, pkg.file)))
+              ? issue('missing-sha256', `${packageId(pkg)} has no SHA-256 digest`)
+              : issue('missing-tarball', `${packageId(pkg)} tarball is missing: ${pkg.file}`)
+          );
+        } else {
+          try {
+            const inspection = await inspectPackageTarball(
+              path.join(bundleDir, pkg.file),
+              pkg,
+              options.inspectionCache
+            );
+            if (
+              inspection.manifest.name !== pkg.name ||
+              inspection.manifest.version !== pkg.version
+            ) {
+              issues.push(
+                issue(
+                  'tarball-metadata-mismatch',
+                  `${packageId(pkg)} tarball contains ${inspection.manifest.name}@${inspection.manifest.version}`
+                )
+              );
+            }
+          } catch (error) {
+            issues.push(
+              isMissingFileError(error)
+                ? issue('missing-tarball', `${packageId(pkg)} tarball is missing: ${pkg.file}`)
+                : issue(
+                    'registry-integrity-mismatch',
+                    `${packageId(pkg)}: ${(error as Error).message}`
+                  )
+            );
+          }
+        }
+      } else if (!(await fs.pathExists(path.join(bundleDir, pkg.file)))) {
+        issues.push(issue('missing-tarball', `${packageId(pkg)} tarball is missing: ${pkg.file}`));
+      }
+
+      completed++;
+      options.onProgress?.(completed, pkg);
+      return issues;
+    }
+  );
+
+  return packageIssues.flat();
 }
 
 export async function validateBundle(
   bundleDir: string,
   manifest: BundleManifest,
   distTags: DistTagsManifest,
-  options: { inspectionCache?: TarballInspectionCache } = {}
+  options: {
+    concurrency?: number;
+    inspectionCache?: TarballInspectionCache;
+    onProgress?: (event: { current: number; package: string; total: number }) => void;
+  } = {}
 ): Promise<BundleValidationResult> {
   const issues: BundleValidationIssue[] = [];
   const manifestSchemaVersion = (manifest as { schemaVersion: number }).schemaVersion;
@@ -174,7 +225,27 @@ export async function validateBundle(
     }
   }
 
-  issues.push(...(await validateTarballs(bundleDir, manifest, options.inspectionCache)));
+  const concurrency =
+    options.concurrency === undefined || !Number.isFinite(options.concurrency)
+      ? defaultTarballValidationConcurrency
+      : Math.max(1, Math.floor(options.concurrency));
+  issues.push(
+    ...(await validateTarballs(bundleDir, manifest, {
+      concurrency,
+      ...(options.inspectionCache ? { inspectionCache: options.inspectionCache } : {}),
+      ...(options.onProgress
+        ? {
+            onProgress: (current, pkg) => {
+              options.onProgress?.({
+                current,
+                package: packageId(pkg),
+                total: manifest.packages.length,
+              });
+            },
+          }
+        : {}),
+    }))
+  );
   return {
     issues,
     valid: issues.length === 0,

@@ -185,6 +185,13 @@ describe('publishBundle', () => {
           status: 'start',
         },
         {
+          current: 1,
+          package: 'demo@1.0.0',
+          phase: 'validate',
+          status: 'progress',
+          total: 1,
+        },
+        {
           phase: 'validate',
           status: 'done',
         },

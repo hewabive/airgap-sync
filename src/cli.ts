@@ -458,7 +458,7 @@ function addNpmPublishOptions(command: Command): Command {
     )
     .option(
       '--publish-concurrency <count>',
-      'Concurrent npm publish operations',
+      'Concurrent npm tarball validation and publish operations',
       parsePositiveInteger,
       defaultPublishConcurrency
     );

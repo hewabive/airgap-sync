@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import * as fs from '../src/core/fs.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { throwIfInvalidBundle, validateBundle } from '../src/core/validation.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
@@ -56,6 +56,7 @@ describe('validateBundle', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await fs.remove(bundleDir);
   });
 
@@ -96,6 +97,43 @@ describe('validateBundle', () => {
       ],
       valid: false,
     });
+  });
+
+  it('validates tarballs with bounded concurrency and reports progress', async () => {
+    const packages = Array.from({ length: 6 }, (_, index) => ({
+      ...manifest.packages[0]!,
+      file: `packages/demo-${String(index)}.tgz`,
+      version: `1.0.${String(index)}`,
+    }));
+    await Promise.all(
+      packages.map(async (pkg) => fs.writeFile(path.join(bundleDir, pkg.file), ''))
+    );
+
+    const originalPathExists = fs.pathExists;
+    let active = 0;
+    let maxActive = 0;
+    vi.spyOn(fs, 'pathExists').mockImplementation(async (filePath) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const exists = await originalPathExists(filePath);
+      active--;
+      return exists;
+    });
+    const progress: { current: number; package: string; total: number }[] = [];
+
+    const result = await validateBundle(bundleDir, { ...manifest, packages }, distTags, {
+      concurrency: 3,
+      onProgress(event) {
+        progress.push(event);
+      },
+    });
+
+    expect(result).toEqual({ issues: [], valid: true });
+    expect(maxActive).toBe(3);
+    expect(progress).toHaveLength(packages.length);
+    expect(progress.map((event) => event.current)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(progress.every((event) => event.total === packages.length)).toBe(true);
   });
 
   it('throws a readable error for invalid bundles', () => {
