@@ -2,7 +2,12 @@ import os from 'node:os';
 import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { throwIfInvalidBundle, validateBundle } from '../src/core/validation.js';
+import {
+  throwIfInvalidBundle,
+  validateBundle,
+  validateBundleStructure,
+  validateBundleTarballs,
+} from '../src/core/validation.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
 let bundleDir: string;
@@ -95,6 +100,36 @@ describe('validateBundle', () => {
           code: 'missing-tarball',
         },
       ],
+      valid: false,
+    });
+  });
+
+  it('separates full structural validation from selected tarball validation', async () => {
+    await fs.remove(path.join(bundleDir, 'packages/demo-1.0.0.tgz'));
+
+    expect(validateBundleStructure(manifest, distTags)).toEqual({ issues: [], valid: true });
+    await expect(validateBundleTarballs(bundleDir, manifest, [])).resolves.toEqual({
+      issues: [],
+      valid: true,
+    });
+    await expect(validateBundle(bundleDir, manifest, distTags)).resolves.toMatchObject({
+      issues: [{ code: 'missing-tarball' }],
+      valid: false,
+    });
+  });
+
+  it('keeps unsafe paths and missing schema-v2 digests in structural validation', () => {
+    expect(
+      validateBundleStructure(
+        {
+          ...manifest,
+          packages: [{ ...manifest.packages[0]!, file: '../demo.tgz' }],
+          schemaVersion: 2,
+        },
+        distTags
+      )
+    ).toMatchObject({
+      issues: [{ code: 'unsafe-package-file' }, { code: 'missing-sha256' }],
       valid: false,
     });
   });

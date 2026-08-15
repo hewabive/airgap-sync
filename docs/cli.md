@@ -523,9 +523,13 @@ Supported options:
 
 Current behavior publishes tarballs with a temporary tag, then restores the required
 tags from `dist-tags.json`. Before running npm publish commands, it requires a fresh
-passing `security-report.json` bound to the exact schema-v2 manifest, revalidates every
-tarball SHA-256/SRI with bounded concurrency, and validates internal manifest
-consistency. Legacy schema-v1 bundles are refused.
+passing `security-report.json` bound to the exact schema-v2 manifest and validates
+internal manifest consistency. After looking up the target registry, it revalidates
+SHA-256/SRI and archive metadata with bounded concurrency only for tarballs whose
+versions still need to be uploaded. Failed or inconclusive registry lookups are treated
+as missing versions. Use `airgap-sync verify` for a full check of every bundle tarball.
+`--dry-run` performs no registry lookup, so it retains full tarball validation. Legacy
+schema-v1 bundles are refused.
 
 ## info
 

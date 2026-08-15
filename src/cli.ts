@@ -1653,7 +1653,7 @@ const publishPhaseLabels: Record<PublishProgressPhase, string> = {
   'dry-run': 'plan publish',
   'lookup-metadata': 'lookup registry metadata',
   publish: 'publish packages',
-  validate: 'validate bundle',
+  validate: 'validate publish tarballs',
 };
 
 type DownloadProgressEvent =

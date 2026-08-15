@@ -432,5 +432,7 @@ Use `airgap-sync info ./airgap-bundle` to print a JSON summary of package counts
 tags, report status, missing tarball files, and validation issues before transferring
 or publishing a bundle.
 
-`airgap-sync npm publish` runs the same validation before it starts npm publish
-commands.
+`airgap-sync verify` validates every referenced tarball. `airgap-sync npm publish`
+always validates the complete manifest structure and security evidence, then validates
+tarball contents only for versions that are absent from the target registry. A failed
+registry lookup is handled conservatively as an absent version.

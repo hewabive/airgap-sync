@@ -2,10 +2,10 @@
 
 ## 0.1.0
 
-- Parallelized full npm tarball validation with bounded concurrency during publish and
-  removed a redundant per-file metadata lookup, and added per-package progress.
-  SHA-256/SRI and archive metadata checks remain unchanged, while flash-drive reads can
-  keep multiple requests in flight.
+- Limited npm publication tarball validation to versions absent from the target
+  registry, while keeping full manifest/security preflight and conservative lookup
+  failure handling. Selected tarballs retain parallel SHA-256/SRI/archive validation
+  with per-package progress; `verify` and `info` still inspect the complete bundle.
 - Made the npm release-age policy availability-safe. Exact lockfile versions and other
   requirements without an eligible compatible alternative are now bundled with a clear
   non-blocking warning instead of failing the entire download. Resolution diagnostics

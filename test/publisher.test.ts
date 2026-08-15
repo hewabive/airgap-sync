@@ -3,7 +3,9 @@ import path from 'node:path';
 import * as fs from '../src/core/fs.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPublishPlan, isBlockedPublishRegistry, publishBundle } from '../src/index.js';
+import { semanticDigest } from '../src/core/canonical-json.js';
 import type { NpmRunner, PublishProgressEvent } from '../src/core/publisher.js';
+import { defaultNpmSecurityPolicy } from '../src/core/security.js';
 import type { BundleManifest, DistTagsManifest } from '../src/types.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -181,8 +183,10 @@ describe('publishBundle', () => {
       expect(report.timings.validateMs).toBeGreaterThanOrEqual(0);
       expect(progress).toEqual([
         {
+          current: 0,
           phase: 'validate',
           status: 'start',
+          total: 1,
         },
         {
           current: 1,
@@ -192,8 +196,10 @@ describe('publishBundle', () => {
           total: 1,
         },
         {
+          current: 1,
           phase: 'validate',
           status: 'done',
+          total: 1,
         },
         {
           current: 2,
@@ -217,9 +223,14 @@ describe('publishBundle', () => {
     ).rejects.toThrow('Refusing to publish to public registry');
   });
 
-  it('uses package metadata to skip existing versions and tags', async () => {
+  it('skips local tarball validation for versions and tags already in the registry', async () => {
     const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
     const progress: PublishProgressEvent[] = [];
+    const secureManifest: BundleManifest = {
+      ...manifest,
+      packages: [{ ...manifest.packages[0]!, sha256: 'a'.repeat(64) }],
+      schemaVersion: 2,
+    };
 
     fetchMock.mockResolvedValue(
       new Response(
@@ -243,11 +254,19 @@ describe('publishBundle', () => {
     );
 
     try {
-      await fs.ensureDir(path.join(bundleDir, 'packages'));
-      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
-
-      const report = await publishBundle(manifest, distTags, {
-        allowLegacyBundle: true,
+      await fs.writeJson(path.join(bundleDir, 'security-report.json'), {
+        advisories: [],
+        errors: [],
+        generatedAt: new Date().toISOString(),
+        manifestSha256: semanticDigest(secureManifest),
+        ok: true,
+        packageCount: 1,
+        policy: defaultNpmSecurityPolicy,
+        provider: { name: 'OSV', url: 'https://api.osv.dev/v1/querybatch' },
+        schemaVersion: 1,
+        staticFindings: [],
+      });
+      const report = await publishBundle(secureManifest, distTags, {
         bundleDir,
         onProgress(event) {
           progress.push(event);
@@ -288,9 +307,201 @@ describe('publishBundle', () => {
         status: 'done',
         total: 1,
       });
+      expect(progress).toContainEqual({
+        current: 0,
+        phase: 'validate',
+        status: 'done',
+        total: 0,
+      });
+      expect(
+        progress.some((event) => event.phase === 'validate' && event.status === 'progress')
+      ).toBe(false);
     } finally {
       await fs.remove(bundleDir);
     }
+  });
+
+  it('validates and publishes only versions missing from the registry', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const progress: PublishProgressEvent[] = [];
+    const npmCalls: string[][] = [];
+    const packages = [
+      manifest.packages[0]!,
+      {
+        ...manifest.packages[0]!,
+        file: 'packages/demo-2.0.0.tgz',
+        version: '2.0.0',
+      },
+    ];
+    const mixedManifest: BundleManifest = { ...manifest, packages };
+    const mixedDistTags: DistTagsManifest = {
+      ...distTags,
+      requirements: [{ ...distTags.requirements[0]!, version: '2.0.0' }],
+      tags: { demo: { latest: '2.0.0' } },
+    };
+
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          'dist-tags': { latest: '1.0.0' },
+          name: 'demo',
+          versions: {
+            '1.0.0': {
+              name: 'demo',
+              version: '1.0.0',
+            },
+          },
+        }),
+        { status: 200 }
+      )
+    );
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-2.0.0.tgz'), '');
+
+      const report = await publishBundle(mixedManifest, mixedDistTags, {
+        allowLegacyBundle: true,
+        bundleDir,
+        onProgress(event) {
+          progress.push(event);
+        },
+        registryUrl: 'http://localhost:4873',
+        runNpm(args) {
+          npmCalls.push(args);
+          return Promise.resolve({ stdout: '' });
+        },
+      });
+
+      expect(report).toMatchObject({ errors: [], published: 1, skipped: 1 });
+      expect(progress).toContainEqual({
+        current: 1,
+        package: 'demo@2.0.0',
+        phase: 'validate',
+        status: 'progress',
+        total: 1,
+      });
+      expect(
+        progress.some((event) => event.phase === 'validate' && event.package === 'demo@1.0.0')
+      ).toBe(false);
+      expect(npmCalls.filter((args) => args[0] === 'publish')).toHaveLength(1);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('applies tag-only changes without reading an existing package tarball', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const progress: PublishProgressEvent[] = [];
+    const npmCalls: string[][] = [];
+
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          'dist-tags': {},
+          name: 'demo',
+          versions: {
+            '1.0.0': {
+              name: 'demo',
+              version: '1.0.0',
+            },
+          },
+        }),
+        { status: 200 }
+      )
+    );
+
+    try {
+      const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
+        bundleDir,
+        onProgress(event) {
+          progress.push(event);
+        },
+        registryUrl: 'http://localhost:4873',
+        runNpm(args) {
+          npmCalls.push(args);
+          return Promise.resolve({ stdout: '' });
+        },
+      });
+
+      expect(report).toMatchObject({ errors: [], published: 0, restoredTags: 1, skipped: 1 });
+      expect(progress).toContainEqual({
+        current: 0,
+        phase: 'validate',
+        status: 'done',
+        total: 0,
+      });
+      expect(npmCalls.map((args) => args[0])).toEqual(['whoami', 'dist-tag']);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('validates conservatively when registry lookup fails', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const npmCalls: string[][] = [];
+    fetchMock.mockRejectedValue(new Error('registry unavailable'));
+
+    try {
+      await expect(
+        publishBundle(manifest, distTags, {
+          allowLegacyBundle: true,
+          bundleDir,
+          registryUrl: 'http://localhost:4873',
+          runNpm(args) {
+            npmCalls.push(args);
+            return Promise.resolve({ stdout: '' });
+          },
+        })
+      ).rejects.toThrow('missing-tarball');
+
+      expect(npmCalls.map((args) => args[0])).toEqual(['view', 'whoami']);
+      expect(npmCalls.some((args) => args[0] === 'publish')).toBe(false);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('validates every tarball with --no-skip-existing', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const npmCalls: string[][] = [];
+
+    try {
+      await expect(
+        publishBundle(manifest, distTags, {
+          allowLegacyBundle: true,
+          bundleDir,
+          registryUrl: 'http://localhost:4873',
+          runNpm(args) {
+            npmCalls.push(args);
+            return Promise.resolve({ stdout: '' });
+          },
+          skipExisting: false,
+        })
+      ).rejects.toThrow('missing-tarball');
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(npmCalls.map((args) => args[0])).toEqual(['whoami']);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('rejects structural errors before registry lookup even for existing versions', async () => {
+    const unsafeManifest: BundleManifest = {
+      ...manifest,
+      packages: [{ ...manifest.packages[0]!, file: '../demo-1.0.0.tgz' }],
+    };
+
+    await expect(
+      publishBundle(unsafeManifest, distTags, {
+        allowLegacyBundle: true,
+        bundleDir: '/unused',
+        registryUrl: 'http://localhost:4873',
+      })
+    ).rejects.toThrow('unsafe-package-file');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not downgrade a newer registry latest for bundled latest requirements', async () => {

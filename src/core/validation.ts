@@ -18,6 +18,14 @@ export interface BundleValidationResult {
   valid: boolean;
 }
 
+export interface BundleTarballValidationOptions {
+  concurrency?: number;
+  inspectionCache?: TarballInspectionCache;
+  onProgress?: (event: { current: number; package: string; total: number }) => void;
+}
+
+type ManifestPackage = BundleManifest['packages'][number];
+
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
 }
@@ -44,7 +52,7 @@ function isMissingFileError(error: unknown): boolean {
 }
 
 async function mapWithConcurrency<T, R>(
-  items: T[],
+  items: readonly T[],
   concurrency: number,
   mapper: (item: T) => Promise<R>
 ): Promise<R[]> {
@@ -66,19 +74,40 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function validateTarballs(
+function validationResult(issues: BundleValidationIssue[]): BundleValidationResult {
+  return {
+    issues,
+    valid: issues.length === 0,
+  };
+}
+
+function mergeValidationResults(...results: BundleValidationResult[]): BundleValidationResult {
+  const seen = new Set<string>();
+  const issues = results.flatMap((result) =>
+    result.issues.filter((item) => {
+      const key = `${item.code}\0${item.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+  );
+  return validationResult(issues);
+}
+
+export async function validateBundleTarballs(
   bundleDir: string,
   manifest: BundleManifest,
-  options: {
-    concurrency: number;
-    inspectionCache?: TarballInspectionCache;
-    onProgress?: (current: number, pkg: BundleManifest['packages'][number]) => void;
-  }
-): Promise<BundleValidationIssue[]> {
+  packages: readonly ManifestPackage[] = manifest.packages,
+  options: BundleTarballValidationOptions = {}
+): Promise<BundleValidationResult> {
+  const concurrency =
+    options.concurrency === undefined || !Number.isFinite(options.concurrency)
+      ? defaultTarballValidationConcurrency
+      : Math.max(1, Math.floor(options.concurrency));
   let completed = 0;
   const packageIssues = await mapWithConcurrency(
-    manifest.packages,
-    options.concurrency,
+    packages,
+    concurrency,
     async (pkg): Promise<BundleValidationIssue[]> => {
       const issues: BundleValidationIssue[] = [];
       if (!isSafeBundleFile(pkg.file)) {
@@ -129,24 +158,22 @@ async function validateTarballs(
       }
 
       completed++;
-      options.onProgress?.(completed, pkg);
+      options.onProgress?.({
+        current: completed,
+        package: packageId(pkg),
+        total: packages.length,
+      });
       return issues;
     }
   );
 
-  return packageIssues.flat();
+  return validationResult(packageIssues.flat());
 }
 
-export async function validateBundle(
-  bundleDir: string,
+export function validateBundleStructure(
   manifest: BundleManifest,
-  distTags: DistTagsManifest,
-  options: {
-    concurrency?: number;
-    inspectionCache?: TarballInspectionCache;
-    onProgress?: (event: { current: number; package: string; total: number }) => void;
-  } = {}
-): Promise<BundleValidationResult> {
+  distTags: DistTagsManifest
+): BundleValidationResult {
   const issues: BundleValidationIssue[] = [];
   const manifestSchemaVersion = (manifest as { schemaVersion: number }).schemaVersion;
   const distTagsSchemaVersion = (distTags as { schemaVersion: number }).schemaVersion;
@@ -184,6 +211,20 @@ export async function validateBundle(
     issues.push(
       issue('duplicate-package', `Package appears more than once in seed-manifest: ${id}`)
     );
+  }
+
+  for (const pkg of manifest.packages) {
+    if (!isSafeBundleFile(pkg.file)) {
+      issues.push(
+        issue(
+          'unsafe-package-file',
+          `${packageId(pkg)} references an unsafe package file path: ${pkg.file}`
+        )
+      );
+    }
+    if (manifest.schemaVersion === 2 && !pkg.sha256) {
+      issues.push(issue('missing-sha256', `${packageId(pkg)} has no SHA-256 digest`));
+    }
   }
 
   for (const requirement of distTags.requirements) {
@@ -225,31 +266,19 @@ export async function validateBundle(
     }
   }
 
-  const concurrency =
-    options.concurrency === undefined || !Number.isFinite(options.concurrency)
-      ? defaultTarballValidationConcurrency
-      : Math.max(1, Math.floor(options.concurrency));
-  issues.push(
-    ...(await validateTarballs(bundleDir, manifest, {
-      concurrency,
-      ...(options.inspectionCache ? { inspectionCache: options.inspectionCache } : {}),
-      ...(options.onProgress
-        ? {
-            onProgress: (current, pkg) => {
-              options.onProgress?.({
-                current,
-                package: packageId(pkg),
-                total: manifest.packages.length,
-              });
-            },
-          }
-        : {}),
-    }))
+  return validationResult(issues);
+}
+
+export async function validateBundle(
+  bundleDir: string,
+  manifest: BundleManifest,
+  distTags: DistTagsManifest,
+  options: BundleTarballValidationOptions = {}
+): Promise<BundleValidationResult> {
+  return mergeValidationResults(
+    validateBundleStructure(manifest, distTags),
+    await validateBundleTarballs(bundleDir, manifest, manifest.packages, options)
   );
-  return {
-    issues,
-    valid: issues.length === 0,
-  };
 }
 
 export function throwIfInvalidBundle(validation: BundleValidationResult): void {

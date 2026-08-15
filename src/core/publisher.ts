@@ -15,7 +15,11 @@ import type {
 } from '../types.js';
 import { encodePackageName, isBlockedPublishRegistry } from './registry.js';
 import * as fs from './fs.js';
-import { throwIfInvalidBundle, validateBundle } from './validation.js';
+import {
+  throwIfInvalidBundle,
+  validateBundleStructure,
+  validateBundleTarballs,
+} from './validation.js';
 import { assertNpmSecurityGate } from './security.js';
 
 const execFileAsync = promisify(execFile);
@@ -658,27 +662,43 @@ export async function publishBundle(
   const totalStart = performance.now();
   const timings = createPublishTimings();
 
-  const validateStart = performance.now();
-  options.onProgress?.({ phase: 'validate', status: 'start' });
+  const validatePreflightStart = performance.now();
   if (options.allowLegacyBundle !== true) {
     await assertNpmSecurityGate(options.bundleDir, manifest);
   }
-  throwIfInvalidBundle(
-    await validateBundle(options.bundleDir, manifest, distTags, {
-      concurrency: normalizeConcurrency(options.publishConcurrency, defaultPublishConcurrency),
-      onProgress(event) {
-        options.onProgress?.({
-          current: event.current,
-          package: event.package,
-          phase: 'validate',
-          status: 'progress',
-          total: event.total,
-        });
-      },
-    })
-  );
-  options.onProgress?.({ phase: 'validate', status: 'done' });
-  timings.validateMs = elapsedMs(validateStart);
+  throwIfInvalidBundle(validateBundleStructure(manifest, distTags));
+  timings.validateMs = elapsedMs(validatePreflightStart);
+
+  async function validatePublishTarballs(packages: readonly ManifestPackage[]): Promise<void> {
+    const validateStart = performance.now();
+    options.onProgress?.({
+      current: 0,
+      phase: 'validate',
+      status: 'start',
+      total: packages.length,
+    });
+    throwIfInvalidBundle(
+      await validateBundleTarballs(options.bundleDir, manifest, packages, {
+        concurrency: normalizeConcurrency(options.publishConcurrency, defaultPublishConcurrency),
+        onProgress(event) {
+          options.onProgress?.({
+            current: event.current,
+            package: event.package,
+            phase: 'validate',
+            status: 'progress',
+            total: event.total,
+          });
+        },
+      })
+    );
+    options.onProgress?.({
+      current: packages.length,
+      phase: 'validate',
+      status: 'done',
+      total: packages.length,
+    });
+    timings.validateMs += elapsedMs(validateStart);
+  }
 
   const errors: PublishActionResult[] = [];
   let published = 0;
@@ -690,6 +710,7 @@ export async function publishBundle(
   ];
 
   if (options.dryRun) {
+    await validatePublishTarballs(manifest.packages);
     const dryRunStart = performance.now();
     const plan = createPublishPlan(manifest, distTags);
     options.onProgress?.({
@@ -733,8 +754,13 @@ export async function publishBundle(
   const publishedPackageNames = new Set<string>();
   timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
 
+  const packagesToPublish = manifest.packages.filter(
+    (pkg) => !existingVersionsByPackage.get(pkg.name)?.has(pkg.version)
+  );
+  const packagesToPublishIds = new Set(packagesToPublish.map(packageId));
+
   const needsAuth =
-    manifest.packages.some((pkg) => !existingVersionsByPackage.get(pkg.name)?.has(pkg.version)) ||
+    packagesToPublish.length > 0 ||
     tagRequirements.some((requirement) => {
       const currentVersion = currentDistTags.get(requirement.name)?.[requirement.tag];
       return (
@@ -765,6 +791,8 @@ export async function publishBundle(
     }
   }
 
+  await validatePublishTarballs(packagesToPublish);
+
   const publishStart = performance.now();
   const publishConcurrency = normalizeConcurrency(
     options.publishConcurrency,
@@ -781,7 +809,7 @@ export async function publishBundle(
   async function publishPackage(pkg: ManifestPackage): Promise<PublishPackageResult> {
     const id = packageId(pkg);
 
-    if (existingVersionsByPackage.get(pkg.name)?.has(pkg.version)) {
+    if (!packagesToPublishIds.has(id)) {
       publishProgress++;
       options.onProgress?.({
         current: publishProgress,
