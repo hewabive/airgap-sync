@@ -169,10 +169,20 @@ import type {
 } from './index.js';
 import { validatePythonIndexUrl } from './menu/python-settings.js';
 import { validateDownloadInvocation } from './cli-validation.js';
+import { formatElapsedTime } from './cli-timing.js';
 
 const defaultDistTagConcurrency = 4;
 const defaultPublishConcurrency = 4;
 const defaultPythonSourceIndex = 'https://pypi.org/simple/';
+
+function printTotalElapsedTime(startedAt: number, jsonOutput: boolean): void {
+  const line = `Total elapsed time: ${formatElapsedTime(performance.now() - startedAt)}`;
+  if (jsonOutput) {
+    console.error(line);
+  } else {
+    console.log(line);
+  }
+}
 
 interface FetchOptions {
   allowPackage?: string[];
@@ -4425,6 +4435,7 @@ program
   .option('--prune', 'Remove stale npm, Python, and Git objects after a successful download')
   .option('--json', 'Print the full JSON report instead of the concise summary')
   .action(async (root: string | undefined, options: CollectOptions) => {
+    const startedAt = performance.now();
     try {
       validateDownloadInvocation(root, options.target);
       if (!root) {
@@ -4807,6 +4818,8 @@ program
         console.error(`Error: ${(error as Error).message}`);
       }
       process.exitCode = 1;
+    } finally {
+      printTotalElapsedTime(startedAt, options.json === true);
     }
   });
 
@@ -5447,6 +5460,7 @@ addNpmPublishOptions(
   .option('--dry-run', 'Print planned publish operations without publishing or pushing')
   .option('--json', 'Print full publish report as JSON')
   .action(async (bundle: string | undefined, options: ApplyOptions) => {
+    const startedAt = performance.now();
     try {
       const resolved = await resolvePublishWorkspaceDefaults({
         bundle,
@@ -5560,6 +5574,8 @@ addNpmPublishOptions(
     } catch (error) {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
+    } finally {
+      printTotalElapsedTime(startedAt, options.json === true);
     }
   });
 
