@@ -98,6 +98,46 @@ describe('HttpGiteaClient', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gitea.local/api/v1/user/repos');
   });
 
+  it('migrates repositories through the long-running migration endpoint', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 201 }));
+    const client = new HttpGiteaClient('http://gitea.local/', {
+      authToken: 'secret',
+    });
+
+    await client.migrateRepository({
+      authPassword: 'source-password',
+      authUsername: 'source-user',
+      cloneUrl: 'http://127.0.0.1:1234/repositories/source.git',
+      description: 'mirror',
+      name: 'repo',
+      owner: 'owner',
+      private: false,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gitea.local/api/v1/repos/migrate');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      body: JSON.stringify({
+        auth_password: 'source-password',
+        auth_username: 'source-user',
+        clone_addr: 'http://127.0.0.1:1234/repositories/source.git',
+        description: 'mirror',
+        issues: false,
+        labels: false,
+        lfs: false,
+        milestones: false,
+        mirror: false,
+        private: false,
+        pull_requests: false,
+        releases: false,
+        repo_name: 'repo',
+        repo_owner: 'owner',
+        service: 'git',
+        wiki: false,
+      }),
+      method: 'POST',
+    });
+  });
+
   it('surfaces Gitea JSON error messages in provision reports', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ message: 'repo lookup failed' }), {
@@ -368,6 +408,8 @@ describe('provisionGiteaRepositories', () => {
       exists: 0,
       generatedAt: '2026-05-21T00:00:00.000Z',
       giteaBaseUrl: 'http://gitea.local',
+      migrated: 0,
+      migrationFallbacks: [],
       organizationCreated: 0,
       organizationErrors: [],
       organizationExists: 0,
@@ -466,6 +508,132 @@ describe('provisionGiteaRepositories', () => {
       organizationErrors: [],
       private: false,
     });
+  });
+
+  it('migrates a missing repository when an authenticated source is available', async () => {
+    const migrateCalls: unknown[] = [];
+    const client: GiteaClient = {
+      createOrganization: () => Promise.resolve(),
+      createRepository: () => {
+        throw new Error('migration must create the repository');
+      },
+      migrateRepository: (options) => {
+        migrateCalls.push(options);
+        return Promise.resolve();
+      },
+      organizationExists: () => Promise.resolve(true),
+      repositoryExists: () => Promise.resolve(false),
+    };
+
+    const report = await provisionGiteaRepositories({
+      client,
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
+      migrationSource: {
+        cloneUrl: () => 'http://source.local/repositories/repo.git',
+        credentials: { password: 'source-password', username: 'source-user' },
+      },
+      private: false,
+    });
+
+    expect(migrateCalls).toEqual([
+      {
+        authPassword: 'source-password',
+        authUsername: 'source-user',
+        cloneUrl: 'http://source.local/repositories/repo.git',
+        description: 'airgap-sync mirror for github.com/owner/repo',
+        name: 'repo',
+        owner: 'owner',
+        private: false,
+      },
+    ]);
+    expect(report).toMatchObject({
+      created: 0,
+      errors: [],
+      migrated: 1,
+      migrationFallbacks: [],
+    });
+  });
+
+  it('falls back to empty creation when migration is unavailable', async () => {
+    const createCalls: unknown[] = [];
+    let repositoryChecks = 0;
+    const client: GiteaClient = {
+      createOrganization: () => Promise.resolve(),
+      createRepository: (options) => {
+        createCalls.push(options);
+        return Promise.resolve();
+      },
+      migrateRepository: () => Promise.reject(new Error('migration host is not allowed')),
+      organizationExists: () => Promise.resolve(true),
+      repositoryExists: () => {
+        repositoryChecks += 1;
+        return Promise.resolve(false);
+      },
+    };
+
+    const report = await provisionGiteaRepositories({
+      client,
+      giteaBaseUrl: 'http://gitea.local',
+      manifest,
+      migrationSource: { cloneUrl: () => 'http://127.0.0.1/repo.git' },
+    });
+
+    expect(repositoryChecks).toBe(2);
+    expect(createCalls).toHaveLength(1);
+    expect(report).toMatchObject({
+      created: 1,
+      errors: [],
+      migrated: 0,
+      migrationFallbacks: [
+        {
+          migrationError: 'migration host is not allowed',
+          repository: 'repo',
+          status: 'created',
+        },
+      ],
+    });
+  });
+
+  it('bounds concurrent migrations and reports completion progress', async () => {
+    const concurrentManifest: GitSourcesManifest = {
+      ...manifest,
+      sources: Array.from({ length: 3 }, (_, index) => ({
+        ...manifest.sources[0]!,
+        id: `github.com/owner/repo-${String(index)}`,
+        localMirrorPath: `git-mirrors/github.com/owner/repo-${String(index)}.git`,
+        repo: `repo-${String(index)}`,
+        sourceUrl: `https://github.com/owner/repo-${String(index)}.git`,
+      })),
+    };
+    let active = 0;
+    let maximumActive = 0;
+    const progress: number[] = [];
+    const client: GiteaClient = {
+      createOrganization: () => Promise.resolve(),
+      createRepository: () => Promise.reject(new Error('migration should succeed')),
+      migrateRepository: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        active -= 1;
+      },
+      organizationExists: () => Promise.resolve(true),
+      repositoryExists: () => Promise.resolve(false),
+    };
+
+    const report = await provisionGiteaRepositories({
+      client,
+      concurrency: 2,
+      giteaBaseUrl: 'http://gitea.local',
+      manifest: concurrentManifest,
+      migrationSource: { cloneUrl: (source) => `http://source.local/${source.repo}.git` },
+      onProgress: (event) => progress.push(event.current),
+    });
+
+    expect(maximumActive).toBe(2);
+    expect(progress).toEqual([1, 2, 3]);
+    expect(report.migrated).toBe(3);
   });
 
   it('does not create an organization more than once', async () => {

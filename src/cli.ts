@@ -227,6 +227,11 @@ interface ApplyOptions {
   gitea?: string;
   giteaToken?: string;
   gitPassword?: string;
+  gitInitialImport?: string;
+  gitConcurrency: number;
+  gitMigrationAdvertisedHost?: string;
+  gitMigrationListenHost?: string;
+  gitMigrationPort?: number;
   gitOwnerStrategy?: GitOwnerStrategy;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
@@ -1022,7 +1027,6 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     : red(`FAILED Publish incomplete: ${String(totalErrors)} errors.`);
   const npmPackageAction = report.dryRun ? 'planned' : 'published';
   const npmTagAction = report.dryRun ? 'planned' : 'restored';
-  const giteaAction = report.dryRun ? 'planned' : 'created';
   const gitAction = report.dryRun ? 'planned' : 'pushed';
   const lines = [
     status,
@@ -1061,11 +1065,9 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
           `CPython distributions: ${String(report.cpythonDistributions.actions.length)} total, ${String(report.cpythonDistributions.published + report.cpythonDistributions.planned)} ${report.dryRun ? 'planned' : 'published'}, ${String(report.cpythonDistributions.skipped)} already in Gitea, ${String(cpythonDistributionErrors)} errors.`,
         ]
       : []),
-    `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(
-      report.gitea.created + report.gitea.planned
-    )} ${giteaAction}, ${String(report.gitea.exists)} already existed, ${String(
-      giteaErrors
-    )} errors.`,
+    report.dryRun
+      ? `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(report.gitea.planned)} planned, ${String(report.gitea.exists)} already existed, ${String(giteaErrors)} errors.`
+      : `Git repositories: ${String(report.gitea.totalRepositories)} total, ${String(report.gitea.migrated)} imported, ${String(report.gitea.created)} provisioned for push, ${String(report.gitea.migrationFallbacks.length)} import fallbacks, ${String(report.gitea.exists)} already existed, ${String(giteaErrors)} errors.`,
     `Git mirrors: ${String(report.gitApply.totalRepositories)} total, ${String(
       report.gitApply.pushed + report.gitApply.planned
     )} ${gitAction}, ${String(report.gitApply.missingMirrors)} missing, ${String(
@@ -1653,6 +1655,7 @@ interface GitFetchOptions {
 }
 
 interface GitApplyOptions {
+  concurrency: number;
   dryRun?: boolean;
   gitea: string;
   password?: string;
@@ -1725,6 +1728,7 @@ function createApplyProgressLogger(): (event: ApplyProgressEvent) => void {
 
   function needsHeartbeat(phase: ApplyProgressPhase): boolean {
     return (
+      phase === 'gitea' ||
       phase === 'git-apply' ||
       phase === 'python-publish' ||
       phase === 'python-application-publish' ||
@@ -5443,6 +5447,7 @@ gitCommand
   .option('--username <name>', 'Git HTTP username for non-Gitea push authentication')
   .option('--password <token>', 'Git HTTP password/token for non-Gitea push authentication')
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
+  .option('--concurrency <count>', 'Parallel Git push workers', parsePositiveInteger, 2)
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
     try {
@@ -5468,6 +5473,7 @@ gitCommand
           : undefined);
       const report = await applyGitSources({
         bundleDir: bundle,
+        concurrency: options.concurrency,
         dryRun: options.dryRun === true,
         ...(gitAuth ? { gitAuth } : {}),
         giteaBaseUrl: options.gitea,
@@ -5579,6 +5585,28 @@ addNpmPublishOptions(
     )
     .option('--git-username <name>', 'Git HTTP username for non-Gitea push authentication')
     .option('--git-password <token>', 'Git HTTP password/token for non-Gitea push authentication')
+    .option('--git-initial-import <mode>', 'Initial Git repository import: auto or push', 'auto')
+    .option(
+      '--git-concurrency <count>',
+      'Parallel Git import/push workers',
+      parsePositiveInteger,
+      2
+    )
+    .option(
+      '--git-migration-listen-host <host>',
+      'Interface for the temporary authenticated Git migration server',
+      '127.0.0.1'
+    )
+    .option(
+      '--git-migration-advertised-host <host>',
+      'Host that Gitea uses to reach the temporary Git migration server'
+    )
+    .option(
+      '--git-migration-port <port>',
+      'Port for the temporary Git migration server; 0 selects a free port',
+      parseNonNegativeInteger,
+      0
+    )
     .option(
       '--git-owner-strategy <strategy>',
       'Git owner mapping: preserve, authenticated-user, or fixed-owner'
@@ -5618,6 +5646,9 @@ addNpmPublishOptions(
         password: options.gitPassword,
         username: options.gitUsername,
       });
+      if (options.gitInitialImport !== 'auto' && options.gitInitialImport !== 'push') {
+        throw new Error('--git-initial-import must be auto or push');
+      }
       const publicRepositories =
         options.public === true ? true : resolved.publicRepositories === true;
       const configureGitGlobal =
@@ -5684,7 +5715,19 @@ addNpmPublishOptions(
         distTagConcurrency: options.distTagConcurrency,
         dryRun: options.dryRun === true,
         ...(gitAuth ? { gitAuth } : {}),
+        gitConcurrency: options.gitConcurrency,
         ...(login ? { gitAuthenticatedUser: login } : {}),
+        ...(options.gitInitialImport === 'auto' && !skipGitProvision
+          ? {
+              gitMigration: {
+                ...(options.gitMigrationAdvertisedHost
+                  ? { advertisedHost: options.gitMigrationAdvertisedHost }
+                  : { advertisedHost: 'localhost' }),
+                listenHost: options.gitMigrationListenHost ?? '127.0.0.1',
+                port: options.gitMigrationPort ?? 0,
+              },
+            }
+          : {}),
         gitOwnerStrategy: resolved.gitOwnerStrategy,
         ...(resolved.gitPublishOwner ? { gitPublishOwner: resolved.gitPublishOwner } : {}),
         ...(resolved.gitPublishOwnerKind

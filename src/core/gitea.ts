@@ -13,6 +13,7 @@ import {
   normalizeBaseUrl,
 } from './git-targets.js';
 import { assertUniqueGitPublishTargets } from './git-publish-targets.js';
+import { mapConcurrent } from './concurrency.js';
 import {
   mergeGiteaOwnerRequirements,
   type GiteaOwnerKind,
@@ -34,6 +35,15 @@ export interface GiteaClient {
     ownerKind: 'organization' | 'user';
     private: boolean;
   }): Promise<void>;
+  migrateRepository?(options: {
+    authPassword?: string;
+    authUsername?: string;
+    cloneUrl: string;
+    description: string;
+    name: string;
+    owner: string;
+    private: boolean;
+  }): Promise<void>;
   organizationExists(owner: string): Promise<boolean>;
   repositoryExists(owner: string, name: string): Promise<boolean>;
 }
@@ -45,17 +55,35 @@ interface GiteaCurrentUser {
 
 export interface HttpGiteaClientOptions {
   authToken: string;
+  migrationTimeoutMs?: number;
   timeoutMs?: number;
+}
+
+export interface GiteaRepositoryMigrationSource {
+  cloneUrl(source: GitSource): string;
+  credentials?: {
+    password: string;
+    username: string;
+  };
 }
 
 export interface ProvisionGiteaRepositoriesOptions {
   client: GiteaClient;
+  concurrency?: number;
   dryRun?: boolean;
   giteaBaseUrl: string;
   generatedAt?: string;
   manifest: GitSourcesManifest;
+  migrationSource?: GiteaRepositoryMigrationSource;
+  onProgress?: (event: GiteaRepositoryProvisionProgressEvent) => void;
   ownerRequirements?: GiteaOwnerRequirement[];
   private?: boolean;
+}
+
+export interface GiteaRepositoryProvisionProgressEvent {
+  action: GiteaRepositoryActionResult;
+  current: number;
+  total: number;
 }
 
 export interface AssumeGiteaRepositoriesExistOptions {
@@ -89,6 +117,7 @@ export interface GiteaOwnerProvisionReport {
 export interface ProvisionGiteaOwnersOptions {
   authenticatedUser?: string;
   client: GiteaClient;
+  concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
   requirements: GiteaOwnerRequirement[];
@@ -158,6 +187,7 @@ function gitOwnerRequirements(
 export class HttpGiteaClient implements GiteaClient {
   readonly #baseUrl: string;
   readonly #headers: Record<string, string>;
+  readonly #migrationTimeoutMs: number;
   readonly #timeoutMs: number;
 
   constructor(giteaBaseUrl: string, options: HttpGiteaClientOptions) {
@@ -166,6 +196,7 @@ export class HttpGiteaClient implements GiteaClient {
       Accept: 'application/json',
       Authorization: `token ${options.authToken}`,
     };
+    this.#migrationTimeoutMs = options.migrationTimeoutMs ?? 660_000;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
   }
 
@@ -174,6 +205,7 @@ export class HttpGiteaClient implements GiteaClient {
     options: {
       body?: unknown;
       method: 'GET' | 'POST';
+      timeoutMs?: number;
       validStatuses: Set<number>;
     }
   ): Promise<Response> {
@@ -188,7 +220,7 @@ export class HttpGiteaClient implements GiteaClient {
     const request: RequestInit = {
       headers,
       method: options.method,
-      signal: AbortSignal.timeout(this.#timeoutMs),
+      signal: AbortSignal.timeout(options.timeoutMs ?? this.#timeoutMs),
     };
 
     if (body !== undefined) {
@@ -263,6 +295,40 @@ export class HttpGiteaClient implements GiteaClient {
     );
   }
 
+  async migrateRepository(options: {
+    authPassword?: string;
+    authUsername?: string;
+    cloneUrl: string;
+    description: string;
+    name: string;
+    owner: string;
+    private: boolean;
+  }): Promise<void> {
+    await this.#request('/repos/migrate', {
+      body: {
+        ...(options.authPassword ? { auth_password: options.authPassword } : {}),
+        ...(options.authUsername ? { auth_username: options.authUsername } : {}),
+        clone_addr: options.cloneUrl,
+        description: options.description,
+        issues: false,
+        labels: false,
+        lfs: false,
+        milestones: false,
+        mirror: false,
+        private: options.private,
+        pull_requests: false,
+        releases: false,
+        repo_name: options.name,
+        repo_owner: options.owner,
+        service: 'git',
+        wiki: false,
+      },
+      method: 'POST',
+      timeoutMs: this.#migrationTimeoutMs,
+      validStatuses: new Set([201]),
+    });
+  }
+
   async currentUserLogin(): Promise<string> {
     const response = await this.#request('/user', {
       method: 'GET',
@@ -283,55 +349,54 @@ export async function provisionGiteaOwners(
   options: ProvisionGiteaOwnersOptions
 ): Promise<GiteaOwnerProvisionReport> {
   const requirements = mergeGiteaOwnerRequirements(options.requirements);
-  const actions: GiteaOwnerProvisionAction[] = [];
-  for (const requirement of requirements) {
-    if (requirement.kind === 'user') {
-      if (!options.authenticatedUser || requirement.name !== options.authenticatedUser) {
-        actions.push({
+  const actions = await mapConcurrent(
+    requirements,
+    options.concurrency ?? 1,
+    async (requirement) => {
+      if (requirement.kind === 'user') {
+        if (!options.authenticatedUser || requirement.name !== options.authenticatedUser) {
+          return {
+            ...requirement,
+            error: `Gitea user owner ${requirement.name} must match the authenticated user`,
+            status: 'error' as const,
+          };
+        }
+        return {
           ...requirement,
-          error: `Gitea user owner ${requirement.name} must match the authenticated user`,
-          status: 'error',
-        });
-      } else {
-        actions.push({
-          ...requirement,
-          status: 'exists',
-        });
+          status: 'exists' as const,
+        };
       }
-      continue;
-    }
-    if (options.dryRun === true) {
-      actions.push({
-        ...requirement,
-        status: 'planned',
-      });
-      continue;
-    }
-    try {
-      if (await options.client.organizationExists(requirement.name)) {
-        actions.push({
+      if (options.dryRun === true) {
+        return {
           ...requirement,
-          status: 'exists',
-        });
-        continue;
+          status: 'planned' as const,
+        };
       }
-      await options.client.createOrganization({
-        fullName: `airgap-sync managed owner for ${requirement.purposes.join(', ')}`,
-        name: requirement.name,
-        visibility: requirement.visibility,
-      });
-      actions.push({
-        ...requirement,
-        status: 'created',
-      });
-    } catch (error) {
-      actions.push({
-        ...requirement,
-        error: errorMessage(error),
-        status: 'error',
-      });
+      try {
+        if (await options.client.organizationExists(requirement.name)) {
+          return {
+            ...requirement,
+            status: 'exists' as const,
+          };
+        }
+        await options.client.createOrganization({
+          fullName: `airgap-sync managed owner for ${requirement.purposes.join(', ')}`,
+          name: requirement.name,
+          visibility: requirement.visibility,
+        });
+        return {
+          ...requirement,
+          status: 'created' as const,
+        };
+      } catch (error) {
+        return {
+          ...requirement,
+          error: errorMessage(error),
+          status: 'error' as const,
+        };
+      }
     }
-  }
+  );
   return {
     actions,
     created: actions.filter((action) => action.status === 'created').length,
@@ -351,21 +416,47 @@ async function provisionRepository(
   const targetUrl = gitSourceTargetUrl(source, options.giteaBaseUrl);
   const owner = gitSourcePublishOwner(source);
   const repo = gitSourcePublishRepo(source);
+  const description = `airgap-sync mirror for ${source.id}`;
+  let migrationError: string | undefined;
 
   try {
-    const exists = await options.client.repositoryExists(owner, repo);
-    if (exists) {
-      return {
-        owner,
-        private: isPrivate,
-        repository: repo,
-        status: 'exists',
-        targetUrl,
-      };
+    if (options.migrationSource && options.client.migrateRepository) {
+      try {
+        const credentials = options.migrationSource.credentials;
+        await options.client.migrateRepository({
+          ...(credentials
+            ? { authPassword: credentials.password, authUsername: credentials.username }
+            : {}),
+          cloneUrl: options.migrationSource.cloneUrl(source),
+          description,
+          name: repo,
+          owner,
+          private: isPrivate,
+        });
+        return {
+          owner,
+          private: isPrivate,
+          repository: repo,
+          status: 'migrated',
+          targetUrl,
+        };
+      } catch (error) {
+        migrationError = errorMessage(error);
+        if (await options.client.repositoryExists(owner, repo)) {
+          return {
+            migrationError,
+            owner,
+            private: isPrivate,
+            repository: repo,
+            status: 'created',
+            targetUrl,
+          };
+        }
+      }
     }
 
     await options.client.createRepository({
-      description: `airgap-sync mirror for ${source.id}`,
+      description,
       name: repo,
       owner,
       ownerKind: gitSourcePublishOwnerKind(source),
@@ -373,6 +464,7 @@ async function provisionRepository(
     });
 
     return {
+      ...(migrationError ? { migrationError } : {}),
       owner,
       private: isPrivate,
       repository: repo,
@@ -382,6 +474,7 @@ async function provisionRepository(
   } catch (error) {
     return {
       error: errorMessage(error),
+      ...(migrationError ? { migrationError } : {}),
       owner,
       private: isPrivate,
       repository: repo,
@@ -433,6 +526,7 @@ export async function provisionGiteaRepositories(
   if (options.dryRun === true) {
     const ownerReport = await provisionGiteaOwners({
       client: options.client,
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       dryRun: true,
       ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
       requirements: [
@@ -451,54 +545,87 @@ export async function provisionGiteaRepositories(
     }
 
     for (const source of options.manifest.sources) {
-      actions.push({
+      const action: GiteaRepositoryActionResult = {
         owner: gitSourcePublishOwner(source),
         private: isPrivate,
         repository: gitSourcePublishRepo(source),
         status: 'planned',
         targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
+      };
+      actions.push(action);
+      options.onProgress?.({
+        action,
+        current: actions.length,
+        total: options.manifest.sources.length,
       });
     }
   } else {
     const missingSources: GitSource[] = [];
-
-    for (const source of options.manifest.sources) {
-      try {
-        const owner = gitSourcePublishOwner(source);
-        const repo = gitSourcePublishRepo(source);
-        const exists = await options.client.repositoryExists(owner, repo);
-        if (exists) {
-          actions.push(existingRepositoryAction(source, options, isPrivate));
-          if (
-            gitSourcePublishOwnerKind(source) === 'organization' &&
-            !organizationActionsByOwner.has(owner)
-          ) {
-            const action: GiteaOrganizationActionResult = {
-              owner,
-              status: 'exists',
-            };
-            organizationActions.push(action);
-            organizationActionsByOwner.set(owner, action);
-          }
-          continue;
+    const sourceChecks = await mapConcurrent(
+      options.manifest.sources,
+      options.concurrency ?? 1,
+      async (source) => {
+        try {
+          return {
+            exists: await options.client.repositoryExists(
+              gitSourcePublishOwner(source),
+              gitSourcePublishRepo(source)
+            ),
+            source,
+          };
+        } catch (error) {
+          return { error: errorMessage(error), exists: false, source };
         }
-
-        missingSources.push(source);
-      } catch (error) {
-        actions.push({
-          error: errorMessage(error),
+      }
+    );
+    for (const check of sourceChecks) {
+      const { source } = check;
+      if (check.error) {
+        const action: GiteaRepositoryActionResult = {
+          error: check.error,
           owner: gitSourcePublishOwner(source),
           private: isPrivate,
           repository: gitSourcePublishRepo(source),
           status: 'error',
           targetUrl: gitSourceTargetUrl(source, options.giteaBaseUrl),
+        };
+        actions.push(action);
+        options.onProgress?.({
+          action,
+          current: actions.length,
+          total: options.manifest.sources.length,
         });
+        continue;
+      }
+      if (!check.exists) {
+        missingSources.push(source);
+        continue;
+      }
+      const action = existingRepositoryAction(source, options, isPrivate);
+      actions.push(action);
+      options.onProgress?.({
+        action,
+        current: actions.length,
+        total: options.manifest.sources.length,
+      });
+      const owner = gitSourcePublishOwner(source);
+      if (
+        gitSourcePublishOwnerKind(source) === 'organization' &&
+        !organizationActionsByOwner.has(owner)
+      ) {
+        const organizationAction: GiteaOrganizationActionResult = {
+          owner,
+          status: 'exists',
+        };
+        organizationActions.push(organizationAction);
+        organizationActionsByOwner.set(owner, organizationAction);
       }
     }
 
     const missingManifest = { ...options.manifest, sources: missingSources };
     const ownerReport = await provisionGiteaOwners({
       client: options.client,
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
       ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
       requirements: [
         ...gitOwnerRequirements(missingManifest, isPrivate ? 'private' : 'public'),
@@ -518,17 +645,23 @@ export async function provisionGiteaRepositories(
       organizationActionsByOwner.set(ownerAction.name, action);
     }
 
-    for (const source of missingSources) {
-      const organization = organizationActionsByOwner.get(gitSourcePublishOwner(source));
-      if (organization?.status === 'error') {
-        actions.push(
-          repositoryBlockedByOrganizationError(source, organization, options, isPrivate)
-        );
-        continue;
-      }
-
-      actions.push(await provisionRepository(source, options, isPrivate));
-    }
+    let completed = actions.length;
+    actions.push(
+      ...(await mapConcurrent(missingSources, options.concurrency ?? 1, async (source) => {
+        const organization = organizationActionsByOwner.get(gitSourcePublishOwner(source));
+        const action =
+          organization?.status === 'error'
+            ? repositoryBlockedByOrganizationError(source, organization, options, isPrivate)
+            : await provisionRepository(source, options, isPrivate);
+        completed += 1;
+        options.onProgress?.({
+          action,
+          current: completed,
+          total: options.manifest.sources.length,
+        });
+        return action;
+      }))
+    );
   }
 
   const errors = actions.filter((action) => action.status === 'error');
@@ -541,6 +674,8 @@ export async function provisionGiteaRepositories(
     exists: actions.filter((action) => action.status === 'exists').length,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     giteaBaseUrl: normalizeBaseUrl(options.giteaBaseUrl),
+    migrated: actions.filter((action) => action.status === 'migrated').length,
+    migrationFallbacks: actions.filter((action) => action.migrationError !== undefined),
     organizationCreated: organizationActions.filter((action) => action.status === 'created').length,
     organizationErrors,
     organizationExists: organizationActions.filter((action) => action.status === 'exists').length,
@@ -579,6 +714,8 @@ export function assumeGiteaRepositoriesExist(
     exists: actions.length,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     giteaBaseUrl: normalizeBaseUrl(options.giteaBaseUrl),
+    migrated: 0,
+    migrationFallbacks: [],
     organizationCreated: 0,
     organizationErrors: [],
     organizationExists: organizationActions.length,

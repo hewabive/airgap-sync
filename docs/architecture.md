@@ -56,8 +56,8 @@ workspace targets / package specs / package.json / package list
 airgap bundle
   -> npm publish tarballs
   -> npm dist-tag add required tags
-  -> create Gitea owners/repositories when using the Gitea provider
-  -> push Git mirrors
+  -> create Gitea owners and import missing repositories from a temporary Git endpoint
+  -> verify imported repositories and update existing repositories with Git pushes
   -> publish Python wheels to Gitea PyPI
   -> publish optional Python evidence and reports to Gitea Generic Packages
   -> publish CPython distributions additively to Gitea Generic Packages
@@ -85,8 +85,8 @@ closed network
   -> publish npm tarballs into an npm-compatible registry
   -> restore npm dist-tags
   -> map Git sources to closed-network Git targets
-  -> create missing Gitea owners/repositories when enabled
-  -> push Git mirrors into the closed-network Git host
+  -> create missing Gitea owners and import missing repositories when enabled
+  -> verify imports and update existing repositories with Git pushes
   -> publish Python wheels and standard metadata to Gitea PyPI
   -> publish portable CPython distributions to Gitea Generic Packages
   -> verify install against closed-network services
@@ -100,8 +100,16 @@ consumer infrastructure
 The Git side should use standard Git primitives where possible:
 
 - bare local mirrors fetched through explicit branch/tag refspecs;
+- Gitea's migration API for the first import, backed by a short-lived authenticated
+  read-only smart-HTTP endpoint over the exact bundle mirrors;
 - branch/tag refspec pushes into Gitea;
 - `git bundle` for auditable file-based transfer when a Git server is not available.
+
+The migration optimization is intentionally limited to missing repositories. It asks
+Gitea for a normal repository rather than a scheduled pull mirror, then performs the
+same prune-aware branch/tag push used by later runs. API import failure is observable
+in the provisioning report and falls back to empty creation plus push. Repository
+checks, imports, and pushes share a bounded operator-configurable concurrency limit.
 
 The npm side should continue to populate npm-compatible registries through
 `npm publish` and `npm dist-tag`, not by mutating registry storage.

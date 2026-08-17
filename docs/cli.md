@@ -649,6 +649,7 @@ airgap-sync git apply ./airgap-bundle --gitea http://gitea.local
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --dry-run
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --mirrors-dir ./git-mirrors
 airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --token "$GITEA_TOKEN"
+airgap-sync git apply ./airgap-bundle --gitea http://gitea.local --concurrency 2
 airgap-sync git apply ./airgap-bundle --gitea http://git.local --username git --password "$TOKEN"
 ```
 
@@ -656,6 +657,8 @@ Reads `git-sources.json` and pushes local bare mirrors to the closed-network Git
 by pruning and
 force-updating only branches and tags: `refs/heads/*` and `refs/tags/*`.
 Provider-specific refs such as GitHub pull-request refs are intentionally not pushed.
+Independent repositories are pushed concurrently (2 workers by default); use
+`--concurrency` to tune the load on the Git host.
 Target URLs preserve upstream owner/repository paths: for example
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`.
 The target repositories must already exist unless the Gitea instance is configured to
@@ -705,7 +708,7 @@ airgap-sync publish
 
 Publishes the whole bundle in the closed network: publish npm packages to an
 npm-compatible registry, restore dist-tags, map Git sources to target Git URLs, create
-missing Gitea owners/repositories when provisioning is enabled, push mirrors, and write
+missing Gitea owners/repositories when provisioning is enabled, import or push mirrors, and write
 import reports. If `python-seed-manifest.json` exists, it also streams bundled wheels
 to Gitea's PyPI endpoint without requiring Python, pip, or twine. Gitea PyPI is the
 Python consumer interface. When `python.publication.publishEvidence` is explicitly
@@ -733,6 +736,45 @@ token user and is never created automatically. Gitea npm authentication is suppl
 through a mode-0600 temporary npm config which is removed after publish; the token is
 not written into the long-lived workspace config.
 
+### Initial Gitea repository import
+
+For each missing Git repository, `publish` defaults to `--git-initial-import auto`.
+It starts a temporary Basic-authenticated, read-only Git smart-HTTP server over only
+the mirrors named by `git-sources.json`. The endpoint advertises only branches and tags,
+not provider-specific refs, then calls `POST /api/v1/repos/migrate` with `mirror: false`.
+Gitea performs one server-side mirror clone; `airgap-sync` then runs
+its normal branch/tag push as an inexpensive verification and uses the same push path
+for every later update. Repositories that already exist are never migrated.
+
+Gitea blocks migration sources on loopback and private networks by default. For the
+default same-host setup, explicitly restrict migration to the advertised hostname in
+Gitea's `app.ini`, then restart Gitea:
+
+```ini
+[migrations]
+ALLOWED_DOMAINS = localhost
+ALLOW_LOCALNETWORKS = true
+```
+
+`publish` binds the temporary endpoint to `127.0.0.1`, advertises `localhost`, chooses
+a free port, generates a new random password for each run, and closes the endpoint as
+soon as provisioning finishes. This default requires Gitea and `airgap-sync` to share
+the host/network namespace. If Gitea runs on another host or in an isolated container,
+bind a specific trusted-network address and advertise an address reachable from Gitea:
+
+```bash
+airgap-sync publish \
+  --git-migration-listen-host 192.168.50.10 \
+  --git-migration-advertised-host 192.168.50.10 \
+  --git-migration-port 18080
+```
+
+Allow that exact hostname or address in Gitea. Because the temporary endpoint uses
+HTTP Basic authentication, expose it only on an isolated trusted network or through a
+private tunnel. Migration API errors are recorded in `gitea-repos-report.json`;
+publication then falls back to empty repository creation and the normal push. Use
+`--git-initial-import push` to disable the migration path explicitly.
+
 If an upload still returns HTTP 404 after owner provisioning, check the Gitea server
 setting `[packages] ENABLED = true` and ensure the access token has package write
 permission. Gitea enables the Package Registry by default, but administrators can
@@ -758,6 +800,11 @@ Supported options:
 --python-owner <owner>    Deprecated one-run PyPI organization override
 --git-username <name>     Git HTTP username for non-Gitea push authentication
 --git-password <token>    Git HTTP password/token for non-Gitea push authentication
+--git-initial-import <mode> auto (default) or push
+--git-concurrency <n>     Concurrent Git imports/pushes, default 2
+--git-migration-listen-host <host> Interface for temporary import source, default 127.0.0.1
+--git-migration-advertised-host <host> Host/address Gitea uses for the import source
+--git-migration-port <port> Temporary import source port, default 0 (select a free port)
 --git-owner-strategy <strategy> preserve, authenticated-user, or fixed-owner
 --git-publish-owner <owner> Destination owner for fixed-owner mapping
 --git-publish-owner-kind <kind> user or organization for fixed-owner mapping

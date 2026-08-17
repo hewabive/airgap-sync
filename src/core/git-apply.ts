@@ -11,9 +11,11 @@ import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
 import { gitSourceMirrorPath, gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
 import { assertUniqueGitPublishTargets } from './git-publish-targets.js';
+import { mapConcurrent } from './concurrency.js';
 
 export interface ApplyGitSourcesOptions {
   bundleDir: string;
+  concurrency?: number;
   dryRun?: boolean;
   giteaBaseUrl: string;
   generatedAt?: string;
@@ -234,23 +236,31 @@ export async function applyGitSources(options: ApplyGitSourcesOptions): Promise<
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    for (const [index, source] of options.manifest.sources.entries()) {
-      options.onProgress?.({
-        current: index,
-        repository: source.id,
-        status: 'progress',
-        total,
-      });
-      const action = await applyRepository(source, options, runner);
-      actions.push(action);
-      options.onProgress?.({
-        action,
-        current: index + 1,
-        repository: source.id,
-        status: 'progress',
-        total,
-      });
-    }
+    let completed = 0;
+    actions.push(
+      ...(await mapConcurrent(
+        options.manifest.sources,
+        options.concurrency ?? 1,
+        async (source) => {
+          options.onProgress?.({
+            current: completed,
+            repository: source.id,
+            status: 'progress',
+            total,
+          });
+          const action = await applyRepository(source, options, runner);
+          completed += 1;
+          options.onProgress?.({
+            action,
+            current: completed,
+            repository: source.id,
+            status: 'progress',
+            total,
+          });
+          return action;
+        }
+      ))
+    );
   }
   options.onProgress?.({
     current: actions.length,

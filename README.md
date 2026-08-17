@@ -236,6 +236,15 @@ Git mirror paths preserve the upstream host and owner/repository path. For examp
 http://gitea.local/antvis/G2.git
 ```
 
+For a missing Gitea repository, `publish` normally exposes the bundle mirror through a
+temporary authenticated, read-only smart-HTTP endpoint and asks Gitea's migration API
+to clone it. This avoids one expensive receive hook per branch or tag on the initial
+publication. The destination is a normal repository: the verification push in the same
+run and every later update still use ordinary branch/tag pushes. If migration is not
+available, publication records the reason and automatically falls back to creating an
+empty repository and pushing it. See [CLI: publish](./docs/cli.md#publish) for the
+required Gitea allowlist and network settings.
+
 That lets consumer machines use one broad rewrite rule instead of many
 repository-specific rules:
 

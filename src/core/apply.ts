@@ -13,6 +13,10 @@ import { applyGitSources, type GitApplyProgressEvent, type GitHttpAuth } from '.
 import { configureGitRewrites } from './git-config.js';
 import { type GitCommandRunner } from './git-fetch.js';
 import {
+  startGitMigrationSourceServer,
+  type StartGitMigrationSourceServerOptions,
+} from './git-migration-source.js';
+import {
   resolveGitPublishTargets,
   type GitOwnerStrategy,
   type GitPublishOwnerKind,
@@ -82,6 +86,11 @@ export interface ApplyBundleOptions {
   generatedAt?: string;
   gitAuth?: GitHttpAuth;
   gitAuthenticatedUser?: string;
+  gitConcurrency?: number;
+  gitMigration?: Pick<
+    StartGitMigrationSourceServerOptions,
+    'advertisedHost' | 'listenHost' | 'port'
+  >;
   gitOwnerStrategy?: GitOwnerStrategy;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
@@ -427,40 +436,96 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   ]);
 
   options.onProgress?.({ phase: 'gitea', status: 'start' });
+  let migrationSource: Awaited<ReturnType<typeof startGitMigrationSourceServer>> | undefined;
+  if (
+    options.gitMigration &&
+    gitSources.sources.length > 0 &&
+    !dryRun &&
+    options.skipGitProvision !== true
+  ) {
+    try {
+      migrationSource = await startGitMigrationSourceServer({
+        ...options.gitMigration,
+        bundleDir,
+        ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+        sources: gitSources.sources,
+      });
+      options.onProgress?.({
+        current: 0,
+        detail: 'initial imports use Gitea migration API',
+        phase: 'gitea',
+        status: 'progress',
+        total: gitSources.sources.length,
+      });
+    } catch (error) {
+      options.onProgress?.({
+        current: 0,
+        detail: `migration source unavailable; using push fallback: ${(error as Error).message}`,
+        phase: 'gitea',
+        status: 'progress',
+        total: gitSources.sources.length,
+      });
+    }
+  }
   let gitea: GiteaRepositoryProvisionReport;
-  if (options.skipGitProvision === true && !dryRun) {
-    const assumed = assumeGiteaRepositoriesExist({
-      generatedAt,
-      giteaBaseUrl: options.giteaBaseUrl,
-      manifest: gitSources,
-      private: options.private ?? true,
-    });
-    if (ownerRequirements.length === 0) {
-      gitea = assumed;
-    } else {
-      const packageOwners = await provisionGiteaRepositories({
-        client: options.giteaClient,
+  try {
+    if (options.skipGitProvision === true && !dryRun) {
+      const assumed = assumeGiteaRepositoriesExist({
         generatedAt,
         giteaBaseUrl: options.giteaBaseUrl,
-        manifest: emptyGitSourcesManifest(generatedAt),
+        manifest: gitSources,
+        private: options.private ?? true,
+      });
+      if (ownerRequirements.length === 0) {
+        gitea = assumed;
+      } else {
+        const packageOwners = await provisionGiteaRepositories({
+          client: options.giteaClient,
+          generatedAt,
+          giteaBaseUrl: options.giteaBaseUrl,
+          manifest: emptyGitSourcesManifest(generatedAt),
+          ownerRequirements,
+          private: options.private ?? true,
+        });
+        gitea = mergeAssumedGitWithPackageOwners(assumed, packageOwners);
+      }
+    } else {
+      gitea = await provisionGiteaRepositories({
+        client: options.giteaClient,
+        ...(options.gitConcurrency === undefined ? {} : { concurrency: options.gitConcurrency }),
+        dryRun,
+        generatedAt,
+        giteaBaseUrl: options.giteaBaseUrl,
+        manifest: gitSources,
+        ...(migrationSource ? { migrationSource } : {}),
+        ...(options.onProgress
+          ? {
+              onProgress: (event) => {
+                options.onProgress?.({
+                  current: event.current,
+                  detail: `${event.action.status} ${event.action.owner}/${event.action.repository}${event.action.migrationError ? ' (migration fallback)' : ''}`,
+                  phase: 'gitea',
+                  status: 'progress',
+                  total: event.total,
+                });
+              },
+            }
+          : {}),
         ownerRequirements,
         private: options.private ?? true,
       });
-      gitea = mergeAssumedGitWithPackageOwners(assumed, packageOwners);
     }
-  } else {
-    gitea = await provisionGiteaRepositories({
-      client: options.giteaClient,
-      dryRun,
-      generatedAt,
-      giteaBaseUrl: options.giteaBaseUrl,
-      manifest: gitSources,
-      ownerRequirements,
-      private: options.private ?? true,
-    });
+  } finally {
+    await migrationSource?.close();
   }
   await writeGiteaRepositoryProvisionReport(bundleDir, gitea);
-  options.onProgress?.({ phase: 'gitea', status: 'done' });
+  options.onProgress?.({
+    current: gitea.totalRepositories,
+    detail: `${String(gitea.migrated)} imported, ${String(gitea.migrationFallbacks.length)} fallbacks`,
+    phase: 'gitea',
+    status: 'done',
+    total: gitea.totalRepositories,
+  });
   const packageOwnerErrors = new Set(
     gitea.organizationErrors
       .filter((error) => ownerRequirements.some((requirement) => requirement.name === error.owner))
@@ -641,6 +706,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
 
   const gitApply = await applyGitSources({
     bundleDir,
+    ...(options.gitConcurrency === undefined ? {} : { concurrency: options.gitConcurrency }),
     dryRun,
     generatedAt,
     ...(options.gitAuth ? { gitAuth: options.gitAuth } : {}),

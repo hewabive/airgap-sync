@@ -155,6 +155,7 @@ export {
   listBuiltInPlatformFamilies,
 } from './core/python/platform-family.js';
 export { applyGitSources, createGitConfigRewriteRules } from './core/git-apply.js';
+export { startGitMigrationSourceServer } from './core/git-migration-source.js';
 export { resolveGitPublishTargets } from './core/git-publish-targets.js';
 export type {
   GitOwnerStrategy,
@@ -370,10 +371,17 @@ export type {
   GitApplyProgressStatus,
   GitHttpAuth,
 } from './core/git-apply.js';
+export type {
+  GitMigrationSourceCredentials,
+  GitMigrationSourceServer,
+  StartGitMigrationSourceServerOptions,
+} from './core/git-migration-source.js';
 export type { ConfigureGitRewritesOptions } from './core/git-config.js';
 export type {
   AssumeGiteaRepositoriesExistOptions,
   GiteaClient,
+  GiteaRepositoryMigrationSource,
+  GiteaRepositoryProvisionProgressEvent,
   GiteaOwnerProvisionAction,
   GiteaOwnerProvisionReport,
   GiteaOwnerProvisionStatus,

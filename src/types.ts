@@ -214,7 +214,7 @@ export interface GitConfigReport {
   totalRules: number;
 }
 
-export type GiteaRepositoryActionStatus = 'planned' | 'exists' | 'created' | 'error';
+export type GiteaRepositoryActionStatus = 'planned' | 'exists' | 'created' | 'migrated' | 'error';
 export type GiteaOrganizationActionStatus = 'planned' | 'exists' | 'created' | 'error';
 
 export interface GiteaOrganizationActionResult {
@@ -225,6 +225,7 @@ export interface GiteaOrganizationActionResult {
 
 export interface GiteaRepositoryActionResult {
   error?: string;
+  migrationError?: string;
   owner: string;
   private: boolean;
   repository: string;
@@ -239,6 +240,8 @@ export interface GiteaRepositoryProvisionReport {
   exists: number;
   generatedAt: string;
   giteaBaseUrl: string;
+  migrated: number;
+  migrationFallbacks: GiteaRepositoryActionResult[];
   organizationCreated: number;
   organizationErrors: GiteaOrganizationActionResult[];
   organizationExists: number;

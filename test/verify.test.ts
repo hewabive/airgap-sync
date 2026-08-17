@@ -174,6 +174,8 @@ const applyReport: ApplyBundleReport = {
     exists: 0,
     generatedAt: '2026-05-21T00:02:00.000Z',
     giteaBaseUrl: 'http://gitea.local',
+    migrated: 0,
+    migrationFallbacks: [],
     organizationCreated: 0,
     organizationErrors: [],
     organizationExists: 0,
