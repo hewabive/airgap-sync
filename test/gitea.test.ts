@@ -138,6 +138,25 @@ describe('HttpGiteaClient', () => {
     });
   });
 
+  it('sets a repository default branch through the Gitea API', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }));
+    const client = new HttpGiteaClient('http://gitea.local/', {
+      authToken: 'secret',
+    });
+
+    await client.setRepositoryDefaultBranch({
+      branch: 'main',
+      name: 'repo',
+      owner: 'owner',
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gitea.local/api/v1/repos/owner/repo');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      body: JSON.stringify({ default_branch: 'main' }),
+      method: 'PATCH',
+    });
+  });
+
   it('surfaces Gitea JSON error messages in provision reports', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ message: 'repo lookup failed' }), {

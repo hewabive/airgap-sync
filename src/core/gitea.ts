@@ -46,6 +46,11 @@ export interface GiteaClient {
   }): Promise<void>;
   organizationExists(owner: string): Promise<boolean>;
   repositoryExists(owner: string, name: string): Promise<boolean>;
+  setRepositoryDefaultBranch?(options: {
+    branch: string;
+    name: string;
+    owner: string;
+  }): Promise<void>;
 }
 
 interface GiteaCurrentUser {
@@ -204,7 +209,7 @@ export class HttpGiteaClient implements GiteaClient {
     path: string,
     options: {
       body?: unknown;
-      method: 'GET' | 'POST';
+      method: 'GET' | 'PATCH' | 'POST';
       timeoutMs?: number;
       validStatuses: Set<number>;
     }
@@ -326,6 +331,18 @@ export class HttpGiteaClient implements GiteaClient {
       method: 'POST',
       timeoutMs: this.#migrationTimeoutMs,
       validStatuses: new Set([201]),
+    });
+  }
+
+  async setRepositoryDefaultBranch(options: {
+    branch: string;
+    name: string;
+    owner: string;
+  }): Promise<void> {
+    await this.#request(`/repos/${encodePathPart(options.owner)}/${encodePathPart(options.name)}`, {
+      body: { default_branch: options.branch },
+      method: 'PATCH',
+      validStatuses: new Set([200]),
     });
   }
 

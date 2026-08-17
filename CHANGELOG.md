@@ -6,7 +6,9 @@
   authenticated read-only smart-HTTP source. Large ref sets are imported through one
   server-side clone, existing repositories continue to use ordinary pushes, failures
   fall back to create-and-push with explicit report diagnostics, and import/push
-  concurrency is bounded and configurable.
+  concurrency is bounded and configurable. Every authenticated Gitea push now also
+  restores the destination default branch from the bundle mirror's symbolic `HEAD`,
+  including fallback imports and repositories created by older releases.
 - Added first-class Gitea npm registry targets. Workspaces select Verdaccio or Gitea;
   Gitea endpoints are derived from the shared base URL and managed owner, owner
   provisioning is shared with Python publication, and the saved Gitea PAT is exposed

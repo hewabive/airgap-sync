@@ -595,6 +595,97 @@ describe('applyBundle', () => {
     });
   });
 
+  it('restores the mirror default branch after a migration fallback push', async () => {
+    const emptyManifest: BundleManifest = {
+      ...manifest,
+      packages: [],
+    };
+    const emptyDistTags: DistTagsManifest = {
+      ...distTags,
+      requirements: [],
+      tags: {},
+    };
+    const mirrorPath = path.join(bundleDir, 'git-mirrors/github.com/acme/app.git');
+    const createdRepositories: unknown[] = [];
+    const defaultBranchCalls: unknown[] = [];
+    const gitCalls: GitCommandInvocation[] = [];
+    await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), emptyManifest, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), emptyDistTags, { spaces: 2 });
+    await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
+    await fs.ensureDir(mirrorPath);
+
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      generatedAt: '2026-08-17T00:00:00.000Z',
+      gitMigration: {},
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: {
+        createOrganization: () => Promise.resolve(),
+        createRepository: (options) => {
+          createdRepositories.push(options);
+          return Promise.resolve();
+        },
+        migrateRepository: () => Promise.reject(new Error('migration source unavailable')),
+        organizationExists: () => Promise.resolve(true),
+        repositoryExists: () => Promise.resolve(false),
+        setRepositoryDefaultBranch: (options) => {
+          defaultBranchCalls.push(options);
+          return Promise.resolve();
+        },
+      },
+      registryUrl: 'http://verdaccio.local:4873',
+      runGitCommand(invocation) {
+        gitCalls.push(invocation);
+        return Promise.resolve({
+          stderr: '',
+          stdout: invocation.args.includes('symbolic-ref') ? 'main\n' : '',
+        });
+      },
+    });
+
+    expect(createdRepositories).toEqual([
+      {
+        description: 'airgap-sync mirror for github.com/acme/app',
+        name: 'app',
+        owner: 'acme',
+        ownerKind: 'organization',
+        private: true,
+      },
+    ]);
+    expect(gitCalls.some((call) => call.args.includes('push'))).toBe(true);
+    expect(defaultBranchCalls).toEqual([
+      {
+        branch: 'main',
+        name: 'app',
+        owner: 'acme',
+      },
+    ]);
+    expect(report).toMatchObject({
+      gitApply: {
+        actions: [
+          {
+            defaultBranch: 'main',
+            status: 'pushed',
+          },
+        ],
+        errors: [],
+      },
+      gitea: {
+        created: 1,
+        migrated: 0,
+        migrationFallbacks: [
+          {
+            migrationError: 'migration source unavailable',
+            repository: 'app',
+            status: 'created',
+          },
+        ],
+      },
+      succeeded: true,
+    });
+  });
+
   it('can skip Gitea provisioning when target Git repositories already exist', async () => {
     const emptyManifest: BundleManifest = {
       ...manifest,

@@ -711,6 +711,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     generatedAt,
     ...(options.gitAuth ? { gitAuth: options.gitAuth } : {}),
     giteaBaseUrl: options.giteaBaseUrl,
+    giteaClient: options.giteaClient,
     manifest: gitSources,
     ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
     ...(options.onProgress

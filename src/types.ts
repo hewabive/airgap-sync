@@ -175,6 +175,7 @@ export interface GitConfigRewriteRule {
 export type GitApplyActionStatus = 'planned' | 'pushed' | 'missing-mirror' | 'error';
 
 export interface GitApplyActionResult {
+  defaultBranch?: string;
   error?: string;
   repository: string;
   sourcePath: string;

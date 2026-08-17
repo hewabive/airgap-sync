@@ -5477,6 +5477,7 @@ gitCommand
         dryRun: options.dryRun === true,
         ...(gitAuth ? { gitAuth } : {}),
         giteaBaseUrl: options.gitea,
+        ...(httpClient ? { giteaClient: httpClient } : {}),
         manifest,
         onProgress: createGitApplyProgressLogger(),
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),

@@ -7,9 +7,16 @@ import type {
   GitSource,
   GitSourcesManifest,
 } from '../types.js';
+import type { GiteaClient } from './gitea.js';
 import { runGitCommand, type GitCommandRunner } from './git-fetch.js';
 import { safeDirectoryGitArgs } from './git-safe.js';
-import { gitSourceMirrorPath, gitSourceTargetUrl, normalizeBaseUrl } from './git-targets.js';
+import {
+  gitSourceMirrorPath,
+  gitSourcePublishOwner,
+  gitSourcePublishRepo,
+  gitSourceTargetUrl,
+  normalizeBaseUrl,
+} from './git-targets.js';
 import { assertUniqueGitPublishTargets } from './git-publish-targets.js';
 import { mapConcurrent } from './concurrency.js';
 
@@ -20,6 +27,7 @@ export interface ApplyGitSourcesOptions {
   giteaBaseUrl: string;
   generatedAt?: string;
   gitAuth?: GitHttpAuth;
+  giteaClient?: Pick<GiteaClient, 'setRepositoryDefaultBranch'>;
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
   onProgress?: (event: GitApplyProgressEvent) => void;
@@ -146,6 +154,24 @@ function pushEnv(): NodeJS.ProcessEnv {
   };
 }
 
+async function mirrorDefaultBranch(mirrorPath: string, runner: GitCommandRunner): Promise<string> {
+  const result = await runner({
+    args: safeDirectoryGitArgs(mirrorPath, [
+      '-C',
+      mirrorPath,
+      'symbolic-ref',
+      '--quiet',
+      '--short',
+      'HEAD',
+    ]),
+  });
+  const branch = result?.stdout.trim();
+  if (!branch) {
+    throw new Error(`mirror HEAD does not name a branch: ${mirrorPath}`);
+  }
+  return branch;
+}
+
 function summarizeErrorMessage(message: string): string {
   const lines = message.trim().split(/\r?\n/);
   const summarizedLines =
@@ -172,6 +198,8 @@ async function applyRepository(
 ): Promise<GitApplyActionResult> {
   const mirrorPath = sourcePath(source, options);
   const targetUrl = gitSourceTargetUrl(source, options.giteaBaseUrl);
+  const setRepositoryDefaultBranch = options.giteaClient?.setRepositoryDefaultBranch;
+  let defaultBranch: string | undefined;
 
   if (!(await fs.pathExists(mirrorPath))) {
     return {
@@ -183,11 +211,28 @@ async function applyRepository(
   }
 
   try {
+    if (setRepositoryDefaultBranch) {
+      defaultBranch = await mirrorDefaultBranch(mirrorPath, runner);
+    }
     await runner({
       args: pushArgs(mirrorPath, targetUrl, options.gitAuth),
       ...(options.gitAuth ? { env: pushEnv() } : {}),
     });
+    if (setRepositoryDefaultBranch && defaultBranch) {
+      try {
+        await setRepositoryDefaultBranch.call(options.giteaClient, {
+          branch: defaultBranch,
+          name: gitSourcePublishRepo(source),
+          owner: gitSourcePublishOwner(source),
+        });
+      } catch (error) {
+        throw new Error(
+          `pushed refs but failed to set Gitea default branch to ${defaultBranch}: ${(error as Error).message}`
+        );
+      }
+    }
     return {
+      ...(defaultBranch ? { defaultBranch } : {}),
       repository: source.id,
       sourcePath: mirrorPath,
       status: 'pushed',
@@ -195,6 +240,7 @@ async function applyRepository(
     };
   } catch (error) {
     return {
+      ...(defaultBranch ? { defaultBranch } : {}),
       error: summarizeErrorMessage((error as Error).message),
       repository: source.id,
       sourcePath: mirrorPath,

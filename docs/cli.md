@@ -666,6 +666,10 @@ create repositories on push.
 
 When `--token`, `GITEA_TOKEN`, or a saved token is available, the command uses it for
 Git HTTP push authentication instead of relying on an interactive credential helper.
+After each successful push it also sets the Gitea repository's default branch from the
+bare mirror's symbolic `HEAD`. This repairs repositories previously initialized from
+the first branch in a multi-ref push and preserves the upstream default in the
+create-and-push fallback when migration is unavailable.
 For non-Gitea HTTP Git hosts, pass `--username` and `--password` instead; no Gitea API
 call is made in that mode.
 
