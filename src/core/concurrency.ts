@@ -33,3 +33,27 @@ export async function mapConcurrent<T, R>(
   );
   return results;
 }
+
+export async function serializeByKey<T>(
+  tails: Map<string, Promise<void>>,
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = tails.get(key);
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  tails.set(key, current);
+  if (previous) {
+    await previous;
+  }
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (tails.get(key) === current) {
+      tails.delete(key);
+    }
+  }
+}

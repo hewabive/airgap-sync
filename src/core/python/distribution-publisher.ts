@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mapConcurrent } from '../concurrency.js';
+import { mapConcurrent, serializeByKey } from '../concurrency.js';
 import * as fs from '../fs.js';
 import { readCpythonDistributionBundleIndex } from './distribution-bundle.js';
 import {
@@ -84,6 +84,11 @@ export async function publishCpythonDistributions(
   );
   let completed = 0;
   const baseUrl = normalizeGiteaGenericBaseUrl(options.giteaBaseUrl);
+  // Gitea creates a package-version row on the first file upload. Concurrent
+  // first uploads to the same coordinate can race on UQE_package_s, so keep
+  // those uploads ordered while allowing different provider builds to proceed
+  // in parallel.
+  const coordinateUploadTails = new Map<string, Promise<void>>();
   const actions = await mapConcurrent(
     artifacts,
     Math.max(1, options.concurrency ?? 4),
@@ -105,6 +110,7 @@ export async function publishCpythonDistributions(
           status: 'error',
         };
       } else {
+        const auth = options.auth;
         const onFileProgress = options.onProgress
           ? createPythonFilePublishProgress({
               current: () => completed,
@@ -116,22 +122,27 @@ export async function publishCpythonDistributions(
         try {
           action = {
             ...common,
-            status: await publishGiteaGenericPackageFile({
-              auth: options.auth,
-              baseUrl,
-              bundleDir,
-              fetch: options.fetch ?? globalThis.fetch,
-              file: {
-                expectedSha256: artifact.sha256,
-                file: artifact.file,
-                filename: validateGiteaGenericCoordinate(artifact.filename, 'filename'),
-                owner,
-                package: packageName,
-                version: artifact.providerBuild,
-              },
-              ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-              timeoutMs: options.timeoutMs ?? 300_000,
-            }),
+            status: await serializeByKey(
+              coordinateUploadTails,
+              `${owner.toLowerCase()}\0${packageName.toLowerCase()}\0${common.version}`,
+              async () =>
+                publishGiteaGenericPackageFile({
+                  auth,
+                  baseUrl,
+                  bundleDir,
+                  fetch: options.fetch ?? globalThis.fetch,
+                  file: {
+                    expectedSha256: artifact.sha256,
+                    file: artifact.file,
+                    filename: validateGiteaGenericCoordinate(artifact.filename, 'filename'),
+                    owner,
+                    package: packageName,
+                    version: artifact.providerBuild,
+                  },
+                  ...(onFileProgress ? { onProgress: onFileProgress } : {}),
+                  timeoutMs: options.timeoutMs ?? 300_000,
+                })
+            ),
           };
         } catch (error) {
           action = { ...common, error: (error as Error).message, status: 'error' };

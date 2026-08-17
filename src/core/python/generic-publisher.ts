@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { serializeByKey } from '../concurrency.js';
 import * as fs from '../fs.js';
 import {
   pythonApplicationManifestCoverageErrors,
@@ -288,30 +289,6 @@ function groupFilesByPackage(files: GiteaGenericPackageFile[]): IndexedGenericFi
     groups.set(key, group);
   }
   return [...groups.values()];
-}
-
-async function serializeByKey<T>(
-  tails: Map<string, Promise<void>>,
-  key: string,
-  operation: () => Promise<T>
-): Promise<T> {
-  const previous = tails.get(key);
-  let release: () => void = () => undefined;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  tails.set(key, current);
-  if (previous) {
-    await previous;
-  }
-  try {
-    return await operation();
-  } finally {
-    release();
-    if (tails.get(key) === current) {
-      tails.delete(key);
-    }
-  }
 }
 
 export async function publishPythonGenericArtifacts(

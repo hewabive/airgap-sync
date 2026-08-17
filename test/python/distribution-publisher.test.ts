@@ -29,28 +29,48 @@ function target(): WorkspaceCpythonDistributionsTarget {
   };
 }
 
-function candidate(): CpythonDistributionCandidate {
+function candidate(
+  options: {
+    content?: Buffer;
+    filename?: string;
+    pythonVersion?: string;
+  } = {}
+): CpythonDistributionCandidate {
+  const candidateContent = options.content ?? content;
+  const candidateFilename = options.filename ?? filename;
   return {
-    filename,
+    filename: candidateFilename,
     platformFamilyId: 'linux-glibc-x86_64',
     provider: 'python-build-standalone',
     providerBuild: '20260805',
     providerPublishedAt: '2026-08-05T00:00:00.000Z',
-    pythonVersion: '3.12.13',
-    sha256: createHash('sha256').update(content).digest('hex'),
-    size: content.length,
-    sourceUrl: `https://github.example/${filename}`,
+    pythonVersion: options.pythonVersion ?? '3.12.13',
+    sha256: createHash('sha256').update(candidateContent).digest('hex'),
+    size: candidateContent.length,
+    sourceUrl: `https://github.example/${candidateFilename}`,
   };
 }
 
-async function writeBundle(): Promise<void> {
+async function writeBundle(
+  candidates: CpythonDistributionCandidate[] = [candidate()],
+  contents: ReadonlyMap<string, Buffer> = new Map([[filename, content]])
+): Promise<void> {
   await downloadCpythonDistributionBundle({
     bundleDir,
-    candidates: [candidate()],
-    fetch: () =>
-      Promise.resolve(
-        new Response(content, { headers: { 'content-length': String(content.length) } })
-      ),
+    candidates,
+    fetch: (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const candidateContent = contents.get(path.posix.basename(new URL(url).pathname));
+      if (!candidateContent) {
+        return Promise.reject(new Error(`Unexpected CPython distribution URL: ${url}`));
+      }
+      return Promise.resolve(
+        new Response(candidateContent, {
+          headers: { 'content-length': String(candidateContent.length) },
+        })
+      );
+    },
     generatedAt: '2026-08-06T00:00:00.000Z',
     targets: [target()],
   });
@@ -120,6 +140,68 @@ describe('CPython distribution publication', () => {
     expect([...published.keys()]).toEqual([
       `/api/packages/airgap-packages/generic/python-build-standalone/20260805/${encodeURIComponent(filename)}`,
     ]);
+  });
+
+  it('serializes initial uploads to the same Gitea package version', async () => {
+    const alternateContent = Buffer.from('alternate portable CPython archive');
+    const alternateFilename =
+      'cpython-3.13.6+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
+    await writeBundle(
+      [
+        candidate(),
+        candidate({
+          content: alternateContent,
+          filename: alternateFilename,
+          pythonVersion: '3.13.6',
+        }),
+      ],
+      new Map([
+        [filename, content],
+        [alternateFilename, alternateContent],
+      ])
+    );
+    const activeCoordinates = new Set<string>();
+    const published = new Map<string, Buffer>();
+    let packageRace = false;
+    const baseUrl = await listen((request, response) => {
+      const url = request.url ?? '';
+      if (request.method === 'GET') {
+        const existing = published.get(url);
+        response.writeHead(existing ? 200 : 404).end(existing);
+        return;
+      }
+      const coordinate = url.split('/').slice(0, -1).join('/').toLowerCase();
+      if (activeCoordinates.has(coordinate)) {
+        packageRace = true;
+        request.resume();
+        response
+          .writeHead(500)
+          .end('pq: duplicate key value violates unique constraint "UQE_package_s"');
+        return;
+      }
+      activeCoordinates.add(coordinate);
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        setTimeout(() => {
+          published.set(url, Buffer.concat(chunks));
+          activeCoordinates.delete(coordinate);
+          response.writeHead(201).end();
+        }, 10);
+      });
+    });
+
+    const report = await publishCpythonDistributions({
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      concurrency: 4,
+      giteaBaseUrl: baseUrl,
+      owner: 'airgap-packages',
+    });
+
+    expect(packageRace).toBe(false);
+    expect(report).toMatchObject({ errors: [], published: 2, skipped: 0 });
+    expect(published.size).toBe(2);
   });
 
   it('reports a conflict when the immutable remote coordinate has different content', async () => {

@@ -77,6 +77,9 @@
 - Added resumable, verified, content-addressed CPython distribution acquisition,
   atomic bundle activation, reference-safe rolling prune, static verification, bundle
   summaries, and additive idempotent publication to Gitea Generic Packages.
+- Serialized CPython files sharing a Gitea Generic Package version to avoid PostgreSQL
+  `UQE_package_s` creation races while retaining parallel publication across provider
+  builds.
 - Added global successful full-download history and a watermark warning that prevents
   a CPython build window from silently skipping releases after a long collection gap.
   Partial, failed, and dry-run downloads do not advance the watermark.
