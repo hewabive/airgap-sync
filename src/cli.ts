@@ -32,6 +32,9 @@ import {
   createWorkspaceGitSources,
   createWorkspaceSnapshot,
   defaultPythonPublicationProfile,
+  defaultGiteaNpmOwner,
+  defaultNpmRegistryTarget,
+  defaultVerdaccioRegistryUrl,
   defaultNpmSecurityPolicy,
   defaultWorkspaceGiteaUrl,
   defaultWorkspaceOutputDir,
@@ -48,6 +51,7 @@ import {
   HttpPythonIndexClient,
   initWorkspace,
   initialPythonApplicationMinors,
+  isGiteaNpmRegistryUrl,
   installMaintainedPythonApplicationRecipe,
   listBuiltInPlatformFamilies,
   migrateWorkspaceConfig,
@@ -91,6 +95,7 @@ import {
   readWorkspaceConfig,
   readWorkspaceSecrets,
   removeWorkspaceTarget,
+  resolveNpmRegistryTarget,
   resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
@@ -145,6 +150,7 @@ import type {
   GitPublishOwnerKind,
   LatestPolicy,
   NpmSecurityDeltaReport,
+  NpmRegistryTarget,
   PlatformCoveragePolicy,
   PythonApplicationDownloadProgressEvent,
   PythonSecurityDeltaReport,
@@ -207,8 +213,10 @@ interface FetchOptions {
 interface PublishOptions {
   distTagConcurrency: number;
   dryRun?: boolean;
+  giteaToken?: string;
   publishConcurrency: number;
   registry: string;
+  registryType?: string;
   skipExisting?: boolean;
 }
 
@@ -225,6 +233,8 @@ interface ApplyOptions {
   gitUsername?: string;
   json?: boolean;
   mirrorsDir?: string;
+  npmOwner?: string;
+  npmRegistryType?: string;
   publishConcurrency: number;
   public?: boolean;
   pythonOwner?: string;
@@ -239,6 +249,7 @@ interface VerifyOptions {
 
 interface VerifyInstallOptions {
   gitea: string;
+  giteaToken?: string;
   json?: boolean;
   keepTemp?: boolean;
   registry: string;
@@ -1018,9 +1029,8 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
     ...(npmAuthErrors.length > 0
       ? [
           red(`NPM auth: failed for ${report.registryUrl}.`),
-          `Existing user: npm login --registry ${report.registryUrl}`,
-          `New user: npm adduser --registry ${report.registryUrl}`,
-          'Package publishing and dist-tag restore were skipped because npm is not logged in.',
+          ...npmAuthErrors.map((error) => error.error ?? 'Unknown npm authentication error'),
+          'Package publishing and dist-tag restore were skipped because registry authentication failed.',
         ]
       : []),
     `NPM packages: ${String(report.publish.totalPackages)} total, ${String(
@@ -1286,6 +1296,12 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
   const publication = config.python?.publication ?? defaultPythonPublicationProfile();
   const publicationOwner = (owner: PythonPublicationProfile['owner']): string =>
     owner.strategy === 'authenticated-user' ? 'authenticated user' : `${owner.kind} ${owner.name}`;
+  const npmRegistry = config.npmRegistry;
+  const npmRegistryDescription = !npmRegistry
+    ? '(not set)'
+    : npmRegistry.type === 'verdaccio'
+      ? `verdaccio ${npmRegistry.url}`
+      : `gitea ${publicationOwner(npmRegistry.owner)}`;
   const pythonLines = [
     `Python application source: ${config.python?.sourceIndex ?? defaultPythonSourceIndex}`,
     `Python publication owner: ${publicationOwner(publication.owner)}`,
@@ -1309,7 +1325,7 @@ function formatWorkspaceConfig(config: WorkspaceConfig): string {
     `npm release quarantine: ${String(config.npmSecurity?.minReleaseAgeDays ?? defaultNpmSecurityPolicy.minReleaseAgeDays)} days`,
     `npm security report TTL: ${String(config.npmSecurity?.maxReportAgeHours ?? defaultNpmSecurityPolicy.maxReportAgeHours)} hours`,
     `npm vulnerability resolution: ${config.npmSecurity?.vulnerabilityResolutionPolicy ?? defaultNpmSecurityPolicy.vulnerabilityResolutionPolicy}`,
-    `Target registry: ${config.targetRegistry ?? '(not set)'}`,
+    `Target npm registry: ${npmRegistryDescription}`,
     `Gitea URL: ${config.giteaUrl ?? '(not set)'}`,
     ...pythonLines,
     `Download devDependencies: ${promptBooleanToString(config.defaults.download.includeDev)}`,
@@ -2367,6 +2383,8 @@ async function resolvePublishWorkspaceDefaults(options: {
   bundle: string | undefined;
   gitea: string | undefined;
   registry: string | undefined;
+  npmOwner?: string;
+  npmRegistryType?: string;
   pythonOwner?: string;
   gitOwnerStrategy?: GitOwnerStrategy;
   gitPublishOwner?: string;
@@ -2382,7 +2400,7 @@ async function resolvePublishWorkspaceDefaults(options: {
   gitOwnerStrategy: GitOwnerStrategy;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
-  registry: string;
+  npmRegistryTarget: NpmRegistryTarget;
   workspaceDir: string;
 }> {
   if (
@@ -2397,30 +2415,72 @@ async function resolvePublishWorkspaceDefaults(options: {
   ) {
     throw new Error('--git-publish-owner-kind must be user or organization');
   }
+  if (
+    options.npmRegistryType !== undefined &&
+    options.npmRegistryType !== 'verdaccio' &&
+    options.npmRegistryType !== 'gitea'
+  ) {
+    throw new Error('--npm-registry-type must be verdaccio or gitea');
+  }
+  if (options.registry && options.npmRegistryType === 'gitea') {
+    throw new Error('--registry cannot be used with --npm-registry-type gitea');
+  }
   const workspaceDir = process.cwd();
-  const needsConfig = !options.bundle || !options.gitea || !options.registry;
+  const needsConfig =
+    !options.bundle ||
+    !options.gitea ||
+    (!options.registry && options.npmRegistryType === undefined && !options.npmOwner);
   let config: WorkspaceConfig | undefined;
   if (needsConfig || options.pythonOwner === undefined || options.gitOwnerStrategy === undefined) {
     try {
       config = await readWorkspaceConfig(workspaceDir);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new Error(
-          `provide <bundle>, --registry, and --gitea, or run from a workspace with ${workspaceConfigFileName}`
-        );
+        if (needsConfig) {
+          throw new Error(
+            `provide <bundle>, an npm registry target, and --gitea, or run from a workspace with ${workspaceConfigFileName}`
+          );
+        }
+        config = undefined;
+      } else {
+        throw error;
       }
-      throw error;
     }
   }
   const bundle = options.bundle ?? config?.output;
-  const registry = options.registry ?? config?.targetRegistry;
   const gitea = options.gitea ?? config?.giteaUrl;
+  const configuredNpmRegistry = config?.npmRegistry;
+  let npmRegistryTarget: NpmRegistryTarget | undefined;
+  if (options.registry) {
+    npmRegistryTarget = { type: 'verdaccio', url: options.registry };
+  } else if (options.npmRegistryType === 'gitea' || options.npmOwner) {
+    const configuredGitea =
+      configuredNpmRegistry?.type === 'gitea' ? configuredNpmRegistry : undefined;
+    npmRegistryTarget = {
+      owner: options.npmOwner
+        ? { kind: 'organization', name: options.npmOwner, strategy: 'fixed-owner' }
+        : (configuredGitea?.owner ?? {
+            kind: 'organization',
+            name: defaultGiteaNpmOwner,
+            strategy: 'fixed-owner',
+          }),
+      type: 'gitea',
+      visibility: configuredGitea?.visibility ?? 'public',
+    };
+  } else if (options.npmRegistryType === 'verdaccio') {
+    npmRegistryTarget =
+      configuredNpmRegistry?.type === 'verdaccio' ? configuredNpmRegistry : undefined;
+  } else {
+    npmRegistryTarget = configuredNpmRegistry;
+  }
 
   if (!bundle) {
     throw new Error('provide <bundle> or configure output in airgap-sync.json');
   }
-  if (!registry) {
-    throw new Error('provide --registry <url> or configure targetRegistry in airgap-sync.json');
+  if (!npmRegistryTarget) {
+    throw new Error(
+      'provide --registry <url>, select --npm-registry-type gitea, or configure npmRegistry in airgap-sync.json'
+    );
   }
   if (!gitea) {
     throw new Error('provide --gitea <url> or configure giteaUrl in airgap-sync.json');
@@ -2448,7 +2508,7 @@ async function resolvePublishWorkspaceDefaults(options: {
     ...(config ? { publicRepositories: config.defaults.publish.publicRepositories } : {}),
     ...(pythonOwner ? { pythonOwner } : {}),
     pythonPublicationProfile,
-    registry,
+    npmRegistryTarget,
     workspaceDir,
   };
 }
@@ -2495,20 +2555,60 @@ async function configureConnectionSettings(
   config: WorkspaceConfig
 ): Promise<WorkspaceConfig> {
   const sourceRegistry = await ask(rl, 'Source npm registry', config.sourceRegistry);
-  const targetRegistry = await ask(
-    rl,
-    'Closed-network npm registry',
-    config.targetRegistry ?? 'http://verdaccio.local:4873'
-  );
   const giteaUrl = await ask(
     rl,
     'Closed-network Gitea URL',
     config.giteaUrl ?? defaultWorkspaceGiteaUrl
   );
+  const currentNpmRegistry = config.npmRegistry ?? defaultNpmRegistryTarget();
+  const npmRegistryType = (
+    await ask(rl, 'Closed-network npm registry type (verdaccio/gitea)', currentNpmRegistry.type)
+  )
+    .trim()
+    .toLowerCase();
+  if (npmRegistryType !== 'verdaccio' && npmRegistryType !== 'gitea') {
+    throw new Error('npm registry type must be verdaccio or gitea');
+  }
+  let npmRegistry: NpmRegistryTarget;
+  if (npmRegistryType === 'verdaccio') {
+    const fallback =
+      currentNpmRegistry.type === 'verdaccio'
+        ? currentNpmRegistry.url
+        : defaultVerdaccioRegistryUrl;
+    const url = (await ask(rl, 'Closed-network Verdaccio URL', fallback)).trim();
+    if (!url) {
+      throw new Error('Verdaccio URL is required');
+    }
+    npmRegistry = { type: 'verdaccio', url };
+  } else {
+    const pythonOwner = config.python?.publication?.owner;
+    const currentOwner =
+      currentNpmRegistry.type === 'gitea' && currentNpmRegistry.owner.strategy === 'fixed-owner'
+        ? currentNpmRegistry.owner.name
+        : pythonOwner?.strategy === 'fixed-owner'
+          ? pythonOwner.name
+          : defaultGiteaNpmOwner;
+    const owner = (
+      await ask(rl, 'Managed Gitea organization for npm packages', currentOwner)
+    ).trim();
+    if (!owner) {
+      throw new Error('Gitea npm organization is required');
+    }
+    const isPublic = await askYesNo(
+      rl,
+      'Make the managed npm package owner public?',
+      currentNpmRegistry.type !== 'gitea' || currentNpmRegistry.visibility === 'public'
+    );
+    npmRegistry = {
+      owner: { kind: 'organization', name: owner, strategy: 'fixed-owner' },
+      type: 'gitea',
+      visibility: isPublic ? 'public' : 'private',
+    };
+  }
   const nextConfig: WorkspaceConfig = {
     ...config,
+    npmRegistry,
     sourceRegistry,
-    ...(targetRegistry ? { targetRegistry } : {}),
     ...(giteaUrl ? { giteaUrl } : {}),
   };
   await saveWorkspaceConfig(workspaceDir, nextConfig);
@@ -3410,25 +3510,19 @@ async function diagnosticsMenu(workspaceDir: string, rl: ReadlineInterface): Pro
   }
 }
 
-async function targetRegistryFromMenu(
+async function npmRegistryTargetFromMenu(
   workspaceDir: string,
   rl: ReadlineInterface
-): Promise<string> {
+): Promise<NpmRegistryTarget> {
   const config = await readMenuWorkspace(workspaceDir, rl);
-  if (config.targetRegistry) {
-    return config.targetRegistry;
+  if (config.npmRegistry) {
+    return config.npmRegistry;
   }
-
-  const targetRegistry = await ask(
-    rl,
-    'Closed-network npm registry',
-    'http://verdaccio.local:4873'
-  );
-  if (!targetRegistry) {
-    throw new Error('Closed-network npm registry is required');
+  const configured = await configureConnectionSettings(workspaceDir, rl, config);
+  if (!configured.npmRegistry) {
+    throw new Error('Closed-network npm registry target is required');
   }
-  await saveWorkspaceConfig(workspaceDir, { ...config, targetRegistry });
-  return targetRegistry;
+  return configured.npmRegistry;
 }
 
 async function giteaUrlFromMenu(workspaceDir: string, rl: ReadlineInterface): Promise<string> {
@@ -3537,8 +3631,11 @@ async function runMenuAction(
     }
     case '3': {
       console.error(`[menu] publish updates: bundle ${bundle}`);
-      const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
+      const npmRegistryTarget = await npmRegistryTargetFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+      const targetRegistry = resolveNpmRegistryTarget(npmRegistryTarget, {
+        giteaBaseUrl: giteaUrl,
+      }).registryUrl;
       const provisionGit = await resolvePromptBoolean(
         rl,
         'Create/check missing Git repositories through Gitea API?',
@@ -3564,12 +3661,13 @@ async function runMenuAction(
           publicRepos
         )} provisionGit=${String(provisionGit)} configureGitGlobal=${String(configureGitGlobal)}`
       );
-      const token = provisionGit
-        ? await giteaTokenFromMenu(workspaceDir, rl)
-        : await resolveGiteaToken({
-            cliToken: undefined,
-            workspaceDir,
-          });
+      const token =
+        provisionGit || npmRegistryTarget.type === 'gitea'
+          ? await giteaTokenFromMenu(workspaceDir, rl)
+          : await resolveGiteaToken({
+              cliToken: undefined,
+              workspaceDir,
+            });
       if (token) {
         console.error('[menu] publish updates: Gitea token is set');
       }
@@ -3577,8 +3675,6 @@ async function runMenuAction(
         compactArgs([
           'publish',
           bundle,
-          '--registry',
-          targetRegistry,
           '--gitea',
           giteaUrl,
           publicRepos ? '--public' : undefined,
@@ -3591,14 +3687,23 @@ async function runMenuAction(
       return true;
     }
     case '4': {
-      const targetRegistry = await targetRegistryFromMenu(workspaceDir, rl);
+      const npmRegistryTarget = await npmRegistryTargetFromMenu(workspaceDir, rl);
       const giteaUrl = await giteaUrlFromMenu(workspaceDir, rl);
+      const targetRegistry = resolveNpmRegistryTarget(npmRegistryTarget, {
+        giteaBaseUrl: giteaUrl,
+      }).registryUrl;
       const ignoreScripts = await resolvePromptBoolean(
         rl,
         'Ignore lifecycle scripts during install verification?',
         config.defaults.verifyInstall.ignoreScripts,
         true
       );
+      const registryToken =
+        npmRegistryTarget.type === 'gitea'
+          ? npmRegistryTarget.visibility === 'private'
+            ? await giteaTokenFromMenu(workspaceDir, rl)
+            : await resolveGiteaToken({ cliToken: undefined, workspaceDir })
+          : undefined;
       await runSelfCommand(
         compactArgs([
           'verify',
@@ -3610,7 +3715,8 @@ async function runMenuAction(
           giteaUrl,
           ignoreScripts ? '--ignore-scripts' : undefined,
         ]),
-        workspaceDir
+        workspaceDir,
+        registryToken ? { GITEA_TOKEN: registryToken } : {}
       );
       return true;
     }
@@ -5082,9 +5188,27 @@ addNpmPublishOptions(
     .argument('<bundle>', 'Path to airgap bundle directory')
     .requiredOption('-r, --registry <url>', 'Target registry URL')
 )
+  .option('--registry-type <type>', 'Registry type: verdaccio or gitea; inferred from URL')
+  .option(
+    '--gitea-token <token>',
+    `Gitea package token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
+  )
   .option('--dry-run', 'Print planned operations without publishing')
   .action(async (bundle: string, options: PublishOptions) => {
     try {
+      const registryType =
+        options.registryType ?? (isGiteaNpmRegistryUrl(options.registry) ? 'gitea' : 'verdaccio');
+      if (registryType !== 'verdaccio' && registryType !== 'gitea') {
+        throw new Error('--registry-type must be verdaccio or gitea');
+      }
+      const registryAuthToken =
+        registryType === 'gitea' && options.dryRun !== true
+          ? await requireGiteaToken({
+              cliToken: options.giteaToken,
+              optionName: '--gitea-token <token>',
+              workspaceDir: process.cwd(),
+            })
+          : undefined;
       const manifest = await readBundleManifest(bundle);
       const distTags = await readDistTagsManifest(bundle);
       const report = await publishBundle(manifest, distTags, {
@@ -5093,6 +5217,8 @@ addNpmPublishOptions(
         dryRun: options.dryRun === true,
         onProgress: createPublishProgressLogger(),
         publishConcurrency: options.publishConcurrency,
+        ...(registryAuthToken ? { registryAuthToken } : {}),
+        registryType,
         registryUrl: options.registry,
         skipExisting: options.skipExisting !== false,
       });
@@ -5178,6 +5304,10 @@ verifyCommand
   .argument('<bundle>', 'Path to airgap bundle directory')
   .requiredOption('-r, --registry <url>', 'Target npm registry URL')
   .requiredOption('--gitea <url>', 'Closed-network Gitea base URL')
+  .option(
+    '--gitea-token <token>',
+    `Gitea package token, defaults to GITEA_TOKEN or ${workspaceSecretsFileName}`
+  )
   .option('--timeout-ms <ms>', 'Install timeout per project', parsePositiveInteger, 10 * 60_000)
   .option(
     '--run-scripts',
@@ -5187,11 +5317,18 @@ verifyCommand
   .option('--json', 'Print the full JSON verification report')
   .action(async (bundle: string, options: VerifyInstallOptions) => {
     try {
+      const registryAuthToken = isGiteaNpmRegistryUrl(options.registry)
+        ? await resolveGiteaToken({
+            cliToken: options.giteaToken,
+            workspaceDir: process.cwd(),
+          })
+        : undefined;
       const report = await verifyInstall({
         bundleDir: bundle,
         giteaBaseUrl: options.gitea,
         ignoreScripts: options.runScripts !== true,
         keepTemp: options.keepTemp === true,
+        ...(registryAuthToken ? { registryAuthToken } : {}),
         registryUrl: options.registry,
         timeoutMs: options.timeoutMs,
       });
@@ -5431,7 +5568,9 @@ addNpmPublishOptions(
     .command('publish')
     .description('Publish an airgap bundle to an npm registry and Git host')
     .argument('[bundle]', 'Path to airgap bundle directory; defaults to airgap-sync.json output')
-    .option('-r, --registry <url>', 'Target npm registry URL; defaults to targetRegistry')
+    .option('-r, --registry <url>', 'Target Verdaccio/npm-compatible registry URL')
+    .option('--npm-registry-type <type>', 'npm registry type: verdaccio or gitea')
+    .option('--npm-owner <owner>', 'Managed Gitea organization for npm packages')
     .option('--gitea <url>', 'Closed-network Git host base URL; defaults to giteaUrl')
     .option('--python-owner <owner>', 'Public Gitea owner for the Python package index')
     .option(
@@ -5466,6 +5605,8 @@ addNpmPublishOptions(
         bundle,
         gitea: options.gitea,
         registry: options.registry,
+        ...(options.npmOwner ? { npmOwner: options.npmOwner } : {}),
+        ...(options.npmRegistryType ? { npmRegistryType: options.npmRegistryType } : {}),
         ...(options.pythonOwner ? { pythonOwner: options.pythonOwner } : {}),
         ...(options.gitOwnerStrategy ? { gitOwnerStrategy: options.gitOwnerStrategy } : {}),
         ...(options.gitPublishOwner ? { gitPublishOwner: options.gitPublishOwner } : {}),
@@ -5500,9 +5641,15 @@ addNpmPublishOptions(
         pythonOwnerTargets.some((owner) =>
           owner.strategy === 'authenticated-user' ? true : owner.kind === 'user'
         );
+      const needsAuthenticatedNpmOwner =
+        resolved.npmRegistryTarget.type === 'gitea' &&
+        (resolved.npmRegistryTarget.owner.strategy === 'authenticated-user' ||
+          resolved.npmRegistryTarget.owner.kind === 'user');
       const requiresGiteaToken =
         (options.dryRun !== true && hasPythonPublication) ||
+        (options.dryRun !== true && resolved.npmRegistryTarget.type === 'gitea') ||
         needsAuthenticatedGitOwner ||
+        needsAuthenticatedNpmOwner ||
         needsAuthenticatedPythonOwner;
       const token = requiresGiteaToken
         ? await requireGiteaToken({
@@ -5546,14 +5693,17 @@ addNpmPublishOptions(
         giteaBaseUrl: resolved.gitea,
         giteaClient: client,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
+        npmRegistryTarget: resolved.npmRegistryTarget,
         onPublishProgress: createPublishProgressLogger(),
         onProgress: createApplyProgressLogger(),
         private: !publicRepositories,
         ...(login && token ? { pythonAuth: { password: token, username: login } } : {}),
+        ...(resolved.npmRegistryTarget.type === 'gitea' && token
+          ? { registryAuthToken: token }
+          : {}),
         ...(resolved.pythonOwner ? { pythonOwner: resolved.pythonOwner } : {}),
         pythonPublicationProfile: resolved.pythonPublicationProfile,
         publishConcurrency: options.publishConcurrency,
-        registryUrl: resolved.registry,
         skipExisting: options.skipExisting !== false,
         skipGitProvision,
       });

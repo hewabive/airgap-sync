@@ -1,6 +1,6 @@
 # Architecture
 
-`airgap-sync` builds a transfer bundle that can populate Verdaccio and Gitea package
+`airgap-sync` builds a transfer bundle that can populate Verdaccio or Gitea npm and Gitea package
 registries through normal publication APIs.
 
 The product direction is broader: a portable airgap dependency sync tool for projects

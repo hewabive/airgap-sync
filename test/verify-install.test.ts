@@ -151,6 +151,34 @@ describe('verifyInstall', () => {
     expect(await fs.pathExists(path.join(bundleDir, 'verify-install-report.json'))).toBe(true);
   });
 
+  it('provides a temporary npm config for an authenticated Gitea registry', async () => {
+    await writeWorkspaceSnapshot();
+    let userConfigPath: string | undefined;
+
+    await verifyInstall({
+      bundleDir,
+      giteaBaseUrl: 'http://gitea.local',
+      gitRunner: gitRunnerWithProject({
+        lockfiles: {
+          'package-lock.json': JSON.stringify({ lockfileVersion: 3, name: 'app', packages: {} }),
+        },
+      }),
+      registryAuthToken: 'gitea-secret',
+      registryUrl: 'http://gitea.local/api/packages/npm-packages/npm/',
+      async runner(invocation) {
+        userConfigPath = invocation.env.NPM_CONFIG_USERCONFIG;
+        expect(userConfigPath).toBe(invocation.env.npm_config_userconfig);
+        expect(await fs.readFile(userConfigPath ?? '', 'utf8')).toBe(
+          '//gitea.local/api/packages/npm-packages/npm/:_authToken=gitea-secret\n'
+        );
+        return { exitCode: 0, stderr: '', stdout: '' };
+      },
+    });
+
+    expect(userConfigPath).toBeTruthy();
+    expect(await fs.pathExists(userConfigPath!)).toBe(false);
+  });
+
   it('selects pnpm for pnpm lockfiles', async () => {
     await writeWorkspaceSnapshot();
     const calls: InstallCommandInvocation[] = [];

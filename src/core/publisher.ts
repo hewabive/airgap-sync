@@ -21,6 +21,7 @@ import {
   validateBundleTarballs,
 } from './validation.js';
 import { assertNpmSecurityGate } from './security.js';
+import { npmUserConfigContent } from './npm-auth.js';
 
 const execFileAsync = promisify(execFile);
 const defaultDistTagConcurrency = 4;
@@ -31,6 +32,7 @@ const registryLookupConcurrency = 8;
 interface NpmRunOptions {
   maxBuffer: number;
   timeout: number;
+  userConfigPath?: string;
 }
 
 export type NpmRunner = (
@@ -46,6 +48,8 @@ export interface PublishBundleOptions {
   dryRun?: boolean;
   onProgress?: (event: PublishProgressEvent) => void;
   publishConcurrency?: number;
+  registryAuthToken?: string;
+  registryType?: 'gitea' | 'verdaccio';
   registryUrl: string;
   runNpm?: NpmRunner;
   skipExisting?: boolean;
@@ -277,7 +281,7 @@ function errorSummary(error: unknown): string {
     summaryLines.length > 0 ? summaryLines.join('\n') : (lines.at(-1) ?? 'Unknown error');
 
   if (summary.includes('E413') || /payload too large/iu.test(summary)) {
-    return `${summary} (target registry rejected the upload as too large; raise Verdaccio max_body_size and any reverse-proxy upload limit)`;
+    return `${summary} (target registry rejected the upload as too large; raise the registry and reverse-proxy upload limits)`;
   }
 
   return summary;
@@ -313,9 +317,17 @@ async function findNpmCliPath(): Promise<string | undefined> {
 
 async function runNpm(args: string[], options: NpmRunOptions): Promise<{ stdout: string }> {
   const npmCliPath = await findNpmCliPath();
+  const env = options.userConfigPath
+    ? {
+        ...process.env,
+        NPM_CONFIG_USERCONFIG: options.userConfigPath,
+        npm_config_userconfig: options.userConfigPath,
+      }
+    : process.env;
 
   if (npmCliPath) {
     return await execFileAsync(process.execPath, [npmCliPath, ...args], {
+      env,
       maxBuffer: options.maxBuffer,
       timeout: options.timeout,
       windowsHide: true,
@@ -329,10 +341,30 @@ async function runNpm(args: string[], options: NpmRunOptions): Promise<{ stdout:
   }
 
   return await execFileAsync('npm', args, {
+    env,
     maxBuffer: options.maxBuffer,
     timeout: options.timeout,
     windowsHide: true,
   });
+}
+
+async function createNpmUserConfig(
+  registryUrl: string,
+  token: string
+): Promise<{
+  directory: string;
+  path: string;
+}> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-npm-auth-'));
+  const configPath = path.join(directory, 'npmrc');
+  await fs.writeFile(configPath, npmUserConfigContent(registryUrl, token), {
+    mode: 0o600,
+  });
+  return { directory, path: configPath };
+}
+
+function runnerWithUserConfig(runner: NpmRunner | undefined, userConfigPath: string): NpmRunner {
+  return async (args, options) => runNpmCommand(args, { ...options, userConfigPath }, runner);
 }
 
 async function runNpmCommand(
@@ -413,17 +445,25 @@ async function npmWhoami(registryUrl: string, runner?: NpmRunner): Promise<void>
   );
 }
 
-function npmAuthError(registryUrl: string, error: unknown): PublishActionResult {
+function npmAuthError(
+  registryUrl: string,
+  error: unknown,
+  registryType: PublishBundleOptions['registryType']
+): PublishActionResult {
+  const guidance =
+    registryType === 'gitea'
+      ? [
+          `Gitea package authentication failed for ${registryUrl}.`,
+          'Provide a Gitea personal access token with package write permission.',
+        ]
+      : [
+          `npm is not logged in to ${registryUrl}.`,
+          `Existing user: npm login --registry ${registryUrl}`,
+          `New user: npm adduser --registry ${registryUrl}`,
+        ];
   return {
     action: 'auth',
-    error: [
-      `npm is not logged in to ${registryUrl}.`,
-      `Existing user: npm login --registry ${registryUrl}`,
-      `New user: npm adduser --registry ${registryUrl}`,
-      errorSummary(error),
-    ]
-      .filter(Boolean)
-      .join('\n'),
+    error: [...guidance, errorSummary(error)].filter(Boolean).join('\n'),
     package: registryUrl,
     status: 'error',
   };
@@ -529,14 +569,19 @@ function parseNpmViewPackageSnapshot(stdout: string): PackageRegistrySnapshot {
 
 async function fetchPackageSnapshot(
   packageName: string,
-  registryUrl: string
+  registryUrl: string,
+  authToken?: string
 ): Promise<PackageRegistrySnapshot> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.npm.install-v1+json, application/json',
+  };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
   const response = await fetch(
     `${registryUrl.replace(/\/$/, '')}/${encodePackageName(packageName)}`,
     {
-      headers: {
-        Accept: 'application/vnd.npm.install-v1+json, application/json',
-      },
+      headers,
       signal: AbortSignal.timeout(30_000),
     }
   );
@@ -572,10 +617,11 @@ async function npmPackageSnapshotFromCli(
 async function npmPackageSnapshot(
   packageName: string,
   registryUrl: string,
-  runner?: NpmRunner
+  runner?: NpmRunner,
+  authToken?: string
 ): Promise<PackageRegistrySnapshot> {
   try {
-    return await fetchPackageSnapshot(packageName, registryUrl);
+    return await fetchPackageSnapshot(packageName, registryUrl, authToken);
   } catch {
     return npmPackageSnapshotFromCli(packageName, registryUrl, runner);
   }
@@ -586,7 +632,8 @@ async function lookupPackageSnapshots(
   distTags: DistTagsManifest,
   registryUrl: string,
   runner?: NpmRunner,
-  onProgress?: PublishBundleOptions['onProgress']
+  onProgress?: PublishBundleOptions['onProgress'],
+  authToken?: string
 ): Promise<Map<string, PackageRegistrySnapshot>> {
   const packageNames = [
     ...new Set([
@@ -605,7 +652,10 @@ async function lookupPackageSnapshots(
     packageNames,
     registryLookupConcurrency,
     async (name) => {
-      const result = [name, await npmPackageSnapshot(name, registryUrl, runner)] as const;
+      const result = [
+        name,
+        await npmPackageSnapshot(name, registryUrl, runner, authToken),
+      ] as const;
       completed++;
       onProgress?.({
         current: completed,
@@ -651,6 +701,26 @@ export function createPublishPlan(
 }
 
 export async function publishBundle(
+  manifest: BundleManifest,
+  distTags: DistTagsManifest,
+  options: PublishBundleOptions
+): Promise<PublishReport> {
+  const authConfig = options.registryAuthToken
+    ? await createNpmUserConfig(options.registryUrl, options.registryAuthToken)
+    : undefined;
+  try {
+    return await publishBundleWithPreparedAuth(manifest, distTags, {
+      ...options,
+      ...(authConfig ? { runNpm: runnerWithUserConfig(options.runNpm, authConfig.path) } : {}),
+    });
+  } finally {
+    if (authConfig) {
+      await fs.remove(authConfig.directory);
+    }
+  }
+}
+
+async function publishBundleWithPreparedAuth(
   manifest: BundleManifest,
   distTags: DistTagsManifest,
   options: PublishBundleOptions
@@ -743,7 +813,8 @@ export async function publishBundle(
           distTags,
           options.registryUrl,
           options.runNpm,
-          options.onProgress
+          options.onProgress,
+          options.registryAuthToken
         );
   const existingVersionsByPackage = new Map(
     [...packageSnapshots].map(([name, snapshot]) => [name, snapshot.versions] as const)
@@ -772,14 +843,20 @@ export async function publishBundle(
   if (needsAuth) {
     options.onProgress?.({ phase: 'auth', status: 'start' });
     try {
-      await npmWhoami(options.registryUrl, options.runNpm);
+      if (options.registryType === 'gitea') {
+        if (!options.registryAuthToken) {
+          throw new Error('No Gitea package token was provided');
+        }
+      } else {
+        await npmWhoami(options.registryUrl, options.runNpm);
+      }
       options.onProgress?.({ phase: 'auth', status: 'done' });
     } catch (error) {
       options.onProgress?.({ phase: 'auth', status: 'error' });
       timings.totalMs = elapsedMs(totalStart);
       return {
         dryRun: false,
-        errors: [npmAuthError(options.registryUrl, error)],
+        errors: [npmAuthError(options.registryUrl, error, options.registryType)],
         generatedAt: new Date().toISOString(),
         published: 0,
         registry: options.registryUrl,
@@ -859,7 +936,12 @@ export async function publishBundle(
 
       if (options.skipExisting !== false) {
         try {
-          const snapshot = await npmPackageSnapshot(pkg.name, options.registryUrl, options.runNpm);
+          const snapshot = await npmPackageSnapshot(
+            pkg.name,
+            options.registryUrl,
+            options.runNpm,
+            options.registryAuthToken
+          );
           if (snapshot.versions.has(pkg.version)) {
             existingVersionsByPackage.set(pkg.name, snapshot.versions);
             currentDistTags.set(pkg.name, snapshot.distTags);

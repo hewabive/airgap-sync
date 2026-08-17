@@ -43,11 +43,13 @@ import {
   isBuiltInPlatformFamilyId,
   type BuiltInPlatformFamilyId,
 } from './python/platform-family.js';
+import { normalizeNpmRegistryTarget, type NpmRegistryTarget } from './npm-publication-targets.js';
 
 export const workspaceConfigFileName = 'airgap-sync.json';
 export const workspaceConfigV1BackupFileName = `${workspaceConfigFileName}.v1.backup`;
 export const workspaceConfigPythonPublicationBackupFileName = `${workspaceConfigFileName}.before-0002-python-publication.backup`;
 export const workspaceConfigPythonPublicationProfileBackupFileName = `${workspaceConfigFileName}.before-0003-python-publication-profile.backup`;
+export const workspaceConfigNpmRegistryTargetBackupFileName = `${workspaceConfigFileName}.before-0004-npm-registry-target.backup`;
 export const workspaceSecretsFileName = 'airgap-sync.secrets.json';
 export const defaultWorkspaceOutputDir = './airgap-bundle';
 export const defaultWorkspaceSourceRegistry = 'https://registry.npmjs.org';
@@ -177,6 +179,7 @@ export interface WorkspaceConfig {
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
   npmSecurity?: NpmSecurityPolicy;
+  npmRegistry?: NpmRegistryTarget;
   output: string;
   pythonPublishOwner?: string;
   pythonResolutionMode?: 'approximate' | 'locked-only';
@@ -185,6 +188,7 @@ export interface WorkspaceConfig {
   python?: WorkspacePythonConfig;
   schemaVersion: 1 | 2;
   sourceRegistry: string;
+  /** Legacy schema-v1/v2 field migrated to npmRegistry.type=verdaccio on read. */
   targetRegistry?: string;
   targets: WorkspaceTarget[];
 }
@@ -958,6 +962,11 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
   }
 
   const giteaUrl = optionalString(value.giteaUrl);
+  if (value.npmRegistry !== undefined && value.targetRegistry !== undefined) {
+    throw new Error('Configure npmRegistry or legacy targetRegistry, not both');
+  }
+  const npmRegistry =
+    value.npmRegistry === undefined ? undefined : normalizeNpmRegistryTarget(value.npmRegistry);
   const targetRegistry = optionalString(value.targetRegistry);
   const pythonTargetEnvironments =
     schemaVersion === 1
@@ -1006,6 +1015,7 @@ function normalizeWorkspaceConfig(value: unknown): WorkspaceConfig {
     ...(gitPublishOwner ? { gitPublishOwner } : {}),
     ...(gitPublishOwnerKind ? { gitPublishOwnerKind } : {}),
     ...(npmSecurity ? { npmSecurity } : {}),
+    ...(npmRegistry ? { npmRegistry } : {}),
     output:
       typeof value.output === 'string' && value.output.trim().length > 0
         ? value.output.trim()
@@ -1243,6 +1253,22 @@ function addWorkspacePythonPublicationProfile(config: WorkspaceConfig): Workspac
   });
 }
 
+function addWorkspaceNpmRegistryTarget(config: WorkspaceConfig): WorkspaceConfig {
+  const normalized = normalizeWorkspaceConfig(config);
+  if (normalized.npmRegistry || !normalized.targetRegistry) {
+    return normalized;
+  }
+  const migrated = { ...normalized };
+  delete migrated.targetRegistry;
+  return normalizeWorkspaceConfig({
+    ...migrated,
+    npmRegistry: {
+      type: 'verdaccio',
+      url: normalized.targetRegistry,
+    },
+  });
+}
+
 const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
   {
     apply: previewWorkspaceConfigMigration,
@@ -1264,6 +1290,12 @@ const workspaceConfigMigrations: WorkspaceConfigMigration[] = [
     backupFileName: workspaceConfigPythonPublicationProfileBackupFileName,
     id: '0003-python-publication-profile',
     isApplied: (config) => config.schemaVersion !== 2 || Boolean(config.python?.publication),
+  },
+  {
+    apply: addWorkspaceNpmRegistryTarget,
+    backupFileName: workspaceConfigNpmRegistryTargetBackupFileName,
+    id: '0004-npm-registry-target',
+    isApplied: (config) => config.targetRegistry === undefined,
   },
 ];
 

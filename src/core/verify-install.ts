@@ -24,6 +24,7 @@ import {
 } from './python/application-bundle.js';
 import type { PythonEnvironmentPlan, PythonPlatformPlan } from './python/environment-plan.js';
 import { compareVersions, versionSatisfies } from './python/pep440.js';
+import { npmUserConfigContent } from './npm-auth.js';
 
 export interface InstallCommandInvocation {
   args: string[];
@@ -50,6 +51,7 @@ export interface VerifyInstallOptions {
   gitRunner?: GitCommandRunner;
   ignoreScripts?: boolean;
   keepTemp?: boolean;
+  registryAuthToken?: string;
   registryUrl: string;
   runner?: InstallCommandRunner;
   timeoutMs?: number;
@@ -189,6 +191,7 @@ function gitConfigContent(
 function installEnv(options: {
   cacheRoot: string;
   gitConfigPath: string;
+  npmUserConfigPath?: string;
   registryUrl: string;
 }): NodeJS.ProcessEnv {
   const npmCache = path.join(options.cacheRoot, 'npm');
@@ -208,6 +211,12 @@ function installEnv(options: {
     NPM_CONFIG_REGISTRY: options.registryUrl,
     NPM_CONFIG_STORE_DIR: pnpmStore,
     NPM_CONFIG_TRUST_LOCKFILE: 'true',
+    ...(options.npmUserConfigPath
+      ? {
+          npm_config_userconfig: options.npmUserConfigPath,
+          NPM_CONFIG_USERCONFIG: options.npmUserConfigPath,
+        }
+      : {}),
     PIP_CACHE_DIR: path.join(options.cacheRoot, 'pip'),
     PIP_CONFIG_FILE: process.platform === 'win32' ? 'NUL' : '/dev/null',
     PIP_EXTRA_INDEX_URL: '',
@@ -636,10 +645,19 @@ export async function verifyInstall(options: VerifyInstallOptions): Promise<Veri
   const pythonIndexUrl = pythonBundleIndex?.indexUrl;
   const gitConfigPath = path.join(tempRoot, 'gitconfig');
   await fs.writeFile(gitConfigPath, gitConfigContent(gitSources, options.giteaBaseUrl));
+  const npmUserConfigPath = options.registryAuthToken ? path.join(tempRoot, 'npmrc') : undefined;
+  if (npmUserConfigPath && options.registryAuthToken) {
+    await fs.writeFile(
+      npmUserConfigPath,
+      npmUserConfigContent(options.registryUrl, options.registryAuthToken),
+      { mode: 0o600 }
+    );
+  }
 
   const env = installEnv({
     cacheRoot: path.join(tempRoot, 'cache'),
     gitConfigPath,
+    ...(npmUserConfigPath ? { npmUserConfigPath } : {}),
     registryUrl: options.registryUrl,
   });
   const runner = options.runner ?? runInstallCommand;

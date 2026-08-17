@@ -158,7 +158,7 @@ Running `airgap-sync` without a subcommand opens this menu. Use `airgap-sync -h`
 specific command's `-h` option for non-interactive help.
 
 The menu is intentionally a thin wrapper over the normal CLI commands. It stores
-`targetRegistry`, `giteaUrl`, bundle output, Python application publication settings,
+`npmRegistry`, `giteaUrl`, bundle output, Python application publication settings,
 coverage, and default answers in `airgap-sync.json`. Adding a Python application asks
 for comma-separated exact application versions and/or `latest`, plus optional Python
 minor versions. Initialization does not ask for distributions, wheel tags, CPU/GPU
@@ -509,12 +509,18 @@ inside the same scan root.
 ```bash
 airgap-sync npm publish ./airgap-bundle \
   --registry http://192.168.0.10:4873
+
+airgap-sync npm publish ./airgap-bundle \
+  --registry http://gitea.local/api/packages/airgap-packages/npm/ \
+  --registry-type gitea
 ```
 
 Supported options:
 
 ```text
 -r, --registry <url>      Target registry URL
+--registry-type <type>    verdaccio or gitea; inferred for standard Gitea npm URLs
+--gitea-token <token>     Gitea PAT, defaults to GITEA_TOKEN or saved secrets
 --dist-tag-concurrency <n> Concurrent npm dist-tag operations, default 4
 --publish-concurrency <n> Concurrent npm tarball validation/publish operations, default 4
 --no-skip-existing        Attempt to publish versions that already exist
@@ -529,7 +535,8 @@ SHA-256/SRI and archive metadata with bounded concurrency only for tarballs whos
 versions still need to be uploaded. Failed or inconclusive registry lookups are treated
 as missing versions. Use `airgap-sync verify` for a full check of every bundle tarball.
 `--dry-run` performs no registry lookup, so it retains full tarball validation. Legacy
-schema-v1 bundles are refused.
+schema-v1 bundles are refused. Gitea mode skips the unsupported npm `whoami` probe and
+uses the already validated PAT through a temporary npm user config.
 
 ## info
 
@@ -719,10 +726,12 @@ portable CPython archives as Gitea Generic Packages. Matching remote files are s
 conflicting content is an error, and no remote version is deleted. This publication is
 independent of application evidence settings and does not influence later local prune.
 
-The same Gitea token authenticates Git, PyPI, and Generic Package operations. Publish
-resolves `python.publication`, creates missing organization owners, and only then
-starts package uploads. A user owner must equal the authenticated token user and is
-never created automatically.
+The same Gitea token authenticates Git, npm, PyPI, and Generic Package operations.
+Publish resolves `npmRegistry` and `python.publication`, creates missing organization
+owners, and only then starts package uploads. A user owner must equal the authenticated
+token user and is never created automatically. Gitea npm authentication is supplied
+through a mode-0600 temporary npm config which is removed after publish; the token is
+not written into the long-lived workspace config.
 
 If an upload still returns HTTP 404 after owner provisioning, check the Gitea server
 setting `[packages] ENABLED = true` and ensure the access token has package write
@@ -730,17 +739,20 @@ permission. Gitea enables the Package Registry by default, but administrators ca
 disable it globally.
 
 When run from an initialized workspace, `publish` defaults to `airgap-sync.json`:
-`output` is used as the bundle path, `targetRegistry` as `--registry`, `giteaUrl` as
-`--gitea`, `python.publication` as the Python publication profile, the
+`output` is used as the bundle path, `npmRegistry` selects Verdaccio or Gitea,
+`giteaUrl` as `--gitea`, `python.publication` as the Python publication profile, the
 `gitOwnerStrategy` settings described below, and `defaults.publish` for Git repository
 provisioning, public repositories, and global Git rewrites.
-Passing `<bundle>`, `--registry`, `--gitea`, `--public`, `--skip-git-provision`, or
+Passing `<bundle>`, `--registry`, `--npm-registry-type`, `--npm-owner`, `--gitea`,
+`--public`, `--skip-git-provision`, or
 `--configure-git-global` overrides the corresponding defaults.
 
 Supported options:
 
 ```text
--r, --registry <url>      Target npm registry URL, defaults to targetRegistry
+-r, --registry <url>      One-run Verdaccio/npm-compatible registry URL override
+--npm-registry-type <type> npm registry type: verdaccio or gitea
+--npm-owner <owner>       One-run managed Gitea organization for npm packages
 --gitea <url>             Closed-network Git host base URL, defaults to giteaUrl
 --gitea-token <token>     Gitea API token, defaults to GITEA_TOKEN or saved secrets
 --python-owner <owner>    Deprecated one-run PyPI organization override

@@ -1,5 +1,6 @@
 import {
   mergeGiteaOwnerRequirements,
+  normalizeGiteaOwnerTarget,
   resolveGiteaOwnerTarget,
   type GiteaOwnerRequirement,
   type GiteaOwnerTarget,
@@ -29,29 +30,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function normalizeOwnerTarget(value: unknown, description: string): GiteaOwnerTarget {
-  if (!isRecord(value)) {
-    throw new Error(`${description} must be a Gitea owner target`);
-  }
-  if (value.strategy === 'authenticated-user') {
-    return { strategy: 'authenticated-user' };
-  }
-  if (value.strategy !== 'fixed-owner') {
-    throw new Error(`${description}.strategy must be authenticated-user or fixed-owner`);
-  }
-  if (value.kind !== 'organization' && value.kind !== 'user') {
-    throw new Error(`${description}.kind must be organization or user`);
-  }
-  if (typeof value.name !== 'string' || !value.name.trim()) {
-    throw new Error(`${description}.name must be a non-empty Gitea owner`);
-  }
-  return {
-    kind: value.kind,
-    name: value.name.trim(),
-    strategy: 'fixed-owner',
-  };
-}
-
 export function defaultPythonPublicationProfile(): PythonPublicationProfile {
   return {
     owner: {
@@ -79,12 +57,17 @@ export function normalizePythonPublicationProfile(value: unknown): PythonPublica
   return {
     ...(value.genericOwner !== undefined
       ? {
-          genericOwner: normalizeOwnerTarget(value.genericOwner, 'python.publication.genericOwner'),
+          genericOwner: normalizeGiteaOwnerTarget(
+            value.genericOwner,
+            'python.publication.genericOwner'
+          ),
         }
       : {}),
-    owner: normalizeOwnerTarget(value.owner, 'python.publication.owner'),
+    owner: normalizeGiteaOwnerTarget(value.owner, 'python.publication.owner'),
     ...(value.pypiOwner !== undefined
-      ? { pypiOwner: normalizeOwnerTarget(value.pypiOwner, 'python.publication.pypiOwner') }
+      ? {
+          pypiOwner: normalizeGiteaOwnerTarget(value.pypiOwner, 'python.publication.pypiOwner'),
+        }
       : {}),
     ...(value.publishEvidence === true ? { publishEvidence: true } : {}),
     visibility,

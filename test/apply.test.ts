@@ -212,6 +212,70 @@ describe('applyBundle', () => {
     expect(await fs.pathExists(path.join(bundleDir, 'publish-dry-run-report.json'))).toBe(true);
   });
 
+  it('derives the Gitea npm URL and provisions its owner with other package owners', async () => {
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local/',
+      giteaClient: noopClient,
+      npmRegistryTarget: {
+        owner: {
+          kind: 'organization',
+          name: 'npm-packages',
+          strategy: 'fixed-owner',
+        },
+        type: 'gitea',
+        visibility: 'public',
+      },
+    });
+
+    expect(report.registryUrl).toBe('http://gitea.local/api/packages/npm-packages/npm/');
+    expect(report.publish.registry).toBe(report.registryUrl);
+    expect(report.gitea.organizations).toContainEqual({
+      owner: 'npm-packages',
+      status: 'planned',
+    });
+    expect(report.succeeded).toBe(true);
+  });
+
+  it('blocks npm publication when its managed Gitea owner cannot be provisioned', async () => {
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: {
+        ...noopClient,
+        createOrganization: () => Promise.reject(new Error('organization create failed')),
+      },
+      npmRegistryTarget: {
+        owner: {
+          kind: 'organization',
+          name: 'npm-packages',
+          strategy: 'fixed-owner',
+        },
+        type: 'gitea',
+        visibility: 'private',
+      },
+      registryAuthToken: 'gitea-secret',
+    });
+
+    expect(report.gitea.organizationErrors).toEqual([
+      expect.objectContaining({
+        error: 'organization create failed',
+        owner: 'npm-packages',
+      }),
+    ]);
+    expect(report.publish.errors).toEqual([
+      expect.objectContaining({
+        error: 'Gitea owner npm-packages could not be provisioned',
+      }),
+    ]);
+    expect(report.succeeded).toBe(false);
+  });
+
   it('plans additive CPython distribution publication through the generic package owner', async () => {
     const content = Buffer.from('cpython archive');
     const filename =

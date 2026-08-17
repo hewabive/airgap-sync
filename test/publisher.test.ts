@@ -719,6 +719,81 @@ describe('publishBundle', () => {
     }
   });
 
+  it('uses a temporary Gitea npm config and skips unsupported npm whoami', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const npmCalls: string[][] = [];
+    const userConfigs: string[] = [];
+    const runNpm: NpmRunner = async (args, options) => {
+      npmCalls.push(args);
+      expect(options.userConfigPath).toBeTruthy();
+      userConfigs.push(await fs.readFile(options.userConfigPath!, 'utf8'));
+      return { stdout: '' };
+    };
+    fetchMock.mockImplementation((_input, init) => {
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer gitea-secret');
+      return Promise.resolve(
+        new Response(JSON.stringify({ 'dist-tags': {}, name: 'demo', versions: {} }), {
+          status: 200,
+        })
+      );
+    });
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+
+      const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
+        bundleDir,
+        registryAuthToken: 'gitea-secret',
+        registryType: 'gitea',
+        registryUrl: 'http://gitea.local/api/packages/airgap-packages/npm/',
+        runNpm,
+      });
+
+      expect(report).toMatchObject({ errors: [], published: 1, restoredTags: 1 });
+      expect(npmCalls.map((args) => args[0])).toEqual(['publish', 'dist-tag', 'dist-tag']);
+      expect(npmCalls).not.toContainEqual(expect.arrayContaining(['whoami']));
+      expect(userConfigs).toEqual([
+        '//gitea.local/api/packages/airgap-packages/npm/:_authToken=gitea-secret\n',
+        '//gitea.local/api/packages/airgap-packages/npm/:_authToken=gitea-secret\n',
+        '//gitea.local/api/packages/airgap-packages/npm/:_authToken=gitea-secret\n',
+      ]);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
+  it('fails Gitea auth before publishing when no package token is provided', async () => {
+    const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
+    const npmCalls: string[][] = [];
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ 'dist-tags': {}, name: 'demo', versions: {} }), {
+        status: 200,
+      })
+    );
+
+    try {
+      await fs.ensureDir(path.join(bundleDir, 'packages'));
+      await fs.writeFile(path.join(bundleDir, 'packages/demo-1.0.0.tgz'), '');
+      const report = await publishBundle(manifest, distTags, {
+        allowLegacyBundle: true,
+        bundleDir,
+        registryType: 'gitea',
+        registryUrl: 'http://gitea.local/api/packages/airgap-packages/npm/',
+        runNpm: (args) => {
+          npmCalls.push(args);
+          return Promise.resolve({ stdout: '' });
+        },
+      });
+
+      expect(report.errors[0]?.error).toContain('Gitea package authentication failed');
+      expect(npmCalls).toEqual([]);
+    } finally {
+      await fs.remove(bundleDir);
+    }
+  });
+
   it('summarizes npm publish json errors', async () => {
     const bundleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-publish-'));
     const runNpm: NpmRunner = (args) => {

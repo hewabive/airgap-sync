@@ -65,13 +65,13 @@ envelopes.
 - npm 11 or newer
 - Git
 - Online side: access to source npm/Python registries and upstream Git hosts
-- Closed side: an npm-compatible registry and Gitea 1.26.2 or newer with its package
-  registry enabled
+- Closed side: either Verdaccio/another npm-compatible registry, or the npm Package
+  Registry in Gitea 1.26.2 or newer
 
-Verdaccio and Gitea are the tested closed-network path. Other npm-compatible registries
-should work when they support `npm publish` and `npm dist-tag`. Generic Git hosts can
-be used when target repositories already exist and normal Git push authentication is
-enough.
+Verdaccio and Gitea npm are tested closed-network registry targets. Other
+npm-compatible registries should work through the Verdaccio/custom-URL target when
+they support `npm publish` and `npm dist-tag`. Generic Git hosts can be used when target
+repositories already exist and normal Git push authentication is enough.
 
 ## Quick Start
 
@@ -129,7 +129,7 @@ npm exec -- airgap-sync download --target 2
 npm exec -- airgap-sync verify ./airgap-bundle
 
 # Closed-network machine.
-# Uses targetRegistry/giteaUrl from airgap-sync.json and GITEA_TOKEN or a saved token.
+# Uses npmRegistry/giteaUrl from airgap-sync.json and GITEA_TOKEN or a saved token.
 npm exec -- airgap-sync publish
 
 npm exec -- airgap-sync verify install ./airgap-bundle \
@@ -138,6 +138,13 @@ npm exec -- airgap-sync verify install ./airgap-bundle \
 ```
 
 After a global install, omit the `npm exec --` prefix.
+
+The workspace menu asks whether the closed-network npm registry is `verdaccio` or
+`gitea`. A Verdaccio target stores its URL. A Gitea target stores only its managed owner
+and visibility; publish derives `/api/packages/<owner>/npm/` from the shared `giteaUrl`,
+creates a missing organization through the existing package-owner preflight, and uses
+the same Gitea token as Git, PyPI, and Generic Packages. Legacy string
+`targetRegistry` settings migrate automatically to a typed Verdaccio target.
 
 When a project pins pnpm through `packageManager` or `devEngines.packageManager`,
 download also includes both the Node-based `pnpm` package and the standalone

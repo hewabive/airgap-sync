@@ -52,7 +52,7 @@ describe('mergeGiteaOwnerRequirements', () => {
         {
           kind: 'organization',
           name: 'airgap-packages',
-          purposes: ['pypi', 'git'],
+          purposes: ['pypi', 'npm', 'git'],
           visibility: 'private',
         },
       ])
@@ -60,7 +60,7 @@ describe('mergeGiteaOwnerRequirements', () => {
       {
         kind: 'organization',
         name: 'airgap-packages',
-        purposes: ['git', 'pypi', 'generic'],
+        purposes: ['git', 'npm', 'pypi', 'generic'],
         visibility: 'public',
       },
     ]);

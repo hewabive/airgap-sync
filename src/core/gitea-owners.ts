@@ -1,5 +1,5 @@
 export type GiteaOwnerKind = 'organization' | 'user';
-export type GiteaOwnerPurpose = 'generic' | 'git' | 'pypi';
+export type GiteaOwnerPurpose = 'generic' | 'git' | 'npm' | 'pypi';
 export type GiteaOwnerVisibility = 'private' | 'public';
 
 export type GiteaOwnerTarget =
@@ -22,10 +22,38 @@ export interface GiteaOwnerRequirement extends ResolvedGiteaOwner {
   visibility: GiteaOwnerVisibility;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function normalizeGiteaOwnerTarget(value: unknown, description: string): GiteaOwnerTarget {
+  if (!isRecord(value)) {
+    throw new Error(`${description} must be a Gitea owner target`);
+  }
+  if (value.strategy === 'authenticated-user') {
+    return { strategy: 'authenticated-user' };
+  }
+  if (value.strategy !== 'fixed-owner') {
+    throw new Error(`${description}.strategy must be authenticated-user or fixed-owner`);
+  }
+  if (value.kind !== 'organization' && value.kind !== 'user') {
+    throw new Error(`${description}.kind must be organization or user`);
+  }
+  if (typeof value.name !== 'string' || !value.name.trim()) {
+    throw new Error(`${description}.name must be a non-empty Gitea owner`);
+  }
+  return {
+    kind: value.kind,
+    name: value.name.trim(),
+    strategy: 'fixed-owner',
+  };
+}
+
 const purposeOrder: Record<GiteaOwnerPurpose, number> = {
   git: 0,
-  pypi: 1,
-  generic: 2,
+  npm: 1,
+  pypi: 2,
+  generic: 3,
 };
 
 function normalizedOwner(value: string | undefined, description: string): string {

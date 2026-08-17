@@ -161,7 +161,11 @@ export type {
   GitPublishOwnerKind,
   ResolveGitPublishTargetsOptions,
 } from './core/git-publish-targets.js';
-export { mergeGiteaOwnerRequirements, resolveGiteaOwnerTarget } from './core/gitea-owners.js';
+export {
+  mergeGiteaOwnerRequirements,
+  normalizeGiteaOwnerTarget,
+  resolveGiteaOwnerTarget,
+} from './core/gitea-owners.js';
 export type {
   GiteaOwnerKind,
   GiteaOwnerPurpose,
@@ -175,6 +179,19 @@ export {
   normalizePythonPublicationProfile,
   resolvePythonPublicationProfile,
 } from './core/python/publication-targets.js';
+export {
+  defaultGiteaNpmOwner,
+  defaultNpmRegistryTarget,
+  defaultVerdaccioRegistryUrl,
+  giteaNpmRegistryUrl,
+  isGiteaNpmRegistryUrl,
+  normalizeNpmRegistryTarget,
+  resolveNpmRegistryTarget,
+} from './core/npm-publication-targets.js';
+export type {
+  NpmRegistryTarget,
+  ResolvedNpmRegistryTarget,
+} from './core/npm-publication-targets.js';
 export type {
   PythonPublicationProfile,
   ResolvedPythonPublicationProfile,
@@ -298,6 +315,7 @@ export {
   workspaceConfigPath,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
+  workspaceConfigNpmRegistryTargetBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceConfigV1BackupPath,
   workspaceTargetEditableFields,

@@ -66,6 +66,11 @@ import {
   type CpythonDistributionBundleIndex,
 } from './python/distribution-bundle.js';
 import { mergeGiteaOwnerRequirements } from './gitea-owners.js';
+import {
+  resolveNpmRegistryTarget,
+  type NpmRegistryTarget,
+  type ResolvedNpmRegistryTarget,
+} from './npm-publication-targets.js';
 
 export interface ApplyBundleOptions {
   /** Explicit compatibility escape hatch for schemaVersion 1 npm bundles. */
@@ -83,6 +88,7 @@ export interface ApplyBundleOptions {
   giteaBaseUrl: string;
   giteaClient: GiteaClient;
   mirrorsDir?: string;
+  npmRegistryTarget?: NpmRegistryTarget;
   onProgress?: (event: ApplyProgressEvent) => void;
   onPublishProgress?: PublishBundleOptions['onProgress'];
   private?: boolean;
@@ -90,7 +96,8 @@ export interface ApplyBundleOptions {
   pythonOwner?: string;
   pythonPublicationProfile?: PythonPublicationProfile;
   publishConcurrency?: number;
-  registryUrl: string;
+  registryAuthToken?: string;
+  registryUrl?: string;
   runGitCommand?: GitCommandRunner;
   skipExisting?: boolean;
   skipGitProvision?: boolean;
@@ -256,6 +263,43 @@ function blockedCpythonDistributionPublishReport(
   };
 }
 
+function blockedNpmPublishReport(
+  manifest: Awaited<ReturnType<typeof readBundleManifest>>,
+  options: {
+    dryRun: boolean;
+    generatedAt: string;
+    reason: string;
+    registryUrl: string;
+  }
+): PublishReport {
+  return {
+    dryRun: options.dryRun,
+    errors: [
+      {
+        action: 'auth',
+        error: options.reason,
+        package: options.registryUrl,
+        status: 'error',
+      },
+    ],
+    generatedAt: options.generatedAt,
+    published: 0,
+    registry: options.registryUrl,
+    restoredTags: 0,
+    skipped: 0,
+    timings: {
+      cleanupMs: 0,
+      distTagsMs: 0,
+      dryRunMs: 0,
+      lookupMetadataMs: 0,
+      publishMs: 0,
+      totalMs: 0,
+      validateMs: 0,
+    },
+    totalPackages: manifest.packages.length,
+  };
+}
+
 function mergeAssumedGitWithPackageOwners(
   assumed: GiteaRepositoryProvisionReport,
   packageOwners: GiteaRepositoryProvisionReport
@@ -291,6 +335,18 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const bundleDir = path.resolve(options.bundleDir);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const dryRun = options.dryRun === true;
+  const npmRegistry: ResolvedNpmRegistryTarget = options.npmRegistryTarget
+    ? resolveNpmRegistryTarget(options.npmRegistryTarget, {
+        ...(options.gitAuthenticatedUser
+          ? { authenticatedUser: options.gitAuthenticatedUser }
+          : {}),
+        giteaBaseUrl: options.giteaBaseUrl,
+      })
+    : options.registryUrl
+      ? { registryUrl: options.registryUrl, type: 'verdaccio' }
+      : (() => {
+          throw new Error('npm registry target is required');
+        })();
   const manifest = await readBundleManifest(bundleDir);
   const distTags = await readDistTagsManifest(bundleDir);
   const sourceGitSources = await readOptionalGitSourcesManifest(bundleDir, generatedAt);
@@ -353,6 +409,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
       )
     : undefined;
   const ownerRequirements = mergeGiteaOwnerRequirements([
+    ...(npmRegistry.type === 'gitea' ? [npmRegistry.ownerRequirement] : []),
     ...(pythonProfile?.ownerRequirements.filter(
       (requirement) =>
         (pythonManifest !== undefined && requirement.purposes.includes('pypi')) ||
@@ -411,20 +468,31 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   );
 
   options.onProgress?.({ phase: 'publish', status: 'start' });
-  const publish = await publishBundle(manifest, distTags, {
-    ...(options.allowLegacyNpmBundle === true ? { allowLegacyBundle: true } : {}),
-    bundleDir,
-    ...(options.distTagConcurrency === undefined
-      ? {}
-      : { distTagConcurrency: options.distTagConcurrency }),
-    dryRun,
-    ...(options.publishConcurrency === undefined
-      ? {}
-      : { publishConcurrency: options.publishConcurrency }),
-    registryUrl: options.registryUrl,
-    ...(options.onPublishProgress ? { onProgress: options.onPublishProgress } : {}),
-    ...(options.skipExisting === undefined ? {} : { skipExisting: options.skipExisting }),
-  });
+  const npmOwnerBlocked =
+    npmRegistry.type === 'gitea' && packageOwnerErrors.has(npmRegistry.owner.name);
+  const publish = npmOwnerBlocked
+    ? blockedNpmPublishReport(manifest, {
+        dryRun,
+        generatedAt,
+        reason: `Gitea owner ${npmRegistry.owner.name} could not be provisioned`,
+        registryUrl: npmRegistry.registryUrl,
+      })
+    : await publishBundle(manifest, distTags, {
+        ...(options.allowLegacyNpmBundle === true ? { allowLegacyBundle: true } : {}),
+        bundleDir,
+        ...(options.distTagConcurrency === undefined
+          ? {}
+          : { distTagConcurrency: options.distTagConcurrency }),
+        dryRun,
+        ...(options.publishConcurrency === undefined
+          ? {}
+          : { publishConcurrency: options.publishConcurrency }),
+        ...(options.registryAuthToken ? { registryAuthToken: options.registryAuthToken } : {}),
+        registryType: npmRegistry.type,
+        registryUrl: npmRegistry.registryUrl,
+        ...(options.onPublishProgress ? { onProgress: options.onPublishProgress } : {}),
+        ...(options.skipExisting === undefined ? {} : { skipExisting: options.skipExisting }),
+      });
   await writePublishReport(bundleDir, publish);
   options.onProgress?.({ phase: 'publish', status: 'done' });
 
@@ -625,7 +693,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ...(python ? { python } : {}),
     ...(pythonApplications.enabled ? { pythonApplications } : {}),
     ...(cpythonDistributions.enabled ? { cpythonDistributions } : {}),
-    registryUrl: options.registryUrl,
+    registryUrl: npmRegistry.registryUrl,
     succeeded: applySucceeded({
       gitApply,
       ...(gitConfig ? { gitConfig } : {}),

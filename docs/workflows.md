@@ -295,6 +295,17 @@ airgap-sync publish ./airgap-bundle \
   --gitea-token "$GITEA_TOKEN"
 ```
 
+To use Gitea for npm as well, select `gitea` in the workspace settings and run simply:
+
+```bash
+export GITEA_TOKEN=...
+airgap-sync publish
+```
+
+The npm endpoint is derived from the shared Gitea URL and configured owner. For a
+one-run invocation outside a workspace, use `--npm-registry-type gitea --npm-owner
+airgap-packages --gitea http://gitea.local`; no separate npm registry URL is required.
+
 Instead of exporting `GITEA_TOKEN` every time, the closed-network operator can save it
 once:
 
@@ -304,11 +315,11 @@ airgap-sync secrets set-gitea-token
 
 The offline publish step should:
 
-- publish npm tarballs into Verdaccio;
+- publish npm tarballs into the selected Verdaccio or Gitea npm registry;
 - restore npm dist-tags;
 - map source Git repositories to the closed-network Git host;
 - preserve upstream owner/repository paths when possible;
-- resolve Git, PyPI, and optional Generic Package owners from the workspace profile;
+- resolve Git, npm, PyPI, and optional Generic Package owners from the workspace profile;
 - create missing Gitea organizations before any dependent upload (users are never
   created automatically);
 - push local bare mirrors into Gitea using the provided Gitea token;

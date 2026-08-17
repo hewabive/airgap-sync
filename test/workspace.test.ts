@@ -21,6 +21,7 @@ import {
   setWorkspacePythonApplicationVersionSelection,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
+  workspaceConfigNpmRegistryTargetBackupFileName,
   workspaceConfigV1BackupFileName,
   workspaceTargetEditableFields,
   workspaceSecretsFileName,
@@ -543,7 +544,60 @@ describe('workspace config', () => {
         },
       },
       giteaUrl: 'http://gitea.local',
-      targetRegistry: 'http://verdaccio.local:4873',
+      npmRegistry: {
+        type: 'verdaccio',
+        url: 'http://verdaccio.local:4873',
+      },
+    });
+  });
+
+  it('migrates a legacy targetRegistry into a typed Verdaccio target', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    await fs.writeJson(
+      path.join(tempDir, 'airgap-sync.json'),
+      { ...config, targetRegistry: 'http://verdaccio.local:4873/' },
+      { spaces: 2 }
+    );
+
+    const migration = await migrateWorkspaceConfig(tempDir);
+    expect(migration.appliedMigrationIds).toEqual(['0004-npm-registry-target']);
+    expect(migration.config.npmRegistry).toEqual({
+      type: 'verdaccio',
+      url: 'http://verdaccio.local:4873',
+    });
+    expect(migration.backupPath).toBe(
+      path.join(tempDir, workspaceConfigNpmRegistryTargetBackupFileName)
+    );
+  });
+
+  it('normalizes a Gitea npm target without storing a second service URL', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    await writeWorkspaceConfig(tempDir, {
+      ...config,
+      giteaUrl: 'http://gitea.local',
+      npmRegistry: {
+        owner: {
+          kind: 'organization',
+          name: 'airgap-packages',
+          strategy: 'fixed-owner',
+        },
+        type: 'gitea',
+        visibility: 'public',
+      },
+    });
+
+    const stored = await fs.readJson<Record<string, unknown>>(
+      path.join(tempDir, 'airgap-sync.json')
+    );
+    expect(stored).not.toHaveProperty('targetRegistry');
+    expect(stored.npmRegistry).toEqual({
+      owner: {
+        kind: 'organization',
+        name: 'airgap-packages',
+        strategy: 'fixed-owner',
+      },
+      type: 'gitea',
+      visibility: 'public',
     });
   });
 

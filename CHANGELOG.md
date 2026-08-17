@@ -2,6 +2,11 @@
 
 ## 0.1.0
 
+- Added first-class Gitea npm registry targets. Workspaces select Verdaccio or Gitea;
+  Gitea endpoints are derived from the shared base URL and managed owner, owner
+  provisioning is shared with Python publication, and the saved Gitea PAT is exposed
+  to npm only through a temporary mode-0600 config. Legacy `targetRegistry` strings
+  migrate to typed Verdaccio targets.
 - Limited npm publication tarball validation to versions absent from the target
   registry, while keeping full manifest/security preflight and conservative lookup
   failure handling. Selected tarballs retain parallel SHA-256/SRI/archive validation
