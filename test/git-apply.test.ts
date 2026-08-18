@@ -306,6 +306,102 @@ describe('applyGitSources', () => {
     });
   });
 
+  it('initializes an empty Gitea repository with only the mirror default branch', async () => {
+    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(sourcePath);
+    const events: string[] = [];
+    let empty = true;
+    let repositoryDefaultBranch = '';
+
+    const report = await applyGitSources({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: {
+        getRepositoryState: () => {
+          events.push(`get:${empty ? 'empty' : repositoryDefaultBranch}`);
+          return Promise.resolve({ defaultBranch: repositoryDefaultBranch, empty });
+        },
+        setRepositoryDefaultBranch: ({ branch }) => {
+          events.push(`patch:${branch}`);
+          repositoryDefaultBranch = branch;
+          return Promise.resolve();
+        },
+      },
+      manifest,
+      runner: (invocation) => {
+        if (invocation.args.includes('symbolic-ref')) {
+          events.push('symbolic-ref');
+          return Promise.resolve({ stderr: '', stdout: 'main\n' });
+        }
+        if (invocation.args.includes('+refs/heads/main:refs/heads/main')) {
+          events.push('push-default');
+          empty = false;
+          repositoryDefaultBranch = 'main';
+          return Promise.resolve();
+        }
+        events.push('push-all');
+        return Promise.resolve();
+      },
+    });
+
+    expect(events).toEqual([
+      'symbolic-ref',
+      'get:empty',
+      'push-default',
+      'get:main',
+      'push-all',
+      'patch:main',
+      'get:main',
+    ]);
+    expect(report).toMatchObject({
+      actions: [
+        {
+          defaultBranch: 'main',
+          repository: 'github.com/owner/repo',
+          status: 'pushed',
+        },
+      ],
+      errors: [],
+      pushed: 1,
+    });
+  });
+
+  it('reports a default branch update that does not persist in Gitea', async () => {
+    const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(sourcePath);
+
+    const report = await applyGitSources({
+      bundleDir,
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: {
+        getRepositoryState: () =>
+          Promise.resolve({ defaultBranch: 'unexpected-branch', empty: false }),
+        setRepositoryDefaultBranch: () => Promise.resolve(),
+      },
+      manifest,
+      runner: (invocation) =>
+        Promise.resolve({
+          stderr: '',
+          stdout: invocation.args.includes('symbolic-ref') ? 'main\n' : '',
+        }),
+    });
+
+    expect(report).toMatchObject({
+      errors: [
+        {
+          defaultBranch: 'main',
+          error:
+            'pushed refs but Gitea reports default branch "unexpected-branch" instead of "main"',
+          repository: 'github.com/owner/repo',
+          status: 'error',
+        },
+      ],
+      pushed: 0,
+    });
+  });
+
   it('reports a pushed repository when Gitea rejects its default branch update', async () => {
     const sourcePath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
     await fs.ensureDir(sourcePath);

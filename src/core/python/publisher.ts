@@ -68,6 +68,16 @@ type PythonRegistrySnapshot = Map<string, PythonRegistryFile>;
 
 type RegistryFileStatus = 'matching' | 'mismatch' | 'missing' | 'unverified';
 
+interface PythonPublishEntry {
+  file: PythonSeedFile;
+  package: string;
+}
+
+interface IndexedPythonPublishEntry {
+  entry: PythonPublishEntry;
+  index: number;
+}
+
 function normalizeBaseUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
@@ -517,9 +527,16 @@ export async function publishPythonBundle(
   const baseUrl = normalizeBaseUrl(options.giteaBaseUrl);
   const uploadUrl = `${baseUrl}/api/packages/${encodeURIComponent(owner)}/pypi`;
   const indexUrl = `${uploadUrl}/simple`;
-  const files = manifest.packages.flatMap((pkg) =>
+  const files: PythonPublishEntry[] = manifest.packages.flatMap((pkg) =>
     pkg.files.map((file) => ({ file, package: `${pkg.name}@${pkg.version}` }))
   );
+  const fileGroups = new Map<string, IndexedPythonPublishEntry[]>();
+  for (const [index, entry] of files.entries()) {
+    const packageName = normalizePackageName(entry.file.coreMetadata.name);
+    const group = fileGroups.get(packageName) ?? [];
+    group.push({ entry, index });
+    fileGroups.set(packageName, group);
+  }
   options.onProgress?.({ current: 0, status: 'start', total: files.length });
   const actions: PythonPublishAction[] = [];
   const timeoutMs = options.timeoutMs ?? 300_000;
@@ -547,91 +564,93 @@ export async function publishPythonBundle(
   let cursor = 0;
   let completed = 0;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 4));
+  const groups = [...fileGroups.values()];
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+    Array.from({ length: Math.min(concurrency, groups.length) }, async () => {
       for (;;) {
-        const index = cursor++;
-        const entry = files[index];
-        if (!entry) return;
-        if (dryRun) {
-          actions[index] = {
-            file: entry.file.file,
-            package: entry.package,
-            status: 'planned',
-          };
-          completed += 1;
-          options.onProgress?.({
-            current: completed,
-            detail: `planned ${entry.file.filename}`,
-            status: 'progress',
-            total: files.length,
-          });
-          continue;
-        }
-        const packageName = normalizePackageName(entry.file.coreMetadata.name);
-        const registryStatus = registryFileStatus(registrySnapshots.get(packageName), entry.file);
-        if (registryStatus === 'matching') {
-          actions[index] = {
-            file: entry.file.file,
-            package: entry.package,
-            status: 'skipped',
-          };
-        } else if (registryStatus === 'mismatch') {
-          actions[index] = {
-            error: registryMismatchError(entry.file),
-            file: entry.file.file,
-            package: entry.package,
-            status: 'error',
-          };
-        } else if (!options.auth) {
-          actions[index] = {
-            error: 'Python publishing requires a Gitea username and token',
-            file: entry.file.file,
-            package: entry.package,
-            status: 'error',
-          };
-        } else {
-          const onFileProgress = options.onProgress
-            ? createPythonFilePublishProgress({
-                current: () => completed,
-                filename: entry.file.filename,
-                onProgress: options.onProgress,
-                total: files.length,
-              })
-            : undefined;
-          try {
+        const group = groups[cursor++];
+        if (!group) return;
+        for (const { entry, index } of group) {
+          if (dryRun) {
             actions[index] = {
               file: entry.file.file,
               package: entry.package,
-              status: await publishFile({
-                auth: options.auth,
-                bundleDir: options.bundleDir,
-                file: entry.file,
-                indexUrl,
-                ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-                timeoutMs,
-                uploadUrl,
-              }),
+              status: 'planned',
             };
-          } catch (error) {
+            completed += 1;
+            options.onProgress?.({
+              current: completed,
+              detail: `planned ${entry.file.filename}`,
+              status: 'progress',
+              total: files.length,
+            });
+            continue;
+          }
+          const packageName = normalizePackageName(entry.file.coreMetadata.name);
+          const registryStatus = registryFileStatus(registrySnapshots.get(packageName), entry.file);
+          if (registryStatus === 'matching') {
             actions[index] = {
-              error: (error as Error).message,
+              file: entry.file.file,
+              package: entry.package,
+              status: 'skipped',
+            };
+          } else if (registryStatus === 'mismatch') {
+            actions[index] = {
+              error: registryMismatchError(entry.file),
               file: entry.file.file,
               package: entry.package,
               status: 'error',
             };
+          } else if (!options.auth) {
+            actions[index] = {
+              error: 'Python publishing requires a Gitea username and token',
+              file: entry.file.file,
+              package: entry.package,
+              status: 'error',
+            };
+          } else {
+            const onFileProgress = options.onProgress
+              ? createPythonFilePublishProgress({
+                  current: () => completed,
+                  filename: entry.file.filename,
+                  onProgress: options.onProgress,
+                  total: files.length,
+                })
+              : undefined;
+            try {
+              actions[index] = {
+                file: entry.file.file,
+                package: entry.package,
+                status: await publishFile({
+                  auth: options.auth,
+                  bundleDir: options.bundleDir,
+                  file: entry.file,
+                  indexUrl,
+                  ...(onFileProgress ? { onProgress: onFileProgress } : {}),
+                  timeoutMs,
+                  uploadUrl,
+                }),
+              };
+            } catch (error) {
+              actions[index] = {
+                error: (error as Error).message,
+                file: entry.file.file,
+                package: entry.package,
+                status: 'error',
+              };
+            }
           }
+          completed += 1;
+          const action = actions[index];
+          options.onProgress?.({
+            current: completed,
+            detail: `${action.status} ${entry.file.filename}${
+              action.error ? `: ${action.error}` : ''
+            }`,
+            status: 'progress',
+            total: files.length,
+          });
         }
-        completed += 1;
-        const action = actions[index];
-        options.onProgress?.({
-          current: completed,
-          detail: `${action.status} ${entry.file.filename}${
-            action.error ? `: ${action.error}` : ''
-          }`,
-          status: 'progress',
-          total: files.length,
-        });
       }
     })
   );

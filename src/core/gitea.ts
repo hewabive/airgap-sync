@@ -46,11 +46,17 @@ export interface GiteaClient {
   }): Promise<void>;
   organizationExists(owner: string): Promise<boolean>;
   repositoryExists(owner: string, name: string): Promise<boolean>;
+  getRepositoryState?(options: { name: string; owner: string }): Promise<GiteaRepositoryState>;
   setRepositoryDefaultBranch?(options: {
     branch: string;
     name: string;
     owner: string;
   }): Promise<void>;
+}
+
+export interface GiteaRepositoryState {
+  defaultBranch: string;
+  empty: boolean;
 }
 
 interface GiteaCurrentUser {
@@ -251,6 +257,32 @@ export class HttpGiteaClient implements GiteaClient {
     );
 
     return response.status === 200;
+  }
+
+  async getRepositoryState(options: {
+    name: string;
+    owner: string;
+  }): Promise<GiteaRepositoryState> {
+    const response = await this.#request(
+      `/repos/${encodePathPart(options.owner)}/${encodePathPart(options.name)}`,
+      {
+        method: 'GET',
+        validStatuses: new Set([200]),
+      }
+    );
+    const data = (await responseData(response)) as {
+      default_branch?: unknown;
+      empty?: unknown;
+    };
+
+    if (typeof data.default_branch !== 'string' || typeof data.empty !== 'boolean') {
+      throw new Error('Gitea API returned an invalid repository state');
+    }
+
+    return {
+      defaultBranch: data.default_branch,
+      empty: data.empty,
+    };
   }
 
   async organizationExists(owner: string): Promise<boolean> {

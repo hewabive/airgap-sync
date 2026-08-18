@@ -110,6 +110,9 @@ Gitea for a normal repository rather than a scheduled pull mirror, then performs
 same prune-aware branch/tag push used by later runs. API import failure is observable
 in the provisioning report and falls back to empty creation plus push. Repository
 checks, imports, and pushes share a bounded operator-configurable concurrency limit.
+For an empty-repository fallback, the default branch is pushed first and Gitea's API
+must report the repository as non-empty before the remaining refs are pushed. The
+final default branch is then updated and read back through the API.
 
 The npm side should continue to populate npm-compatible registries through
 `npm publish` and `npm dist-tag`, not by mutating registry storage.

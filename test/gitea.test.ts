@@ -57,6 +57,23 @@ describe('HttpGiteaClient', () => {
     expect(firstCall?.[1]?.signal).toBeDefined();
   });
 
+  it('reads repository empty and default branch state through the Gitea API', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ default_branch: 'main', empty: false }), { status: 200 })
+    );
+    const client = new HttpGiteaClient('http://gitea.local/', {
+      authToken: 'secret',
+    });
+
+    await expect(client.getRepositoryState({ name: 'repo', owner: 'owner' })).resolves.toEqual({
+      defaultBranch: 'main',
+      empty: false,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gitea.local/api/v1/repos/owner/repo');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' });
+  });
+
   it('reads the authenticated user login', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ login: 'maxim' }), {

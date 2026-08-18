@@ -243,7 +243,9 @@ publication. The destination is a normal repository: the verification push in th
 run and every later update still use ordinary branch/tag pushes, followed by restoring
 the Gitea default branch from the bundle mirror's symbolic `HEAD`. If migration is not
 available, publication records the reason and automatically falls back to creating an
-empty repository, pushing it, and applying the same default-branch synchronization.
+empty repository. The fallback first pushes only the mirror's default branch and waits
+until Gitea has finished its asynchronous empty-repository initialization, then pushes
+the remaining refs, applies the default branch, and verifies it through the API.
 See [CLI: publish](./docs/cli.md#publish) for the required Gitea allowlist and network
 settings.
 

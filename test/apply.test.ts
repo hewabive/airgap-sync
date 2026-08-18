@@ -609,6 +609,8 @@ describe('applyBundle', () => {
     const createdRepositories: unknown[] = [];
     const defaultBranchCalls: unknown[] = [];
     const gitCalls: GitCommandInvocation[] = [];
+    let repositoryDefaultBranch = '';
+    let repositoryEmpty = true;
     await fs.writeJson(path.join(bundleDir, 'seed-manifest.json'), emptyManifest, { spaces: 2 });
     await fs.writeJson(path.join(bundleDir, 'dist-tags.json'), emptyDistTags, { spaces: 2 });
     await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
@@ -629,14 +631,24 @@ describe('applyBundle', () => {
         migrateRepository: () => Promise.reject(new Error('migration source unavailable')),
         organizationExists: () => Promise.resolve(true),
         repositoryExists: () => Promise.resolve(false),
+        getRepositoryState: () =>
+          Promise.resolve({
+            defaultBranch: repositoryDefaultBranch,
+            empty: repositoryEmpty,
+          }),
         setRepositoryDefaultBranch: (options) => {
           defaultBranchCalls.push(options);
+          repositoryDefaultBranch = options.branch;
           return Promise.resolve();
         },
       },
       registryUrl: 'http://verdaccio.local:4873',
       runGitCommand(invocation) {
         gitCalls.push(invocation);
+        if (invocation.args.includes('+refs/heads/main:refs/heads/main')) {
+          repositoryDefaultBranch = 'main';
+          repositoryEmpty = false;
+        }
         return Promise.resolve({
           stderr: '',
           stdout: invocation.args.includes('symbolic-ref') ? 'main\n' : '',
@@ -653,7 +665,9 @@ describe('applyBundle', () => {
         private: true,
       },
     ]);
-    expect(gitCalls.some((call) => call.args.includes('push'))).toBe(true);
+    expect(gitCalls).toHaveLength(3);
+    expect(gitCalls[1]?.args).toContain('+refs/heads/main:refs/heads/main');
+    expect(gitCalls[2]?.args).toContain('+refs/heads/*:refs/heads/*');
     expect(defaultBranchCalls).toEqual([
       {
         branch: 'main',

@@ -18,6 +18,9 @@ let server: http.Server | undefined;
 const wheel = Buffer.from('wheel bytes');
 const hash = createHash('sha256').update(wheel).digest('hex');
 const wheelRelativePath = `python/artifacts/wheels/${hash}/demo_package-1.0-py3-none-any.whl`;
+const secondWheel = Buffer.from('second wheel bytes');
+const secondHash = createHash('sha256').update(secondWheel).digest('hex');
+const secondWheelRelativePath = `python/artifacts/wheels/${secondHash}/demo_package-2.0-py3-none-any.whl`;
 
 function manifest(): PythonSeedManifest {
   return {
@@ -53,6 +56,38 @@ function manifest(): PythonSeedManifest {
     roots: ['demo-package==1.0'],
     sourceIndex: 'https://pypi.org/simple/',
     targetEnvironments: [],
+  };
+}
+
+function twoVersionManifest(): PythonSeedManifest {
+  const first = manifest();
+  const firstFile = first.packages[0]!.files[0]!;
+  return {
+    ...first,
+    packages: [
+      first.packages[0]!,
+      {
+        files: [
+          {
+            ...firstFile,
+            coreMetadata: {
+              ...firstFile.coreMetadata,
+              name: 'demo.package',
+              version: '2.0',
+            },
+            file: secondWheelRelativePath,
+            filename: 'demo_package-2.0-py3-none-any.whl',
+            sha256: secondHash,
+            sourceHashes: { sha256: secondHash },
+            url: 'https://files.example/demo_package-2.0-py3-none-any.whl',
+          },
+        ],
+        name: 'demo-package',
+        resolvedFrom: [],
+        version: '2.0',
+      },
+    ],
+    roots: ['demo-package==1.0', 'demo-package==2.0'],
   };
 }
 
@@ -166,6 +201,54 @@ describe('publishPythonBundle', () => {
     expect(received.includes(wheel)).toBe(true);
     expect(received.toString()).toContain('name="sha256_digest"');
     expect(received.toString()).toContain(hash);
+  });
+
+  it('serializes uploads for different versions of the same normalized package', async () => {
+    const publishManifest = twoVersionManifest();
+    await fs.ensureDir(path.dirname(path.join(bundleDir, secondWheelRelativePath)));
+    await fs.writeFile(path.join(bundleDir, secondWheelRelativePath), secondWheel);
+    await writePythonSecurityReport(
+      bundleDir,
+      await scanPythonBundleSecurity({
+        advisoryClient: { query: (packages) => Promise.resolve(packages.map(() => [])) },
+        manifest: publishManifest,
+      })
+    );
+    let activeUploads = 0;
+    let overlappingUploads = false;
+    const baseUrl = await listen((request, response) => {
+      if (request.method === 'GET') {
+        expect(request.url).toBe('/api/packages/public/pypi/simple/demo-package/');
+        response.writeHead(404).end();
+        return;
+      }
+
+      expect(request.method).toBe('POST');
+      if (activeUploads > 0) overlappingUploads = true;
+      activeUploads += 1;
+      request.resume();
+      request.on('end', () => {
+        setTimeout(() => {
+          activeUploads -= 1;
+          response.writeHead(201).end();
+        }, 20);
+      });
+    });
+
+    const report = await publishPythonBundle(publishManifest, {
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      concurrency: 4,
+      giteaBaseUrl: baseUrl,
+      owner: 'public',
+    });
+
+    expect(overlappingUploads).toBe(false);
+    expect(report).toMatchObject({ errors: [], published: 2, skipped: 0 });
+    expect(report.actions.map((action) => action.package)).toEqual([
+      'demo-package@1.0',
+      'demo-package@2.0',
+    ]);
   });
 
   it('skips an existing wheel from compact registry metadata without uploading it', async () => {

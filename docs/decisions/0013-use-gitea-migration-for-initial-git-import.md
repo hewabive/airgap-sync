@@ -35,7 +35,10 @@ For a missing repository during top-level `publish`:
    only update mechanism for repositories that already exist.
 5. If the migration endpoint, source allowlist, or network path is unavailable, record
    `migrationError`, create an empty repository when necessary, and continue through
-   the established push path.
+   the established push path. Initialize an empty repository by pushing only the
+   mirror default branch, wait until Gitea reports it as non-empty, then push all refs
+   and verify the final default branch through the API. This avoids Gitea's asynchronous
+   first-branch handler overwriting a default branch update after the push returns.
 
 Repository existence checks, migrations, and pushes use a shared bounded concurrency
 setting. Results retain manifest order; progress and fallback details are reported as

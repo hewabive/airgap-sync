@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import * as fs from './fs.js';
 import type {
   GitApplyActionResult,
@@ -27,7 +28,7 @@ export interface ApplyGitSourcesOptions {
   giteaBaseUrl: string;
   generatedAt?: string;
   gitAuth?: GitHttpAuth;
-  giteaClient?: Pick<GiteaClient, 'setRepositoryDefaultBranch'>;
+  giteaClient?: Pick<GiteaClient, 'getRepositoryState' | 'setRepositoryDefaultBranch'>;
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
   onProgress?: (event: GitApplyProgressEvent) => void;
@@ -130,6 +131,8 @@ function gitHttpAuthHeader(auth: GitHttpAuth): string {
 }
 
 const giteaMirrorRefspecs = ['+refs/heads/*:refs/heads/*', '+refs/tags/*:refs/tags/*'];
+const repositoryReadyPollMs = 100;
+const repositoryReadyTimeoutMs = 30_000;
 const maxErrorLines = 80;
 const maxErrorChars = 12_000;
 
@@ -144,6 +147,24 @@ function pushArgs(mirrorPath: string, targetUrl: string, auth?: GitHttpAuth): st
     '--prune',
     targetUrl,
     ...giteaMirrorRefspecs,
+  ]);
+}
+
+function pushDefaultBranchArgs(
+  mirrorPath: string,
+  targetUrl: string,
+  branch: string,
+  auth?: GitHttpAuth
+): string[] {
+  return safeDirectoryGitArgs(mirrorPath, [
+    ...(auth
+      ? ['-c', 'credential.helper=', '-c', `http.extraHeader=${gitHttpAuthHeader(auth)}`]
+      : []),
+    '-C',
+    mirrorPath,
+    'push',
+    targetUrl,
+    `+refs/heads/${branch}:refs/heads/${branch}`,
   ]);
 }
 
@@ -172,6 +193,26 @@ async function mirrorDefaultBranch(mirrorPath: string, runner: GitCommandRunner)
   return branch;
 }
 
+async function waitForRepositoryReady(
+  client: NonNullable<ApplyGitSourcesOptions['giteaClient']>,
+  repository: { name: string; owner: string }
+): Promise<void> {
+  const getRepositoryState = client.getRepositoryState;
+  if (!getRepositoryState) return;
+  const deadline = Date.now() + repositoryReadyTimeoutMs;
+
+  for (;;) {
+    const state = await getRepositoryState.call(client, repository);
+    if (!state.empty) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Gitea still reports ${repository.owner}/${repository.name} as empty after the default branch push`
+      );
+    }
+    await delay(repositoryReadyPollMs);
+  }
+}
+
 function summarizeErrorMessage(message: string): string {
   const lines = message.trim().split(/\r?\n/);
   const summarizedLines =
@@ -198,6 +239,7 @@ async function applyRepository(
 ): Promise<GitApplyActionResult> {
   const mirrorPath = sourcePath(source, options);
   const targetUrl = gitSourceTargetUrl(source, options.giteaBaseUrl);
+  const getRepositoryState = options.giteaClient?.getRepositoryState;
   const setRepositoryDefaultBranch = options.giteaClient?.setRepositoryDefaultBranch;
   let defaultBranch: string | undefined;
 
@@ -214,6 +256,20 @@ async function applyRepository(
     if (setRepositoryDefaultBranch) {
       defaultBranch = await mirrorDefaultBranch(mirrorPath, runner);
     }
+    const repository = {
+      name: gitSourcePublishRepo(source),
+      owner: gitSourcePublishOwner(source),
+    };
+    if (getRepositoryState && defaultBranch && options.giteaClient) {
+      const initialState = await getRepositoryState.call(options.giteaClient, repository);
+      if (initialState.empty) {
+        await runner({
+          args: pushDefaultBranchArgs(mirrorPath, targetUrl, defaultBranch, options.gitAuth),
+          ...(options.gitAuth ? { env: pushEnv() } : {}),
+        });
+        await waitForRepositoryReady(options.giteaClient, repository);
+      }
+    }
     await runner({
       args: pushArgs(mirrorPath, targetUrl, options.gitAuth),
       ...(options.gitAuth ? { env: pushEnv() } : {}),
@@ -222,12 +278,26 @@ async function applyRepository(
       try {
         await setRepositoryDefaultBranch.call(options.giteaClient, {
           branch: defaultBranch,
-          name: gitSourcePublishRepo(source),
-          owner: gitSourcePublishOwner(source),
+          ...repository,
         });
       } catch (error) {
         throw new Error(
           `pushed refs but failed to set Gitea default branch to ${defaultBranch}: ${(error as Error).message}`
+        );
+      }
+    }
+    if (getRepositoryState && defaultBranch && options.giteaClient) {
+      const finalState = await getRepositoryState.call(options.giteaClient, repository);
+      if (finalState.empty) {
+        throw new Error(
+          `pushed refs but Gitea still reports ${repository.owner}/${repository.name} as empty`
+        );
+      }
+      if (finalState.defaultBranch !== defaultBranch) {
+        throw new Error(
+          `pushed refs but Gitea reports default branch ${JSON.stringify(
+            finalState.defaultBranch
+          )} instead of ${JSON.stringify(defaultBranch)}`
         );
       }
     }

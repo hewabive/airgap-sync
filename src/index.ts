@@ -382,6 +382,7 @@ export type {
   GiteaClient,
   GiteaRepositoryMigrationSource,
   GiteaRepositoryProvisionProgressEvent,
+  GiteaRepositoryState,
   GiteaOwnerProvisionAction,
   GiteaOwnerProvisionReport,
   GiteaOwnerProvisionStatus,
