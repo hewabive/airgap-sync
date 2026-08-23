@@ -28,7 +28,7 @@ goto end
 :find_workspace
 if defined AIRGAP_SYNC_WORKSPACE (
   call :validate_workspace "%AIRGAP_SYNC_WORKSPACE%"
-  exit /b %errorlevel%
+  exit /b !errorlevel!
 )
 
 set "AIRGAP_SYNC_FOLDER=airgap-sync"
@@ -64,10 +64,13 @@ if not exist "%AIRGAP_SYNC_WORKSPACE%\dist\cli.cjs" (
 echo.
 echo [airgap-sync] node dist\cli.cjs %*
 node "%AIRGAP_SYNC_WORKSPACE%\dist\cli.cjs" %*
-if errorlevel 1 (
+set "AIRGAP_SYNC_CMD_CODE=%errorlevel%"
+rem Compare as a string: Windows crash exit codes (>= 0x80000000) read as
+rem negative by "if errorlevel" and would be mistaken for success.
+if not "%AIRGAP_SYNC_CMD_CODE%"=="0" (
   echo.
-  echo [ERROR] airgap-sync failed with exit code %errorlevel%.
-  exit /b %errorlevel%
+  echo [ERROR] airgap-sync failed with exit code %AIRGAP_SYNC_CMD_CODE%.
+  exit /b 1
 )
 exit /b 0
 
