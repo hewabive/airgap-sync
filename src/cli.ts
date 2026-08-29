@@ -1981,12 +1981,21 @@ function createCollectProgressLogger(): (event: DownloadProgressEvent) => void {
 }
 
 function formatGitFetchActionDetail(event: GitFetchProgressEvent): string | undefined {
+  if (event.deferred && event.action) {
+    return `${event.action.repository} deferred after batch fetch: ${event.action.error ?? 'Git fetch failed'}`;
+  }
+  if (event.interactiveRetry && !event.action) {
+    return `${event.repository ?? 'Git repository'} interactive retry`;
+  }
   if (!event.action) {
     return event.repository;
   }
 
   const action = event.action;
   const parts = [action.repository, action.status];
+  if (event.interactiveRetry) {
+    parts.push('after interactive retry');
+  }
   if (action.status === 'updated') {
     if (action.changed === false) {
       parts.push('unchanged');
@@ -4677,6 +4686,7 @@ program
           deferGitSourcesActivation: true,
           includeDev,
           includePeer,
+          interactiveGitRetry: process.stdin.isTTY && process.stderr.isTTY,
           initialGitRequirements: parsedTargets.gitRequirements,
           initialGitSources: gitTargets,
           initialRequirements: parsedTargets.requirements,
@@ -4865,6 +4875,7 @@ program
         concurrency: options.concurrency,
         includeDev: options.includeDev === true,
         includePeer: options.includePeer === true,
+        interactiveGitRetry: process.stdin.isTTY && process.stderr.isTTY,
         latestPolicy: options.latestPolicy ?? 'bundled',
         minReleaseAgeDays: npmSecurity.minReleaseAgeDays,
         rangeResolutionPolicy: options.rangeResolutionPolicy ?? 'reuse-stable',
@@ -5418,6 +5429,7 @@ gitCommand
         bundleDir: bundle,
         concurrency: options.concurrency,
         dryRun: options.dryRun === true,
+        interactiveRetry: process.stdin.isTTY && process.stderr.isTTY,
         manifest,
         onProgress: createGitFetchProgressLogger(),
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),

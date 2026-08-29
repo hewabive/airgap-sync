@@ -137,6 +137,12 @@ coverage, downloads the deduplicated minimum wheel union, and retains planning e
 and reports. Exact locks are audit artifacts; consumers are not expected to depend on
 them.
 
+Git mirrors first use the configured parallelism without allowing credential prompts.
+After that batch completes, failed SSH repositories are identified individually and
+retried one at a time when the command has an interactive terminal. This keeps ordinary
+agent-backed downloads parallel while making first-use host confirmation and SSH-key
+prompts readable and safe to answer.
+
 Pinned pnpm is part of that closure. A `packageManager: pnpm@<version>` declaration
 adds exact `pnpm` and `@pnpm/exe` roots. `devEngines.packageManager` ranges are resolved
 only when no covering pnpm lockfile exists; otherwise the lockfile's exact

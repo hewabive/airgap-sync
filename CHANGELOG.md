@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Made Git mirror downloads run a parallel non-interactive first pass and defer failed
+  SSH repositories until the rest of the batch completes. Interactive terminals retry
+  those repositories sequentially with live SSH prompts, while reports retain both
+  attempts and non-interactive runs keep actionable per-repository failures.
 - Made initial Gitea Git publication use the repository migration API with a temporary
   authenticated read-only smart-HTTP source. Large ref sets are imported through one
   server-side clone, existing repositories continue to use ordinary pushes, failures

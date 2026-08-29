@@ -385,8 +385,11 @@ generated bundles, prefer `refresh` policies; reused dependency tags are restore
 strictly and can move shared registry tags backward.
 
 `--concurrency` controls parallel npm resolution/download, Git mirror/update/manifest
-scan, and Python resolution/download workers. The default is `8`. Use a lower value
-such as `4` on slow removable media, interactive SSH connections, or unstable network
+scan, and Python resolution/download workers. The default is `8`. Git mirror fetches
+use this concurrency for a non-interactive first pass. Failed SSH repositories are
+listed after that pass and, when stdin and stderr are terminals, retried interactively
+one at a time so host-key, private-key passphrase, PIN, and hardware-key prompts cannot
+overlap. Use a lower value such as `4` on slow removable media or unstable network
 links.
 
 `--registry-timeout-ms` controls npm metadata request timeout. The default is 60000.
@@ -638,6 +641,15 @@ pull-request refs are intentionally not downloaded into new mirrors. The command
 writes `git-fetch-report.json`. During fetch, each mirror is logged with its
 repository, status, whether refs changed, and, when it can be counted locally, the
 number of new commits on updated refs.
+
+The concurrent pass disables Git and SSH prompts. SSH repositories that fail during
+that pass are reported by name after all other mirrors finish. In an interactive
+terminal they are then retried sequentially with stdin attached and stderr shown live.
+This allows OpenSSH to request first-use host confirmation, a private-key passphrase,
+a security-key PIN, or hardware-key presence without competing prompts. A key already
+available through `ssh-agent` remains on the parallel fast path. Without a terminal no
+retry is attempted and the batch error remains in the report. OpenSSH batch mode and
+PuTTY/plink `-batch` are selected from the configured SSH variant when possible.
 
 This is the online-side download step only. It does not push to Gitea; that belongs
 to a later offline publish command.

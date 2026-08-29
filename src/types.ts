@@ -139,8 +139,17 @@ export interface CollectReport {
 
 export type GitFetchActionStatus = 'planned' | 'cloned' | 'updated' | 'error';
 
+export type GitFetchAttemptMode = 'batch' | 'interactive';
+
+export interface GitFetchAttemptResult {
+  error?: string;
+  mode: GitFetchAttemptMode;
+  status: 'success' | 'error';
+}
+
 export interface GitFetchActionResult {
   addedRefs?: number;
+  attempts?: GitFetchAttemptResult[];
   changed?: boolean;
   deletedRefs?: number;
   error?: string;

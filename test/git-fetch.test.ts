@@ -7,6 +7,7 @@ import {
   runGitCommand,
   type GitCommandInvocation,
   type GitCommandResult,
+  type GitFetchProgressEvent,
 } from '../src/core/git-fetch.js';
 import type { GitSourcesManifest } from '../src/types.js';
 
@@ -48,6 +49,7 @@ function mirrorHeadSyncCalls(mirrorPath: string): GitCommandInvocation[] {
   return [
     {
       args: mirrorGitArgs(mirrorPath, ['ls-remote', '--symref', 'origin', 'HEAD']),
+      interaction: 'batch',
     },
     {
       args: mirrorGitArgs(mirrorPath, ['show-ref', '--verify', '--quiet', 'refs/heads/main']),
@@ -71,6 +73,28 @@ describe('fetchGitSources', () => {
 
   afterEach(async () => {
     await fs.remove(bundleDir);
+  });
+
+  it('forces Git and OpenSSH batch behavior for non-interactive network commands', async () => {
+    const result = await runGitCommand({
+      args: [
+        '-c',
+        'alias.show-batch=!printf "%s\\n%s\\n%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_SSH_COMMAND" "$SSH_ASKPASS_REQUIRE"',
+        'show-batch',
+      ],
+      env: {
+        GIT_SSH_COMMAND: 'ssh -i /keys/sync',
+        GIT_SSH_VARIANT: 'ssh',
+      },
+      interaction: 'batch',
+      sshTransport: true,
+    });
+
+    expect(result.stdout.trim().split('\n')).toEqual([
+      '0',
+      'ssh -i /keys/sync -o BatchMode=yes',
+      'never',
+    ]);
   });
 
   it('plans source mirror fetches without running git in dry-run mode', async () => {
@@ -159,6 +183,7 @@ describe('fetchGitSources', () => {
           '--prune',
           'origin',
         ]),
+        interaction: 'batch',
       },
       ...mirrorHeadSyncCalls(path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git')),
     ]);
@@ -229,6 +254,7 @@ describe('fetchGitSources', () => {
       },
       {
         args: mirrorGitArgs(targetPath, ['fetch', '--prune', 'origin']),
+        interaction: 'batch',
       },
       ...mirrorHeadSyncCalls(targetPath),
       {
@@ -312,6 +338,7 @@ describe('fetchGitSources', () => {
       },
       {
         args: mirrorGitArgs(targetPath, ['fetch', '--prune', 'origin']),
+        interaction: 'batch',
       },
       ...mirrorHeadSyncCalls(targetPath),
       {
@@ -420,6 +447,7 @@ describe('fetchGitSources', () => {
           '--prune',
           'origin',
         ]),
+        interaction: 'batch',
       },
       ...mirrorHeadSyncCalls(path.join(mirrorsDir, 'github.com/owner/repo.git')),
     ]);
@@ -472,6 +500,234 @@ describe('fetchGitSources', () => {
       'github.com/owner/repo',
       'github.com/owner/second',
     ]);
+  });
+
+  it('defers failed SSH mirrors until batch work finishes and retries them interactively in order', async () => {
+    const manifest: GitSourcesManifest = {
+      ...sourcesManifest,
+      sources: ['first', 'ready', 'third'].map((repo) => ({
+        ...sourcesManifest.sources[0]!,
+        host: 'git.example',
+        id: `git.example/owner/${repo}`,
+        localMirrorPath: `git-mirrors/git.example/owner/${repo}.git`,
+        repo,
+        sourceUrl: `git@git.example:owner/${repo}.git`,
+      })),
+    };
+    const batchFetches: (() => void)[] = [];
+    const interactiveOrder: string[] = [];
+    const progress: GitFetchProgressEvent[] = [];
+    let activeBatchFetches = 0;
+    let activeInteractiveFetches = 0;
+    let maxActiveBatchFetches = 0;
+    let maxActiveInteractiveFetches = 0;
+    let readyHeadChecked = false;
+
+    const report = await fetchGitSources({
+      bundleDir,
+      concurrency: 3,
+      interactiveRetry: true,
+      manifest,
+      onProgress(event) {
+        progress.push(event);
+      },
+      async runner(invocation): Promise<GitCommandResult | undefined> {
+        if (invocation.args[0] === 'init') {
+          await fs.ensureDir(invocation.args.at(-1) ?? '');
+          return undefined;
+        }
+
+        const targetIndex = invocation.args.indexOf('-C');
+        const targetPath = targetIndex >= 0 ? invocation.args[targetIndex + 1] : undefined;
+        const repo = targetPath ? path.basename(targetPath, '.git') : 'unknown';
+        if (invocation.args.includes('fetch')) {
+          expect(invocation.sshTransport).toBe(true);
+          if (invocation.interaction === 'batch') {
+            activeBatchFetches += 1;
+            maxActiveBatchFetches = Math.max(maxActiveBatchFetches, activeBatchFetches);
+            return await new Promise<GitCommandResult>((resolve, reject) => {
+              batchFetches.push(() => {
+                activeBatchFetches -= 1;
+                if (repo === 'ready') {
+                  resolve({ stderr: '', stdout: '' });
+                } else {
+                  reject(new Error(`batch authentication failed for ${repo}`));
+                }
+              });
+              if (batchFetches.length === 3) {
+                batchFetches.splice(0).forEach((release) => {
+                  release();
+                });
+              }
+            });
+          }
+
+          expect(invocation.interaction).toBe('interactive');
+          expect(readyHeadChecked).toBe(true);
+          interactiveOrder.push(repo);
+          activeInteractiveFetches += 1;
+          maxActiveInteractiveFetches = Math.max(
+            maxActiveInteractiveFetches,
+            activeInteractiveFetches
+          );
+          activeInteractiveFetches -= 1;
+          return { stderr: '', stdout: '' };
+        }
+        if (invocation.args.includes('ls-remote')) {
+          if (repo === 'ready' && invocation.interaction === 'batch') {
+            readyHeadChecked = true;
+          }
+          return remoteHeadCommandResult(invocation);
+        }
+        if (invocation.args.includes('for-each-ref')) {
+          return { stderr: '', stdout: '' };
+        }
+        return undefined;
+      },
+    });
+
+    expect(maxActiveBatchFetches).toBe(3);
+    expect(maxActiveInteractiveFetches).toBe(1);
+    expect(interactiveOrder).toEqual(['first', 'third']);
+    expect(progress.filter((event) => event.deferred).map((event) => event.repository)).toEqual([
+      'git.example/owner/first',
+      'git.example/owner/third',
+    ]);
+    expect(
+      progress
+        .filter((event) => event.interactiveRetry && !event.action)
+        .map((event) => event.repository)
+    ).toEqual(['git.example/owner/first', 'git.example/owner/third']);
+    expect(report.errors).toEqual([]);
+    expect(report.actions.map((action) => action.status)).toEqual(['cloned', 'cloned', 'cloned']);
+    expect(report.actions[0]?.attempts).toEqual([
+      {
+        error: 'batch authentication failed for first',
+        mode: 'batch',
+        status: 'error',
+      },
+      { mode: 'interactive', status: 'success' },
+    ]);
+    expect(report.actions[1]?.attempts).toBeUndefined();
+    expect(report.actions[2]?.attempts).toEqual([
+      {
+        error: 'batch authentication failed for third',
+        mode: 'batch',
+        status: 'error',
+      },
+      { mode: 'interactive', status: 'success' },
+    ]);
+  });
+
+  it('keeps failed SSH mirrors as errors when interactive retry is disabled', async () => {
+    const manifest: GitSourcesManifest = {
+      ...sourcesManifest,
+      sources: [
+        {
+          ...sourcesManifest.sources[0]!,
+          sourceUrl: 'ssh://git@git.example/owner/repo.git',
+        },
+      ],
+    };
+    const interactions: GitCommandInvocation['interaction'][] = [];
+
+    const report = await fetchGitSources({
+      bundleDir,
+      interactiveRetry: false,
+      manifest,
+      runner(invocation): Promise<GitCommandResult | undefined> {
+        if (invocation.args.includes('fetch')) {
+          interactions.push(invocation.interaction);
+          return Promise.reject(new Error('Host key verification failed'));
+        }
+        return Promise.resolve(undefined);
+      },
+    });
+
+    expect(interactions).toEqual(['batch']);
+    expect(report.errors).toHaveLength(1);
+    expect(report.actions[0]?.attempts).toBeUndefined();
+  });
+
+  it('compares an interactive retry with refs from before the failed batch attempt', async () => {
+    const targetPath = path.join(bundleDir, 'git-mirrors/github.com/owner/repo.git');
+    await fs.ensureDir(targetPath);
+    const manifest: GitSourcesManifest = {
+      ...sourcesManifest,
+      sources: [
+        {
+          ...sourcesManifest.sources[0]!,
+          sourceUrl: 'git@git.example:owner/repo.git',
+        },
+      ],
+    };
+    const refSnapshots = ['refs/heads/main old\n', 'refs/heads/main new\n'];
+
+    const report = await fetchGitSources({
+      bundleDir,
+      interactiveRetry: true,
+      manifest,
+      runner(invocation): Promise<GitCommandResult | undefined> {
+        if (invocation.args.includes('for-each-ref')) {
+          return Promise.resolve({ stderr: '', stdout: refSnapshots.shift() ?? '' });
+        }
+        if (invocation.args.includes('ls-remote')) {
+          if (invocation.interaction === 'batch') {
+            return Promise.reject(new Error('batch default-branch lookup failed'));
+          }
+          return Promise.resolve(remoteHeadCommandResult(invocation));
+        }
+        return Promise.resolve(undefined);
+      },
+    });
+
+    expect(refSnapshots).toEqual([]);
+    expect(report.errors).toEqual([]);
+    expect(report.actions[0]).toMatchObject({
+      changed: true,
+      status: 'updated',
+      updatedRefs: 1,
+    });
+  });
+
+  it('preserves configured SSH commands and variants when enabling batch mode', async () => {
+    const manifest: GitSourcesManifest = {
+      ...sourcesManifest,
+      sources: [
+        {
+          ...sourcesManifest.sources[0]!,
+          sourceUrl: 'git@git.example:owner/repo.git',
+        },
+      ],
+    };
+    let fetchCall: GitCommandInvocation | undefined;
+
+    await fetchGitSources({
+      bundleDir,
+      manifest,
+      runner(invocation) {
+        if (
+          invocation.args.includes('--get-regexp') &&
+          invocation.args.includes('^(core\\.sshcommand|ssh\\.variant)$')
+        ) {
+          return Promise.resolve({
+            stderr: '',
+            stdout: 'core.sshcommand ssh -i /keys/sync\nssh.variant ssh\n',
+          });
+        }
+        if (invocation.args.includes('fetch')) {
+          fetchCall = invocation;
+        }
+        return Promise.resolve(remoteHeadCommandResult(invocation));
+      },
+    });
+
+    expect(fetchCall).toMatchObject({
+      interaction: 'batch',
+      sshCommand: 'ssh -i /keys/sync',
+      sshTransport: true,
+      sshVariant: 'ssh',
+    });
   });
 
   it('does not rewrite an already correct mirror remote configuration', async () => {

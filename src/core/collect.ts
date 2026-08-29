@@ -56,6 +56,7 @@ export interface CollectBundleOptions {
   generatedAt?: string;
   includeDev?: boolean;
   includePeer?: boolean;
+  interactiveGitRetry?: boolean;
   initialGitRequirements?: GitRequirement[];
   initialGitSources?: GitSource[];
   /** Sources preserved in the resulting manifest without fetching or scanning them. */
@@ -219,12 +220,21 @@ function gitSourcesFetchKey(sources: GitSource[]): string {
 }
 
 function formatGitFetchProgressDetail(event: GitFetchProgressEvent): string | undefined {
+  if (event.deferred && event.action) {
+    return `${event.action.repository} deferred after batch fetch: ${event.action.error ?? 'Git fetch failed'}`;
+  }
+  if (event.interactiveRetry && !event.action) {
+    return `${event.repository ?? 'Git repository'} interactive retry`;
+  }
   if (!event.action) {
     return event.repository;
   }
 
   const action = event.action;
   const parts = [action.repository, action.status];
+  if (event.interactiveRetry) {
+    parts.push('after interactive retry');
+  }
   if (action.status === 'updated') {
     if (action.changed === false) {
       parts.push('unchanged');
@@ -606,6 +616,7 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
         dryRun,
         generatedAt,
+        interactiveRetry: options.interactiveGitRetry === true,
         manifest: gitSources,
         onProgress: (event: GitFetchProgressEvent) => {
           const detail = formatGitFetchProgressDetail(event);

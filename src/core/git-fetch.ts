@@ -10,6 +10,10 @@ export interface GitCommandInvocation {
   args: string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  interaction?: GitCommandInteraction;
+  sshCommand?: string;
+  sshTransport?: boolean;
+  sshVariant?: string;
 }
 
 export interface GitCommandResult {
@@ -21,22 +25,27 @@ export type GitCommandRunner = (
   invocation: GitCommandInvocation
 ) => Promise<GitCommandResult | undefined> | Promise<void>;
 
+export type GitCommandInteraction = 'batch' | 'interactive';
+
 export interface FetchGitSourcesOptions {
   bundleDir: string;
   concurrency?: number;
   dryRun?: boolean;
   generatedAt?: string;
+  interactiveRetry?: boolean;
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
   onProgress?: (event: GitFetchProgressEvent) => void;
   runner?: GitCommandRunner;
 }
 
-export type GitFetchProgressStatus = 'start' | 'progress' | 'done';
+export type GitFetchProgressStatus = 'start' | 'progress' | 'warning' | 'done';
 
 export interface GitFetchProgressEvent {
   action?: GitFetchActionResult;
   current: number;
+  deferred?: boolean;
+  interactiveRetry?: boolean;
   repository?: string;
   status: GitFetchProgressStatus;
   total: number;
@@ -44,8 +53,20 @@ export interface GitFetchProgressEvent {
 
 interface FetchEntry {
   id: string;
+  sshTransport: boolean;
   sourceUrl: string;
   targetPath: string;
+}
+
+interface FetchEntryState {
+  baselineCaptured: boolean;
+  baselineRefs: RefSnapshot | undefined;
+  originallyExisted: boolean;
+}
+
+interface SshBatchConfiguration {
+  command?: string;
+  variant?: string;
 }
 
 const mirrorBranchRefspec = '+refs/heads/*:refs/heads/*';
@@ -76,12 +97,61 @@ function redactGitArg(arg: string): string {
   return arg.startsWith('http.extraHeader=') ? 'http.extraHeader=<redacted>' : arg;
 }
 
+function shellQuote(value: string): string {
+  return `"${value.replace(/["\\$`]/gu, '\\$&')}"`;
+}
+
+function batchSshCommand(env: NodeJS.ProcessEnv, configuration: SshBatchConfiguration): string {
+  const configuredCommand = env.GIT_SSH_COMMAND?.trim();
+  const configuredExecutable = env.GIT_SSH?.trim();
+  const command =
+    configuredCommand ??
+    (configuredExecutable ? shellQuote(configuredExecutable) : (configuration.command ?? 'ssh'));
+  const variant = env.GIT_SSH_VARIANT?.toLowerCase() ?? configuration.variant?.toLowerCase();
+  const usesPlink =
+    variant === 'plink' ||
+    variant === 'putty' ||
+    variant === 'tortoiseplink' ||
+    /(?:^|[\\/\s"'])(?:tortoise)?plink(?:\.exe)?(?=\s|["']|$)/iu.test(command);
+
+  if (variant === 'simple') {
+    return command;
+  }
+  return usesPlink ? `${command} -batch` : `${command} -o BatchMode=yes`;
+}
+
+function commandEnvironment(invocation: GitCommandInvocation): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...invocation.env };
+  if (invocation.interaction !== 'batch') {
+    return env;
+  }
+
+  env.GIT_TERMINAL_PROMPT = '0';
+  if (invocation.sshTransport === true) {
+    env.GIT_SSH_COMMAND = batchSshCommand(env, {
+      ...(invocation.sshCommand ? { command: invocation.sshCommand } : {}),
+      ...(invocation.sshVariant ? { variant: invocation.sshVariant } : {}),
+    });
+    env.SSH_ASKPASS_REQUIRE = 'never';
+  }
+  return env;
+}
+
+function isSshSourceUrl(sourceUrl: string): boolean {
+  const normalized = sourceUrl.replace(/^git\+/u, '');
+  if (/^ssh:\/\//iu.test(normalized)) {
+    return true;
+  }
+  return /^[^\s/@:]+@[^\s/:]+:.+/u.test(normalized);
+}
+
 export async function runGitCommand(invocation: GitCommandInvocation): Promise<GitCommandResult> {
   return await new Promise<GitCommandResult>((resolve, reject) => {
+    const interactive = invocation.interaction === 'interactive';
     const child = spawn('git', invocation.args, {
       cwd: invocation.cwd,
-      env: { ...process.env, ...invocation.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      env: commandEnvironment(invocation),
+      stdio: [interactive ? 'inherit' : 'ignore', 'pipe', 'pipe'],
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -91,6 +161,9 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<G
     });
     child.stderr.on('data', (chunk: Buffer) => {
       stderr.push(chunk);
+      if (interactive) {
+        process.stderr.write(chunk);
+      }
     });
     child.on('error', reject);
     child.on('close', (code) => {
@@ -260,19 +333,38 @@ async function configureMirrorFetchRefspecs(
   });
 }
 
-async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Promise<void> {
+async function fetchMirrorRefs(
+  entry: FetchEntry,
+  runner: GitCommandRunner,
+  interaction: GitCommandInteraction,
+  sshConfiguration: SshBatchConfiguration
+): Promise<void> {
   await runner({
-    args: safeDirectoryGitArgs(targetPath, ['-C', targetPath, 'fetch', '--prune', 'origin']),
+    args: safeDirectoryGitArgs(entry.targetPath, [
+      '-C',
+      entry.targetPath,
+      'fetch',
+      '--prune',
+      'origin',
+    ]),
+    interaction,
+    ...(sshConfiguration.command ? { sshCommand: sshConfiguration.command } : {}),
+    ...(entry.sshTransport ? { sshTransport: true } : {}),
+    ...(sshConfiguration.variant ? { sshVariant: sshConfiguration.variant } : {}),
   });
   const remoteHead = await runner({
-    args: safeDirectoryGitArgs(targetPath, [
+    args: safeDirectoryGitArgs(entry.targetPath, [
       '-C',
-      targetPath,
+      entry.targetPath,
       'ls-remote',
       '--symref',
       'origin',
       'HEAD',
     ]),
+    interaction,
+    ...(sshConfiguration.command ? { sshCommand: sshConfiguration.command } : {}),
+    ...(entry.sshTransport ? { sshTransport: true } : {}),
+    ...(sshConfiguration.variant ? { sshVariant: sshConfiguration.variant } : {}),
   });
   if (!remoteHead) {
     return;
@@ -284,9 +376,9 @@ async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Pr
   }
 
   await runner({
-    args: safeDirectoryGitArgs(targetPath, [
+    args: safeDirectoryGitArgs(entry.targetPath, [
       '-C',
-      targetPath,
+      entry.targetPath,
       'show-ref',
       '--verify',
       '--quiet',
@@ -294,14 +386,54 @@ async function fetchMirrorRefs(targetPath: string, runner: GitCommandRunner): Pr
     ]),
   });
   await runner({
-    args: safeDirectoryGitArgs(targetPath, [
+    args: safeDirectoryGitArgs(entry.targetPath, [
       '-C',
-      targetPath,
+      entry.targetPath,
       'symbolic-ref',
       'HEAD',
       remoteHeadRef,
     ]),
   });
+}
+
+async function readSshBatchConfiguration(
+  entry: FetchEntry,
+  runner: GitCommandRunner
+): Promise<SshBatchConfiguration> {
+  if (!entry.sshTransport) {
+    return {};
+  }
+  try {
+    const result = await runner({
+      args: safeDirectoryGitArgs(entry.targetPath, [
+        '-C',
+        entry.targetPath,
+        'config',
+        '--get-regexp',
+        '^(core\\.sshcommand|ssh\\.variant)$',
+      ]),
+    });
+    if (!result) {
+      return {};
+    }
+    const configuration: SshBatchConfiguration = {};
+    for (const line of result.stdout.split(/\r?\n/u)) {
+      const separator = line.search(/\s/u);
+      if (separator < 1) {
+        continue;
+      }
+      const key = line.slice(0, separator).toLowerCase();
+      const value = line.slice(separator).trim();
+      if (key === 'core.sshcommand' && value) {
+        configuration.command = value;
+      } else if (key === 'ssh.variant' && value) {
+        configuration.variant = value;
+      }
+    }
+    return configuration;
+  } catch {
+    return {};
+  }
 }
 
 function configuredRemoteMatches(stdout: string, sourceUrl: string): boolean {
@@ -361,13 +493,23 @@ async function ensureMirrorRemote(entry: FetchEntry, runner: GitCommandRunner): 
 
 async function fetchEntry(
   entry: FetchEntry,
-  runner: GitCommandRunner
+  runner: GitCommandRunner,
+  options: {
+    interaction: GitCommandInteraction;
+    state: FetchEntryState;
+  }
 ): Promise<GitFetchActionResult> {
   try {
     if (await fs.pathExists(entry.targetPath)) {
-      const before = await refsSnapshot(entry.targetPath, runner);
+      const before = options.state.baselineCaptured
+        ? options.state.baselineRefs
+        : await refsSnapshot(entry.targetPath, runner);
+      options.state.baselineCaptured = true;
+      options.state.baselineRefs = before;
       await ensureMirrorRemote(entry, runner);
-      await fetchMirrorRefs(entry.targetPath, runner);
+      const sshConfiguration =
+        options.interaction === 'batch' ? await readSshBatchConfiguration(entry, runner) : {};
+      await fetchMirrorRefs(entry, runner, options.interaction, sshConfiguration);
       const after = await refsSnapshot(entry.targetPath, runner);
       const changes =
         before !== undefined && after !== undefined
@@ -378,6 +520,7 @@ async function fetchEntry(
               targetPath: entry.targetPath,
             })
           : undefined;
+      const clonedDuringRun = !options.state.originallyExisted;
       return {
         ...(changes
           ? {
@@ -388,9 +531,10 @@ async function fetchEntry(
               updatedRefs: changes.updatedRefs,
             }
           : {}),
+        ...(clonedDuringRun ? { changed: true } : {}),
         repository: entry.id,
         sourceUrl: entry.sourceUrl,
-        status: 'updated',
+        status: clonedDuringRun ? 'cloned' : 'updated',
         targetPath: entry.targetPath,
       };
     }
@@ -410,7 +554,9 @@ async function fetchEntry(
       ]),
     });
     await configureMirrorFetchRefspecs(entry.targetPath, runner);
-    await fetchMirrorRefs(entry.targetPath, runner);
+    const sshConfiguration =
+      options.interaction === 'batch' ? await readSshBatchConfiguration(entry, runner) : {};
+    await fetchMirrorRefs(entry, runner, options.interaction, sshConfiguration);
     return {
       changed: true,
       repository: entry.id,
@@ -434,6 +580,7 @@ async function fetchEntries(options: {
   dryRun: boolean;
   entries: FetchEntry[];
   generatedAt?: string;
+  interactiveRetry: boolean;
   mirrorsDir: string;
   onProgress?: (event: GitFetchProgressEvent) => void;
   runner?: GitCommandRunner;
@@ -464,20 +611,92 @@ async function fetchEntries(options: {
     }
   } else {
     const runner = options.runner ?? runGitCommand;
-    let completed = 0;
-    const results = await mapConcurrent(options.entries, options.concurrency, async (entry) => {
-      const action = await fetchEntry(entry, runner);
-      completed += 1;
+    let batchCompleted = 0;
+    const results = await mapConcurrent(
+      options.entries,
+      options.concurrency,
+      async (entry, index) => {
+        const originallyExisted = await fs.pathExists(entry.targetPath);
+        const state: FetchEntryState = {
+          baselineCaptured: false,
+          baselineRefs: undefined,
+          originallyExisted,
+        };
+        const action = await fetchEntry(entry, runner, {
+          interaction: 'batch',
+          state,
+        });
+        batchCompleted += 1;
+        const deferred =
+          options.interactiveRetry && entry.sshTransport && action.status === 'error';
+        if (!deferred) {
+          options.onProgress?.({
+            action,
+            current: batchCompleted,
+            repository: entry.id,
+            status: 'progress',
+            total: options.entries.length,
+          });
+        }
+        return { action, entry, index, state };
+      }
+    );
+    const deferred = results.filter(
+      (result) =>
+        options.interactiveRetry && result.entry.sshTransport && result.action.status === 'error'
+    );
+    let finalized = results.length - deferred.length;
+
+    for (const result of deferred) {
       options.onProgress?.({
-        action,
-        current: completed,
-        repository: entry.id,
-        status: 'progress',
+        action: result.action,
+        current: finalized,
+        deferred: true,
+        repository: result.entry.id,
+        status: 'warning',
         total: options.entries.length,
       });
-      return action;
-    });
-    actions.push(...results);
+    }
+
+    for (const result of deferred) {
+      options.onProgress?.({
+        current: finalized,
+        interactiveRetry: true,
+        repository: result.entry.id,
+        status: 'warning',
+        total: options.entries.length,
+      });
+      const retried = await fetchEntry(result.entry, runner, {
+        interaction: 'interactive',
+        state: result.state,
+      });
+      const action: GitFetchActionResult = {
+        ...retried,
+        attempts: [
+          {
+            ...(result.action.error ? { error: result.action.error } : {}),
+            mode: 'batch',
+            status: 'error',
+          },
+          {
+            ...(retried.error ? { error: retried.error } : {}),
+            mode: 'interactive',
+            status: retried.status === 'error' ? 'error' : 'success',
+          },
+        ],
+      };
+      results[result.index] = { ...result, action };
+      finalized += 1;
+      options.onProgress?.({
+        action,
+        current: finalized,
+        interactiveRetry: true,
+        repository: result.entry.id,
+        status: action.status === 'error' ? 'warning' : 'progress',
+        total: options.entries.length,
+      });
+    }
+    actions.push(...results.map((result) => result.action));
   }
   options.onProgress?.({
     current: actions.length,
@@ -508,6 +727,7 @@ export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<
   const mirrorsDir = path.resolve(options.mirrorsDir ?? defaultMirrorRoot);
   const entries = options.manifest.sources.map((source) => ({
     id: source.id,
+    sshTransport: isSshSourceUrl(source.sourceUrl),
     sourceUrl: source.sourceUrl,
     targetPath: gitSourceMirrorPath({
       bundleDir,
@@ -520,6 +740,7 @@ export async function fetchGitSources(options: FetchGitSourcesOptions): Promise<
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     dryRun: options.dryRun === true,
     entries,
+    interactiveRetry: options.interactiveRetry === true,
     mirrorsDir,
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
     ...(options.onProgress ? { onProgress: options.onProgress } : {}),

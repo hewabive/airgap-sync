@@ -392,6 +392,7 @@ export type {
 } from './core/gitea.js';
 export type {
   FetchGitSourcesOptions,
+  GitCommandInteraction,
   GitFetchProgressEvent,
   GitFetchProgressStatus,
   GitCommandInvocation,
@@ -644,6 +645,8 @@ export type {
   GitConfigRewriteRule,
   GitFetchActionResult,
   GitFetchActionStatus,
+  GitFetchAttemptMode,
+  GitFetchAttemptResult,
   GitFetchReport,
   GitRequirement,
   GitSource,

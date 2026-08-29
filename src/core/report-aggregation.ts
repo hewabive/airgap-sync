@@ -56,8 +56,10 @@ function mergeGitFetchAction(
   const deletedRefs = mergeOptionalCounts(previous.deletedRefs, next.deletedRefs);
   const newCommits = mergeOptionalCounts(previous.newCommits, next.newCommits);
   const updatedRefs = mergeOptionalCounts(previous.updatedRefs, next.updatedRefs);
+  const attempts = [...(previous.attempts ?? []), ...(next.attempts ?? [])];
   return {
     ...(addedRefs === undefined ? {} : { addedRefs }),
+    ...(attempts.length === 0 ? {} : { attempts }),
     ...(deletedRefs === undefined ? {} : { deletedRefs }),
     ...((next.error ?? previous.error) ? { error: next.error ?? previous.error } : {}),
     ...(newCommits === undefined ? {} : { newCommits }),
