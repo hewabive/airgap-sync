@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { serializeByKey } from '../concurrency.js';
+import { mapConcurrent, serializeByKey } from '../concurrency.js';
 import * as fs from '../fs.js';
 import {
   pythonApplicationManifestCoverageErrors,
@@ -16,6 +16,10 @@ import {
 } from './publish-progress.js';
 import { readPythonSeedManifest } from './bundle.js';
 import { assertPythonSecurityGate } from './security.js';
+
+const genericRegistryLookupConcurrency = 8;
+const genericRegistryLookupTimeoutMs = 30_000;
+const sha256Pattern = /^[a-f0-9]{64}$/iu;
 
 export interface PythonGenericPublishAuth {
   password: string;
@@ -58,12 +62,22 @@ export interface PublishPythonGenericArtifactsOptions {
 
 export interface GiteaGenericPackageFile {
   expectedSha256: string;
+  expectedSize?: number;
   file: string;
   filename: string;
   owner: string;
   package: string;
   version: string;
 }
+
+interface GiteaGenericPackageRemoteFile {
+  sha256?: string;
+  size?: number;
+}
+
+export type GiteaGenericPackageVersionSnapshot = ReadonlyMap<string, GiteaGenericPackageRemoteFile>;
+
+type GiteaGenericPackageFileStatus = 'matching' | 'mismatch' | 'missing' | 'unverified';
 
 interface IndexedGenericFile {
   file: GiteaGenericPackageFile;
@@ -125,6 +139,145 @@ function authHeaders(auth: PythonGenericPublishAuth | undefined): Record<string,
     : {};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function giteaGenericPackageVersionKey(
+  file: Pick<GiteaGenericPackageFile, 'owner' | 'package' | 'version'>
+): string {
+  return `${file.owner.toLowerCase()}\0${file.package.toLowerCase()}\0${file.version}`;
+}
+
+function genericVersionFilesUrl(
+  baseUrl: string,
+  file: Pick<GiteaGenericPackageFile, 'owner' | 'package' | 'version'>
+): string {
+  return `${baseUrl}/api/v1/packages/${encodeURIComponent(file.owner)}/generic/${encodeURIComponent(file.package)}/${encodeURIComponent(file.version)}/files`;
+}
+
+function parseGenericPackageVersionSnapshot(
+  value: unknown
+): GiteaGenericPackageVersionSnapshot | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const snapshot = new Map<string, GiteaGenericPackageRemoteFile>();
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.name !== 'string' || !item.name) {
+      return undefined;
+    }
+    if (snapshot.has(item.name)) {
+      return undefined;
+    }
+    const rawSha256 = typeof item.sha256 === 'string' ? item.sha256 : undefined;
+    const sha256 = rawSha256 && sha256Pattern.test(rawSha256) ? rawSha256.toLowerCase() : undefined;
+    const size =
+      typeof item.size === 'number' && Number.isSafeInteger(item.size) && item.size >= 0
+        ? item.size
+        : undefined;
+    snapshot.set(item.name, {
+      ...(sha256 ? { sha256 } : {}),
+      ...(size === undefined ? {} : { size }),
+    });
+  }
+  return snapshot;
+}
+
+async function fetchGiteaGenericPackageVersionSnapshot(options: {
+  auth?: PythonGenericPublishAuth;
+  baseUrl: string;
+  fetch: typeof globalThis.fetch;
+  file: Pick<GiteaGenericPackageFile, 'owner' | 'package' | 'version'>;
+  timeoutMs: number;
+}): Promise<GiteaGenericPackageVersionSnapshot | undefined> {
+  try {
+    const response = await options.fetch(genericVersionFilesUrl(options.baseUrl, options.file), {
+      headers: {
+        ...authHeaders(options.auth),
+        Accept: 'application/json',
+        'Cache-Control': 'no-cache',
+      },
+      signal: AbortSignal.timeout(Math.min(options.timeoutMs, genericRegistryLookupTimeoutMs)),
+    });
+    if (response.status === 404) {
+      await response.text();
+      return new Map();
+    }
+    if (!response.ok) {
+      await response.text();
+      return undefined;
+    }
+    return parseGenericPackageVersionSnapshot(await response.json());
+  } catch {
+    return undefined;
+  }
+}
+
+export async function lookupGiteaGenericPackageVersionSnapshots(options: {
+  auth?: PythonGenericPublishAuth;
+  baseUrl: string;
+  concurrency?: number;
+  fetch: typeof globalThis.fetch;
+  files: readonly GiteaGenericPackageFile[];
+  timeoutMs: number;
+}): Promise<Map<string, GiteaGenericPackageVersionSnapshot | undefined>> {
+  const coordinates = new Map<string, GiteaGenericPackageFile>();
+  for (const file of options.files) {
+    const key = giteaGenericPackageVersionKey(file);
+    if (!coordinates.has(key)) {
+      coordinates.set(key, file);
+    }
+  }
+  const entries = await mapConcurrent(
+    [...coordinates],
+    options.concurrency ?? genericRegistryLookupConcurrency,
+    async ([key, file]) =>
+      [
+        key,
+        await fetchGiteaGenericPackageVersionSnapshot({
+          ...(options.auth ? { auth: options.auth } : {}),
+          baseUrl: options.baseUrl,
+          fetch: options.fetch,
+          file,
+          timeoutMs: options.timeoutMs,
+        }),
+      ] as const
+  );
+  return new Map(entries);
+}
+
+function genericPackageFileStatus(
+  snapshot: GiteaGenericPackageVersionSnapshot | undefined,
+  file: GiteaGenericPackageFile
+): GiteaGenericPackageFileStatus {
+  if (!snapshot) {
+    return 'unverified';
+  }
+  const remote = snapshot.get(file.filename);
+  if (!remote) {
+    return 'missing';
+  }
+  if (!remote.sha256) {
+    return 'unverified';
+  }
+  if (
+    remote.sha256 !== file.expectedSha256.toLowerCase() ||
+    (file.expectedSize !== undefined &&
+      remote.size !== undefined &&
+      remote.size !== file.expectedSize)
+  ) {
+    return 'mismatch';
+  }
+  return 'matching';
+}
+
+function genericPackageMismatchError(file: GiteaGenericPackageFile): Error {
+  return new Error(
+    `Gitea already has ${file.filename} at ${file.package}/${file.version}, but the existing generic artifact differs from the bundle`
+  );
+}
+
 function genericUrl(baseUrl: string, file: GiteaGenericPackageFile): string {
   return `${baseUrl}/api/packages/${encodeURIComponent(file.owner)}/generic/${encodeURIComponent(file.package)}/${encodeURIComponent(file.version)}/${encodeURIComponent(file.filename)}`;
 }
@@ -172,8 +325,16 @@ export async function publishGiteaGenericPackageFile(options: {
   fetch: typeof globalThis.fetch;
   file: GiteaGenericPackageFile;
   onProgress?: PythonFilePublishProgress;
+  remoteSnapshot?: GiteaGenericPackageVersionSnapshot;
   timeoutMs: number;
 }): Promise<'published' | 'skipped'> {
+  const remoteStatus = genericPackageFileStatus(options.remoteSnapshot, options.file);
+  if (remoteStatus === 'matching') {
+    return 'skipped';
+  }
+  if (remoteStatus === 'mismatch') {
+    throw genericPackageMismatchError(options.file);
+  }
   const filePath = safeFile(options.bundleDir, options.file.file);
   const digest = await sha256(filePath, options.onProgress);
   if (options.file.expectedSha256 && digest !== options.file.expectedSha256) {
@@ -208,6 +369,20 @@ export async function publishGiteaGenericPackageFile(options: {
   }
   if (response.status === 409) {
     await response.text();
+    const refreshedSnapshot = await fetchGiteaGenericPackageVersionSnapshot({
+      ...(options.auth ? { auth: options.auth } : {}),
+      baseUrl: options.baseUrl,
+      fetch: options.fetch,
+      file: options.file,
+      timeoutMs: options.timeoutMs,
+    });
+    const refreshedStatus = genericPackageFileStatus(refreshedSnapshot, options.file);
+    if (refreshedStatus === 'matching') {
+      return 'skipped';
+    }
+    if (refreshedStatus === 'mismatch') {
+      throw genericPackageMismatchError(options.file);
+    }
     if (
       await remoteMatches({
         ...(options.auth ? { auth: options.auth } : {}),
@@ -398,6 +573,18 @@ export async function publishPythonGenericArtifacts(
     );
   }
   const fileGroups = groupFilesByPackage(files);
+  const baseUrl = normalizeGiteaGenericBaseUrl(options.giteaBaseUrl);
+  const timeoutMs = options.timeoutMs ?? 300_000;
+  const remoteSnapshots =
+    dryRun || !options.auth
+      ? new Map<string, GiteaGenericPackageVersionSnapshot | undefined>()
+      : await lookupGiteaGenericPackageVersionSnapshots({
+          auth: options.auth,
+          baseUrl,
+          fetch: options.fetch ?? globalThis.fetch,
+          files,
+          timeoutMs,
+        });
   // Gitea deduplicates package blobs globally by their hashes. Concurrent uploads of
   // identical content to different packages can both try to create the blob row and
   // make PostgreSQL reject one with UQE_package_blob_md5. Keep unrelated uploads
@@ -440,6 +627,7 @@ export async function publishPythonGenericArtifacts(
                   total: files.length,
                 })
               : undefined;
+            const remoteSnapshot = remoteSnapshots.get(giteaGenericPackageVersionKey(file));
             try {
               actions[index] = {
                 file: file.file,
@@ -448,12 +636,13 @@ export async function publishPythonGenericArtifacts(
                 status: await serializeByKey(digestUploadTails, file.expectedSha256, async () =>
                   publishGiteaGenericPackageFile({
                     ...(options.auth ? { auth: options.auth } : {}),
-                    baseUrl: normalizeGiteaGenericBaseUrl(options.giteaBaseUrl),
+                    baseUrl,
                     bundleDir,
                     fetch: options.fetch ?? globalThis.fetch,
                     file,
                     ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-                    timeoutMs: options.timeoutMs ?? 300_000,
+                    ...(remoteSnapshot ? { remoteSnapshot } : {}),
+                    timeoutMs,
                   })
                 ),
                 version: file.version,

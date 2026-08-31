@@ -332,6 +332,9 @@ The offline publish step should:
 - query Gitea's compact PyPI Simple Index and skip exact version, filename, and SHA-256
   matches before uploading missing wheels through the PyPI API; a 409 triggers a
   metadata refresh and is accepted only when the existing file has the same SHA-256;
+- query compact Gitea Generic Package file metadata once per package version and skip
+  exact application-evidence and CPython files before opening or uploading local data;
+  inconclusive metadata retains full-content conflict verification;
 - preserve standard dependency metadata needed by ordinary PyPI clients;
 - optionally publish plans, audit evidence, reports, or explicitly requested runtime
   artifacts through Gitea Generic Packages.

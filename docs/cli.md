@@ -730,9 +730,10 @@ to Gitea's PyPI endpoint without requiring Python, pip, or twine. Gitea PyPI is 
 Python consumer interface. When `python.publication.publishEvidence` is explicitly
 enabled, current bundles may additionally publish plans, locks, prerequisite reports,
 and configuration templates to Gitea Generic Packages. Those objects are evidence;
-consumers must not need them to install from PyPI.
-Existing immutable generic objects are skipped only after their downloaded content
-matches the local SHA-256.
+consumers must not need them to install from PyPI. Existing immutable generic objects
+are skipped from Gitea's compact package-file metadata when the filename, size where
+recorded, and SHA-256 match. An unavailable or inconclusive metadata response retains
+the full-content verification fallback.
 
 Before provisioning Gitea owners or publishing collected wheels or Python application
 evidence, `publish` requires a fresh passing `python-security-report.json` bound to the
@@ -744,6 +745,8 @@ When `python/distributions/index.json` exists, `publish` independently uploads i
 portable CPython archives as Gitea Generic Packages. Matching remote files are skipped,
 conflicting content is an error, and no remote version is deleted. This publication is
 independent of application evidence settings and does not influence later local prune.
+Metadata is fetched once per provider build, so a repeated publish does not upload or
+download archives that Gitea already stores exactly.
 
 The same Gitea token authenticates Git, npm, PyPI, and Generic Package operations.
 Publish resolves `npmRegistry` and `python.publication`, creates missing organization

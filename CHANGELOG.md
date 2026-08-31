@@ -2,6 +2,11 @@
 
 ## 0.1.0
 
+- Made repeated Gitea Generic Package publication use one compact file-inventory
+  lookup per package version. Exact application-evidence and CPython artifacts are now
+  skipped by filename and SHA-256, plus the recorded CPython size, without local reads,
+  duplicate uploads, or remote downloads; inconclusive metadata keeps the full-content
+  safety fallback.
 - Made Git mirror downloads run a parallel non-interactive first pass and defer failed
   SSH repositories until the rest of the batch completes. Interactive terminals retry
   those repositories sequentially with live SSH prompts, while reports retain both

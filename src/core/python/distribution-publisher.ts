@@ -3,9 +3,13 @@ import { mapConcurrent, serializeByKey } from '../concurrency.js';
 import * as fs from '../fs.js';
 import { readCpythonDistributionBundleIndex } from './distribution-bundle.js';
 import {
+  giteaGenericPackageVersionKey,
+  lookupGiteaGenericPackageVersionSnapshots,
   normalizeGiteaGenericBaseUrl,
   publishGiteaGenericPackageFile,
   validateGiteaGenericCoordinate,
+  type GiteaGenericPackageFile,
+  type GiteaGenericPackageVersionSnapshot,
   type PythonGenericPublishAuth,
 } from './generic-publisher.js';
 import {
@@ -84,6 +88,43 @@ export async function publishCpythonDistributions(
   );
   let completed = 0;
   const baseUrl = normalizeGiteaGenericBaseUrl(options.giteaBaseUrl);
+  const fetch = options.fetch ?? globalThis.fetch;
+  const timeoutMs = options.timeoutMs ?? 300_000;
+  const files = new Map<string, GiteaGenericPackageFile>(
+    artifacts.map((artifact) => [
+      artifact.id,
+      {
+        expectedSha256: artifact.sha256,
+        expectedSize: artifact.size,
+        file: artifact.file,
+        filename: validateGiteaGenericCoordinate(artifact.filename, 'filename'),
+        owner,
+        package: packageName,
+        version: validateGiteaGenericCoordinate(artifact.providerBuild, 'version'),
+      },
+    ])
+  );
+  const versionCount = new Set(
+    [...files.values()].map((file) => giteaGenericPackageVersionKey(file))
+  ).size;
+  if (!dryRun && options.auth && versionCount > 0) {
+    options.onProgress?.({
+      current: 0,
+      detail: `checking ${String(versionCount)} Gitea Generic Package versions`,
+      status: 'progress',
+      total: artifacts.length,
+    });
+  }
+  const remoteSnapshots =
+    dryRun || !options.auth
+      ? new Map<string, GiteaGenericPackageVersionSnapshot | undefined>()
+      : await lookupGiteaGenericPackageVersionSnapshots({
+          auth: options.auth,
+          baseUrl,
+          fetch,
+          files: [...files.values()],
+          timeoutMs,
+        });
   // Gitea creates a package-version row on the first file upload. Concurrent
   // first uploads to the same coordinate can race on UQE_package_s, so keep
   // those uploads ordered while allowing different provider builds to proceed
@@ -111,6 +152,8 @@ export async function publishCpythonDistributions(
         };
       } else {
         const auth = options.auth;
+        const file = files.get(artifact.id)!;
+        const remoteSnapshot = remoteSnapshots.get(giteaGenericPackageVersionKey(file));
         const onFileProgress = options.onProgress
           ? createPythonFilePublishProgress({
               current: () => completed,
@@ -130,17 +173,11 @@ export async function publishCpythonDistributions(
                   auth,
                   baseUrl,
                   bundleDir,
-                  fetch: options.fetch ?? globalThis.fetch,
-                  file: {
-                    expectedSha256: artifact.sha256,
-                    file: artifact.file,
-                    filename: validateGiteaGenericCoordinate(artifact.filename, 'filename'),
-                    owner,
-                    package: packageName,
-                    version: artifact.providerBuild,
-                  },
+                  fetch,
+                  file,
                   ...(onFileProgress ? { onProgress: onFileProgress } : {}),
-                  timeoutMs: options.timeoutMs ?? 300_000,
+                  ...(remoteSnapshot ? { remoteSnapshot } : {}),
+                  timeoutMs,
                 })
             ),
           };

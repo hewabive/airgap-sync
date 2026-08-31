@@ -17,6 +17,23 @@ import {
 
 let bundleDir: string;
 let server: http.Server | undefined;
+const genericPackageVersion = '1.0.0+plan.aaaaaaaaaaaa.pub.bbbbbbbbbbbb';
+const genericVersionFilesUrl = `/api/v1/packages/python-apps/generic/demo-desktop-x64/${encodeURIComponent(genericPackageVersion)}/files`;
+const genericFilePrefix = `/api/packages/python-apps/generic/demo-desktop-x64/${encodeURIComponent(genericPackageVersion)}/`;
+
+function genericVersionMetadata(published: ReadonlyMap<string, Buffer>): {
+  name: string;
+  sha256: string;
+  size: number;
+}[] {
+  return [...published]
+    .filter(([url]) => url.startsWith(genericFilePrefix))
+    .map(([url, body]) => ({
+      name: decodeURIComponent(url.slice(genericFilePrefix.length)),
+      sha256: createHash('sha256').update(body).digest('hex'),
+      size: body.length,
+    }));
+}
 
 async function listen(handler: http.RequestListener): Promise<string> {
   server = http.createServer(handler);
@@ -167,12 +184,22 @@ describe('publishPythonGenericArtifacts', () => {
 
   it('publishes contracts idempotently with Basic authentication', async () => {
     const published = new Map<string, Buffer>();
+    const requests: { method: string | undefined; url: string }[] = [];
     const baseUrl = await listen((request, response) => {
       expect(request.headers.authorization).toBe(
         `Basic ${Buffer.from('publisher:token').toString('base64')}`
       );
+      const url = request.url ?? '';
+      requests.push({ method: request.method, url });
+      if (request.method === 'GET' && url === genericVersionFilesUrl) {
+        const metadata = genericVersionMetadata(published);
+        response
+          .writeHead(metadata.length > 0 ? 200 : 404, { 'Content-Type': 'application/json' })
+          .end(metadata.length > 0 ? JSON.stringify(metadata) : undefined);
+        return;
+      }
       if (request.method === 'GET') {
-        const content = published.get(request.url ?? '');
+        const content = published.get(url);
         response.writeHead(content ? 200 : 404).end(content);
         return;
       }
@@ -201,6 +228,9 @@ describe('publishPythonGenericArtifacts', () => {
       ...options,
       onProgress: (event) => progress.push(event),
     });
+    requests.length = 0;
+    await fs.remove(path.join(bundleDir, 'python/applications/demo--desktop-x64'));
+    await fs.remove(path.join(bundleDir, 'python/publications', 'b'.repeat(64)));
     const second = await publishPythonGenericArtifacts(options);
 
     expect(first).toMatchObject({ errors: [], published: 6, skipped: 0 });
@@ -217,6 +247,7 @@ describe('publishPythonGenericArtifacts', () => {
     expect(typeof uploadProgress?.totalBytes).toBe('number');
     expect(progress.at(-1)).toEqual({ current: 6, status: 'done', total: 6 });
     expect(second).toMatchObject({ errors: [], published: 0, skipped: 6 });
+    expect(requests).toEqual([{ method: 'GET', url: genericVersionFilesUrl }]);
     expect([...published.keys()]).toEqual(
       expect.arrayContaining([
         expect.stringContaining(

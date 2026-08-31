@@ -17,6 +17,23 @@ let server: http.Server | undefined;
 
 const content = Buffer.from('portable CPython archive');
 const filename = 'cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
+const genericVersionFilesUrl =
+  '/api/v1/packages/airgap-packages/generic/python-build-standalone/20260805/files';
+const genericFilePrefix = '/api/packages/airgap-packages/generic/python-build-standalone/20260805/';
+
+function genericVersionMetadata(published: ReadonlyMap<string, Buffer>): {
+  name: string;
+  sha256: string;
+  size: number;
+}[] {
+  return [...published]
+    .filter(([url]) => url.startsWith(genericFilePrefix))
+    .map(([url, body]) => ({
+      name: decodeURIComponent(url.slice(genericFilePrefix.length)),
+      sha256: createHash('sha256').update(body).digest('hex'),
+      size: body.length,
+    }));
+}
 
 function target(): WorkspaceCpythonDistributionsTarget {
   return {
@@ -104,11 +121,20 @@ describe('CPython distribution publication', () => {
 
   it('publishes additively and skips exact content already present in Gitea', async () => {
     const published = new Map<string, Buffer>();
+    const requests: { method: string | undefined; url: string }[] = [];
     const baseUrl = await listen((request, response) => {
       expect(request.headers.authorization).toBe(
         `Basic ${Buffer.from('publisher:token').toString('base64')}`
       );
       const url = request.url ?? '';
+      requests.push({ method: request.method, url });
+      if (request.method === 'GET' && url === genericVersionFilesUrl) {
+        const metadata = genericVersionMetadata(published);
+        response
+          .writeHead(metadata.length > 0 ? 200 : 404, { 'Content-Type': 'application/json' })
+          .end(metadata.length > 0 ? JSON.stringify(metadata) : undefined);
+        return;
+      }
       if (request.method === 'GET') {
         const existing = published.get(url);
         response.writeHead(existing ? 200 : 404).end(existing);
@@ -133,10 +159,13 @@ describe('CPython distribution publication', () => {
     };
 
     const first = await publishCpythonDistributions(options);
+    requests.length = 0;
+    await fs.remove(path.join(bundleDir, first.actions[0]!.file));
     const second = await publishCpythonDistributions(options);
 
     expect(first).toMatchObject({ errors: [], published: 1, skipped: 0 });
     expect(second).toMatchObject({ errors: [], published: 0, skipped: 1 });
+    expect(requests).toEqual([{ method: 'GET', url: genericVersionFilesUrl }]);
     expect([...published.keys()]).toEqual([
       `/api/packages/airgap-packages/generic/python-build-standalone/20260805/${encodeURIComponent(filename)}`,
     ]);
@@ -163,9 +192,13 @@ describe('CPython distribution publication', () => {
     const activeCoordinates = new Set<string>();
     const published = new Map<string, Buffer>();
     let packageRace = false;
+    let metadataRequests = 0;
     const baseUrl = await listen((request, response) => {
       const url = request.url ?? '';
       if (request.method === 'GET') {
+        if (url === genericVersionFilesUrl) {
+          metadataRequests++;
+        }
         const existing = published.get(url);
         response.writeHead(existing ? 200 : 404).end(existing);
         return;
@@ -200,8 +233,87 @@ describe('CPython distribution publication', () => {
     });
 
     expect(packageRace).toBe(false);
+    expect(metadataRequests).toBe(1);
     expect(report).toMatchObject({ errors: [], published: 2, skipped: 0 });
     expect(published.size).toBe(2);
+  });
+
+  it('rejects conflicting compact metadata without reading or uploading the local archive', async () => {
+    await fs.remove(
+      path.join(bundleDir, 'python/distributions/artifacts', candidate().sha256, filename)
+    );
+    const requests: { method: string | undefined; url: string }[] = [];
+    const baseUrl = await listen((request, response) => {
+      const url = request.url ?? '';
+      requests.push({ method: request.method, url });
+      if (request.method === 'GET' && url === genericVersionFilesUrl) {
+        response.writeHead(200, { 'Content-Type': 'application/json' }).end(
+          JSON.stringify([
+            {
+              name: filename,
+              sha256: 'ab'.repeat(32),
+              size: content.length,
+            },
+          ])
+        );
+        return;
+      }
+      response.writeHead(500).end('unexpected request');
+    });
+
+    const report = await publishCpythonDistributions({
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      owner: 'airgap-packages',
+    });
+
+    expect(report).toMatchObject({ published: 0, skipped: 0 });
+    expect(report.errors[0]?.error).toContain('existing generic artifact differs');
+    expect(requests).toEqual([{ method: 'GET', url: genericVersionFilesUrl }]);
+  });
+
+  it('refreshes compact metadata after a 409 publication race', async () => {
+    let metadataRequests = 0;
+    let downloadedExisting = false;
+    const baseUrl = await listen((request, response) => {
+      const url = request.url ?? '';
+      if (request.method === 'GET' && url === genericVersionFilesUrl) {
+        metadataRequests++;
+        if (metadataRequests === 1) {
+          response.writeHead(404).end();
+        } else {
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(
+            JSON.stringify([
+              {
+                name: filename,
+                sha256: candidate().sha256,
+                size: content.length,
+              },
+            ])
+          );
+        }
+        return;
+      }
+      if (request.method === 'PUT') {
+        request.resume();
+        request.on('end', () => response.writeHead(409).end('already exists'));
+        return;
+      }
+      downloadedExisting = true;
+      response.writeHead(200).end(content);
+    });
+
+    const report = await publishCpythonDistributions({
+      auth: { password: 'token', username: 'publisher' },
+      bundleDir,
+      giteaBaseUrl: baseUrl,
+      owner: 'airgap-packages',
+    });
+
+    expect(report).toMatchObject({ errors: [], published: 0, skipped: 1 });
+    expect(metadataRequests).toBe(2);
+    expect(downloadedExisting).toBe(false);
   });
 
   it('reports a conflict when the immutable remote coordinate has different content', async () => {

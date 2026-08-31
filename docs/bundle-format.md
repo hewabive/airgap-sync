@@ -273,7 +273,9 @@ targets. `fetch-report.json` records selection and acquisition results;
 Closed-side publication uses additive Gitea Generic Package coordinates
 `python-build-standalone/<provider-build>/<filename>`. Exact remote content is skipped,
 conflicting content is rejected, and remote objects are never deleted. Publication
-state is not an input to later collection or pruning.
+state is not an input to later collection or pruning. Repeated publication compares the
+index against Gitea's package-file SHA-256 metadata once per provider build; full remote
+content is fetched only as a compatibility fallback when metadata is inconclusive.
 
 ## python/publications/\<publication-id\>/publication-manifest.json
 
