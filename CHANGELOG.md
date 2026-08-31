@@ -2,6 +2,9 @@
 
 ## 0.1.0
 
+- Added elapsed-time breakdowns for the high-level download and publish commands. The
+  summaries attribute time to concrete progress phases, aggregate repeated fixed-point
+  iterations, retain preparation/finalization time, and keep JSON stdout machine-readable.
 - Made repeated Gitea Generic Package publication use one compact file-inventory
   lookup per package version. Exact application-evidence and CPython artifacts are now
   skipped by filename and SHA-256, plus the recorded CPython size, without local reads,

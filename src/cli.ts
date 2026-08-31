@@ -175,18 +175,18 @@ import type {
 } from './index.js';
 import { validatePythonIndexUrl } from './menu/python-settings.js';
 import { validateDownloadInvocation } from './cli-validation.js';
-import { formatElapsedTime } from './cli-timing.js';
+import { ElapsedTimeTracker, formatElapsedTimeSummary } from './cli-timing.js';
 
 const defaultDistTagConcurrency = 4;
 const defaultPublishConcurrency = 4;
 const defaultPythonSourceIndex = 'https://pypi.org/simple/';
 
-function printTotalElapsedTime(startedAt: number, jsonOutput: boolean): void {
-  const line = `Total elapsed time: ${formatElapsedTime(performance.now() - startedAt)}`;
+function printElapsedTimeSummary(timing: ElapsedTimeTracker, jsonOutput: boolean): void {
+  const output = formatElapsedTimeSummary(timing.summary());
   if (jsonOutput) {
-    console.error(line);
+    console.error(output);
   } else {
-    console.log(line);
+    console.log(output);
   }
 }
 
@@ -2100,6 +2100,58 @@ function createPublishProgressLogger(): (event: PublishProgressEvent) => void {
         event.total
       )} ${event.status}${subject}`
     );
+  };
+}
+
+function timingStageLabel(label: string): string {
+  return `${label.slice(0, 1).toUpperCase()}${label.slice(1)}`;
+}
+
+function createTimedDownloadProgressLogger(
+  timing: ElapsedTimeTracker
+): (event: DownloadProgressEvent) => void {
+  const logger = createCollectProgressLogger();
+  const parentPhases: DownloadProgressEvent['phase'][] = [];
+  let activePhase: DownloadProgressEvent['phase'] | undefined;
+
+  return (event) => {
+    if (event.status === 'start') {
+      if (activePhase !== undefined && activePhase !== event.phase) {
+        parentPhases.push(activePhase);
+      }
+      activePhase = event.phase;
+      timing.switchTo(timingStageLabel(collectPhaseLabels[event.phase]));
+    } else if (event.status === 'done' && activePhase === event.phase) {
+      activePhase = parentPhases.pop();
+      if (activePhase !== undefined) {
+        timing.switchTo(timingStageLabel(collectPhaseLabels[activePhase]));
+      }
+    }
+    logger(event);
+  };
+}
+
+function createTimedApplyProgressLogger(
+  timing: ElapsedTimeTracker
+): (event: ApplyProgressEvent) => void {
+  const logger = createApplyProgressLogger();
+  return (event) => {
+    if (event.status === 'start') {
+      timing.switchTo(timingStageLabel(applyPhaseLabels[event.phase]));
+    }
+    logger(event);
+  };
+}
+
+function createTimedPublishProgressLogger(
+  timing: ElapsedTimeTracker
+): (event: PublishProgressEvent) => void {
+  const logger = createPublishProgressLogger();
+  return (event) => {
+    if (event.status === 'start') {
+      timing.switchTo(`NPM: ${publishPhaseLabels[event.phase]}`);
+    }
+    logger(event);
   };
 }
 
@@ -4554,7 +4606,7 @@ program
   .option('--prune', 'Remove stale npm, Python, and Git objects after a successful download')
   .option('--json', 'Print the full JSON report instead of the concise summary')
   .action(async (root: string | undefined, options: CollectOptions) => {
-    const startedAt = performance.now();
+    const timing = new ElapsedTimeTracker('Preparation');
     try {
       validateDownloadInvocation(root, options.target);
       if (!root) {
@@ -4594,6 +4646,7 @@ program
         const cpythonTargets = activeConfig.targets.filter(
           (target) => target.type === 'cpython-distributions'
         );
+        timing.switchTo('Plan Python applications');
         const pythonApplicationPreflight = await ensureWorkspacePythonApplicationPlans({
           config,
           onPlanRequired: (requirements) => {
@@ -4628,6 +4681,7 @@ program
           ...(targetSelection ? { targetIndexes: targetSelection.selectedIndexes } : {}),
           workspaceDir,
         });
+        timing.switchTo('Preparation');
         const pythonApplicationPlans = pythonApplicationPreflight.targets.map(
           ({ activePlan, selectionId, targetId }) => ({ activePlan, selectionId, targetId })
         );
@@ -4679,7 +4733,7 @@ program
           targetSelection && (await fileExists(path.join(outputDir, 'git-sources.json')))
             ? (await readGitSourcesManifest(outputDir)).sources
             : undefined;
-        const onDownloadProgress = createCollectProgressLogger();
+        const onDownloadProgress = createTimedDownloadProgressLogger(timing);
         const report = await collectBundle({
           dryRun: options.dryRun === true,
           concurrency: options.concurrency,
@@ -4752,6 +4806,7 @@ program
           (targetSelection === undefined &&
             (await fileExists(path.join(outputDir, cpythonDistributionIndexPath))))
         ) {
+          timing.switchTo('Download CPython distributions');
           report.cpythonDistributions = await downloadCpythonDistributionBundle({
             bundleDir: outputDir,
             concurrency: options.concurrency,
@@ -4774,6 +4829,7 @@ program
             targets: cpythonTargets,
           });
         }
+        timing.switchTo('Finalize download');
         const securityDeltas =
           options.dryRun === true
             ? {}
@@ -4796,8 +4852,12 @@ program
           await writeWorkspaceSnapshot(outputDir, workspaceSnapshot);
         }
 
-        const pruneReport =
-          prune && options.dryRun !== true ? await pruneAfterSuccessfulDownload(report) : undefined;
+        let pruneReport: BundlePruneReport | undefined;
+        if (prune && options.dryRun !== true) {
+          timing.switchTo('Prune bundle');
+          pruneReport = await pruneAfterSuccessfulDownload(report);
+          timing.switchTo('Finalize download');
+        }
         if (pruneReport?.errors.length === 0) {
           const removedPlans = await pruneInactivePythonApplicationPlans(
             workspaceDir,
@@ -4882,7 +4942,7 @@ program
         ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
         tagResolutionPolicy: options.tagResolutionPolicy ?? 'reuse-stable',
         ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
-        onProgress: createCollectProgressLogger(),
+        onProgress: createTimedDownloadProgressLogger(timing),
         outputDir,
         registry,
         registryUrl,
@@ -4894,14 +4954,17 @@ program
         },
         root,
       });
+      timing.switchTo('Finalize download');
       const securityDeltas =
         options.dryRun === true
           ? {}
           : await createDownloadSecurityDeltas(outputDir, report, beforeState);
-      const pruneReport =
-        options.prune === true && options.dryRun !== true
-          ? await pruneAfterSuccessfulDownload(report)
-          : undefined;
+      let pruneReport: BundlePruneReport | undefined;
+      if (options.prune === true && options.dryRun !== true) {
+        timing.switchTo('Prune bundle');
+        pruneReport = await pruneAfterSuccessfulDownload(report);
+        timing.switchTo('Finalize download');
+      }
       if (beforeState) {
         await writeDownloadRunHistory({
           before: beforeState,
@@ -4940,7 +5003,7 @@ program
       }
       process.exitCode = 1;
     } finally {
-      printTotalElapsedTime(startedAt, options.json === true);
+      printElapsedTimeSummary(timing, options.json === true);
     }
   });
 
@@ -5640,7 +5703,7 @@ addNpmPublishOptions(
   .option('--dry-run', 'Print planned publish operations without publishing or pushing')
   .option('--json', 'Print full publish report as JSON')
   .action(async (bundle: string | undefined, options: ApplyOptions) => {
-    const startedAt = performance.now();
+    const timing = new ElapsedTimeTracker('Preparation');
     try {
       const resolved = await resolvePublishWorkspaceDefaults({
         bundle,
@@ -5695,6 +5758,7 @@ addNpmPublishOptions(
         needsAuthenticatedGitOwner ||
         needsAuthenticatedNpmOwner ||
         needsAuthenticatedPythonOwner;
+      timing.switchTo('Authenticate with Gitea');
       const token = requiresGiteaToken
         ? await requireGiteaToken({
             cliToken: options.giteaToken,
@@ -5722,6 +5786,7 @@ addNpmPublishOptions(
       const login = httpClient && token ? await httpClient.currentUserLogin() : undefined;
       const gitAuth =
         providedGitAuth ?? (login && token ? { password: token, username: login } : undefined);
+      timing.switchTo('Preparation');
       const report = await applyBundle({
         bundleDir: resolved.bundle,
         configureGitGlobal,
@@ -5750,8 +5815,8 @@ addNpmPublishOptions(
         giteaClient: client,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
         npmRegistryTarget: resolved.npmRegistryTarget,
-        onPublishProgress: createPublishProgressLogger(),
-        onProgress: createApplyProgressLogger(),
+        onPublishProgress: createTimedPublishProgressLogger(timing),
+        onProgress: createTimedApplyProgressLogger(timing),
         private: !publicRepositories,
         ...(login && token ? { pythonAuth: { password: token, username: login } } : {}),
         ...(resolved.npmRegistryTarget.type === 'gitea' && token
@@ -5763,6 +5828,7 @@ addNpmPublishOptions(
         skipExisting: options.skipExisting !== false,
         skipGitProvision,
       });
+      timing.switchTo('Finalize publish');
       await writePublishRunHistory({
         bundleDir: path.resolve(resolved.bundle),
         report,
@@ -5781,7 +5847,7 @@ addNpmPublishOptions(
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
     } finally {
-      printTotalElapsedTime(startedAt, options.json === true);
+      printElapsedTimeSummary(timing, options.json === true);
     }
   });
 
