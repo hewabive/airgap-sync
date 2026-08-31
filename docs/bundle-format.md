@@ -270,6 +270,12 @@ verified. Partial target downloads merge their selected references with unselect
 targets. `fetch-report.json` records selection and acquisition results;
 `publish-report.json` records the latest closed-side publication attempt.
 
+Incremental `download` uses the same verified-object cache contract as Python
+application artifacts. A CPython artifact recorded by the active index is reused after
+an exact identity, path, source URL, SHA-256, and current-size match without reading its
+contents again. New and unindexed files are fully SHA-256 checked before reuse, while
+the explicit `verify` workflow always rehashes every indexed distribution.
+
 Closed-side publication uses additive Gitea Generic Package coordinates
 `python-build-standalone/<provider-build>/<filename>`. Exact remote content is skipped,
 conflicting content is rejected, and remote objects are never deleted. Publication

@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { semanticDigest } from '../canonical-json.js';
 import { mapConcurrent } from '../concurrency.js';
 import * as fs from '../fs.js';
+import { hashArtifactFile, inspectIndexedArtifactFile } from '../indexed-artifact.js';
 import {
   downloadResumableHttpFile,
   type ResumableDownloadRetryEvent,
@@ -239,21 +239,6 @@ function wheelArtifactFile(wheel: PythonPlanWheel): string {
   return path.posix.join(pythonWheelArtifactsDirectory, wheel.sha256, safeFilename(wheel.filename));
 }
 
-async function hashFile(
-  filePath: string,
-  onProgress?: (bytes: number) => void
-): Promise<{ sha256: string; size: number }> {
-  const hash = createHash('sha256');
-  let size = 0;
-  for await (const chunk of fs.createReadStream(filePath)) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
-    hash.update(buffer);
-    size += buffer.byteLength;
-    onProgress?.(size);
-  }
-  return { sha256: hash.digest('hex'), size };
-}
-
 async function downloadArtifact(
   artifact: PlannedArtifact['artifact'],
   targetPath: string,
@@ -272,7 +257,7 @@ async function downloadArtifact(
     throw new Error('Python application artifact URLs must not contain credentials');
   }
   const validateFile = async (filePath: string): Promise<void> => {
-    const actual = await hashFile(filePath);
+    const actual = await hashArtifactFile(filePath);
     if (actual.sha256 !== artifact.sha256) {
       throw new Error(`SHA-256 mismatch: expected ${artifact.sha256}, received ${actual.sha256}`);
     }
@@ -828,20 +813,16 @@ export async function downloadPythonApplicationPlans(
           indexed.sourceUrl === planned.artifact.sourceUrl &&
           (planned.artifact.expectedSize === undefined ||
             indexed.size === planned.artifact.expectedSize);
-        const indexedStat =
-          indexedMatch && (await fs.pathExists(targetPath)) ? await fs.stat(targetPath) : undefined;
-        const existing =
-          indexed && indexedStat?.size === indexed.size
-            ? { sha256: indexed.sha256, size: indexed.size }
-            : (await fs.pathExists(targetPath))
-              ? await hashFile(targetPath, (bytes) => {
-                  reportBytes(
-                    `verify ${planned.artifact.filename}`,
-                    bytes,
-                    planned.artifact.expectedSize
-                  );
-                })
-              : undefined;
+        const existing = await inspectIndexedArtifactFile(targetPath, {
+          ...(indexedMatch ? { indexed: { sha256: indexed.sha256, size: indexed.size } } : {}),
+          onHashProgress: (bytes) => {
+            reportBytes(
+              `verify ${planned.artifact.filename}`,
+              bytes,
+              planned.artifact.expectedSize
+            );
+          },
+        });
         const matches =
           existing?.sha256 === planned.artifact.sha256 &&
           (planned.artifact.expectedSize === undefined ||
@@ -1252,7 +1233,7 @@ export async function verifyPythonApplicationBundle(
     }
     try {
       const artifactPath = path.join(resolvedBundleDir, artifact.file);
-      const actual = await hashFile(artifactPath);
+      const actual = await hashArtifactFile(artifactPath);
       if (actual.sha256 !== artifact.sha256) {
         errors.push(`Python application artifact SHA-256 mismatch: ${artifact.file}`);
       }

@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { mapConcurrent } from '../concurrency.js';
 import * as fs from '../fs.js';
+import { hashArtifactFile, inspectIndexedArtifactFile } from '../indexed-artifact.js';
 import {
   downloadResumableHttpFile,
   type ResumableDownloadRetryEvent,
@@ -100,14 +100,6 @@ function safeBundleFile(bundleDir: string, relativeFile: string): string {
     throw new Error(`Unsafe CPython distribution bundle path: ${relativeFile}`);
   }
   return path.join(bundleDir, relativeFile);
-}
-
-async function hashFile(file: string): Promise<string> {
-  const hash = createHash('sha256');
-  for await (const chunk of fs.createReadStream(file)) {
-    hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
-  }
-  return hash.digest('hex');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -294,26 +286,20 @@ function mergePartialIndex(
 async function existingArtifactIsReusable(
   bundleDir: string,
   artifact: CpythonDistributionBundleArtifact,
-  current: CpythonDistributionBundleIndex | undefined
+  indexedArtifacts: ReadonlyMap<string, CpythonDistributionBundleArtifact>
 ): Promise<boolean> {
-  const recorded = current?.artifacts.find(
-    (candidate) =>
-      candidate.id === artifact.id &&
-      candidate.file === artifact.file &&
-      candidate.sha256 === artifact.sha256 &&
-      candidate.size === artifact.size &&
-      candidate.sourceUrl === artifact.sourceUrl
+  const recorded = indexedArtifacts.get(artifact.id);
+  const indexedMatch =
+    recorded?.file === artifact.file &&
+    recorded.filename === artifact.filename &&
+    recorded.sha256 === artifact.sha256 &&
+    recorded.size === artifact.size &&
+    recorded.sourceUrl === artifact.sourceUrl;
+  const existing = await inspectIndexedArtifactFile(
+    safeBundleFile(bundleDir, artifact.file),
+    indexedMatch ? { indexed: { sha256: recorded.sha256, size: recorded.size } } : {}
   );
-  if (!recorded) return false;
-  try {
-    const file = safeBundleFile(bundleDir, artifact.file);
-    return (
-      (await fs.stat(file)).size === artifact.size && (await hashFile(file)) === artifact.sha256
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw error;
-  }
+  return existing?.size === artifact.size && existing.sha256 === artifact.sha256;
 }
 
 async function downloadArtifact(
@@ -353,9 +339,11 @@ async function downloadArtifact(
       targetPath,
       url: new URL(artifact.sourceUrl),
       validateFile: async (file) => {
-        const digest = await hashFile(file);
-        if (digest !== artifact.sha256) {
-          throw new Error(`SHA-256 mismatch: expected ${artifact.sha256}, received ${digest}`);
+        const actual = await hashArtifactFile(file);
+        if (actual.sha256 !== artifact.sha256) {
+          throw new Error(
+            `SHA-256 mismatch: expected ${artifact.sha256}, received ${actual.sha256}`
+          );
         }
       },
     });
@@ -399,6 +387,9 @@ export async function downloadCpythonDistributionBundle(
     targets: options.targets,
   });
   const current = await readCpythonDistributionBundleIndex(options.bundleDir);
+  const indexedArtifacts = new Map(
+    (current?.artifacts ?? []).map((artifact) => [artifact.id, artifact])
+  );
   const artifacts = selection.artifacts.map<CpythonDistributionBundleArtifact>((artifact) => ({
     ...artifact,
     file: artifactFile(artifact),
@@ -407,7 +398,7 @@ export async function downloadCpythonDistributionBundle(
     artifacts,
     Math.max(1, options.concurrency ?? 4),
     async (artifact): Promise<CpythonDistributionDownloadAction> => {
-      if (await existingArtifactIsReusable(options.bundleDir, artifact, current)) {
+      if (await existingArtifactIsReusable(options.bundleDir, artifact, indexedArtifacts)) {
         return {
           file: artifact.file,
           id: artifact.id,
@@ -483,7 +474,7 @@ export async function verifyCpythonDistributionBundle(bundleDir: string): Promis
       errors.push(`CPython distribution size mismatch: ${artifact.file}`);
       continue;
     }
-    if ((await hashFile(file)) !== artifact.sha256) {
+    if ((await hashArtifactFile(file)).sha256 !== artifact.sha256) {
       errors.push(`CPython distribution SHA-256 mismatch: ${artifact.file}`);
     }
   }

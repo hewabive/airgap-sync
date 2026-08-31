@@ -89,18 +89,22 @@ describe('CPython distribution bundle', () => {
     expect(fetches).toBe(1);
   });
 
-  it('detects same-size artifact corruption', async () => {
+  it('uses the active index for incremental checks and leaves full hashing to verify', async () => {
     const content = Buffer.from('portable-cpython-distribution');
     const artifact = candidate(content);
+    let fetches = 0;
+    const fetch: typeof globalThis.fetch = () => {
+      fetches++;
+      return Promise.resolve(
+        new Response(content, {
+          headers: { 'content-length': String(content.length) },
+        })
+      );
+    };
     await downloadCpythonDistributionBundle({
       bundleDir,
       candidates: [artifact],
-      fetch: () =>
-        Promise.resolve(
-          new Response(content, {
-            headers: { 'content-length': String(content.length) },
-          })
-        ),
+      fetch,
       generatedAt: '2026-08-06T00:00:00.000Z',
       targets: [target()],
     });
@@ -111,8 +115,46 @@ describe('CPython distribution bundle', () => {
     const file = path.join(bundleDir, indexedArtifact?.file ?? 'missing');
     await fs.writeFile(file, Buffer.alloc(content.length, 1));
 
+    const repeated = await downloadCpythonDistributionBundle({
+      bundleDir,
+      candidates: [artifact],
+      fetch,
+      generatedAt: '2026-08-07T00:00:00.000Z',
+      targets: [target()],
+    });
+
+    expect(repeated).toMatchObject({ downloaded: 0, errors: [], selected: 1, skipped: 1 });
+    expect(fetches).toBe(1);
     await expect(verifyCpythonDistributionBundle(bundleDir)).resolves.toEqual([
       expect.stringContaining('SHA-256 mismatch'),
     ]);
+  });
+
+  it('hashes and reuses a valid unindexed artifact without reporting a download', async () => {
+    const content = Buffer.from('portable-cpython-distribution');
+    const artifact = candidate(content);
+    const relativeFile = `python/distributions/artifacts/${artifact.sha256}/${artifact.filename}`;
+    const file = path.join(bundleDir, relativeFile);
+    await fs.ensureDir(path.dirname(file));
+    await fs.writeFile(file, content);
+    let fetches = 0;
+
+    const report = await downloadCpythonDistributionBundle({
+      bundleDir,
+      candidates: [artifact],
+      fetch: () => {
+        fetches++;
+        return Promise.resolve(new Response(content));
+      },
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      targets: [target()],
+    });
+
+    expect(report).toMatchObject({ downloaded: 0, errors: [], selected: 1, skipped: 1 });
+    expect(report.actions).toEqual([
+      expect.objectContaining({ file: relativeFile, status: 'skipped' }),
+    ]);
+    expect(fetches).toBe(0);
+    expect((await readCpythonDistributionBundleIndex(bundleDir))?.artifacts).toHaveLength(1);
   });
 });
