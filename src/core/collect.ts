@@ -22,6 +22,7 @@ import type { NpmAdvisoryClient } from './security.js';
 import {
   createBundleDocuments,
   createFetchReport,
+  mergeBundleDocuments,
   writeBundleDocuments,
   writeCollectReport,
   writeFetchReport,
@@ -68,6 +69,8 @@ export interface CollectBundleOptions {
   minReleaseAgeDays?: number;
   onProgress?: (event: CollectProgressEvent) => void;
   outputDir: string;
+  /** Merge the new npm graph with the active bundle instead of replacing it. */
+  partial?: boolean;
   rangeResolutionPolicy?: RangeResolutionPolicy;
   registry: RegistryClient;
   registryUrl: string;
@@ -113,6 +116,25 @@ interface RequirementState {
   gitRequirements: GitRequirement[];
   requirements: RootPackageRequirement[];
   unsupported: UnsupportedRootPackageRequirement[];
+}
+
+async function readRetainedBundleDocuments(
+  outputDir: string
+): Promise<ReturnType<typeof createBundleDocuments> | undefined> {
+  const manifestPath = path.join(outputDir, 'seed-manifest.json');
+  const distTagsPath = path.join(outputDir, 'dist-tags.json');
+  const [hasManifest, hasDistTags] = await Promise.all([
+    fs.pathExists(manifestPath),
+    fs.pathExists(distTagsPath),
+  ]);
+  if (!hasManifest && !hasDistTags) return undefined;
+  if (!hasManifest || !hasDistTags) {
+    throw new Error('Cannot preserve the active npm graph: bundle documents are incomplete');
+  }
+  return {
+    distTagsManifest: await fs.readJson(distTagsPath),
+    manifest: await fs.readJson(manifestPath),
+  };
 }
 
 function createCollectTimings(): CollectTimings {
@@ -397,6 +419,9 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const root = options.root ? path.resolve(options.root) : undefined;
   const outputDir = path.resolve(options.outputDir);
+  const retainedBundleDocuments = options.partial
+    ? await readRetainedBundleDocuments(outputDir)
+    : undefined;
   const dryRun = options.dryRun === true;
   const includeDev = options.includeDev === true;
   const includePeer = options.includePeer === true;
@@ -787,13 +812,17 @@ export async function collectBundle(options: CollectBundleOptions): Promise<Coll
         phase: 'bundle-write',
         status: 'start',
       });
-      const documents = createBundleDocuments({
-        outputDir,
-        resolved: resolution.resolved,
-        sourceRegistry: options.registryUrl,
-        latestPolicy: options.latestPolicy ?? 'bundled',
-        tagRequirements: resolution.tagRequirements,
-      });
+      const documents = mergeBundleDocuments(
+        createBundleDocuments({
+          createdAt: generatedAt,
+          outputDir,
+          resolved: resolution.resolved,
+          sourceRegistry: options.registryUrl,
+          latestPolicy: options.latestPolicy ?? 'bundled',
+          tagRequirements: resolution.tagRequirements,
+        }),
+        retainedBundleDocuments
+      );
       if (options.security) {
         options.onProgress?.({ phase: 'security-scan', status: 'start' });
         const security = await scanNpmBundleSecurity({

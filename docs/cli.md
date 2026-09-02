@@ -78,6 +78,8 @@ airgap-sync target edit <index> \
   --from-minor 3.11 \
   --platform windows-x86_64 --platform linux-glibc-x86_64 \
   --latest 2 --window-days 30
+airgap-sync target pause <index>
+airgap-sync target resume <index>
 airgap-sync target remove 1
 ```
 
@@ -86,6 +88,16 @@ Targets are stored in `airgap-sync.json`. Git targets are fetched as bare mirror
 package specs. Git projects that pin pnpm through `packageManager` or
 `devEngines.packageManager` automatically contribute `pnpm` and `@pnpm/exe` bootstrap
 requirements; no separate npm target is needed.
+
+`target pause` is available for every target type. It records `paused: true` in the
+workspace and `target list` marks the entry as `[paused]`. Normal and explicitly
+selected downloads skip that target without refreshing its upstream data. If it has
+already been downloaded, its active dependency closure remains referenced and safe
+from pruning; pausing a new target does not materialize it. `target resume` removes the
+flag so the next applicable download refreshes it normally.
+Retention is conservative for shared npm and Git graphs: while any target is paused,
+some previously active objects belonging to other roots may also remain. A successful
+full download after all targets are resumed makes the bundle exactly prunable again.
 
 `python-app` is the normal Python target. By default it inherits both coverage and the
 Python runtime matrix from `python.applicationDefaults`. `--coverage` references a named
@@ -291,17 +303,20 @@ own ordinary Python application.
 
 Every download prints the last successful full-download watermark. If it is older than
 a selected CPython build window, interactive use offers to stop and non-interactive use
-requires `--allow-window-gap`. Failed, dry-run, and `--target` downloads do not advance
-the watermark.
+requires `--allow-window-gap`. Failed, dry-run, `--target`, and paused-target downloads
+do not advance the watermark.
 
 Use `--target <index>` in workspace mode to download only selected targets from
 `airgap-sync target list`. The option is repeatable. Partial downloads still reuse and
-extend the same bundle. Previously active Git sources that are not part of the selected
-download remain in `git-sources.json`, and `workspace-snapshot.json` continues to
-record the complete configured target list. Newly configured unselected targets are
-not materialized until they are selected or a full download is run. Pruning is skipped
-even when `--prune` or a prune default is enabled, because other targets may still
-depend on existing bundle objects.
+extend the same bundle. Previously active npm documents, Git sources, Python
+application entries, and CPython distribution entries that are not part of the
+selected download remain active, and `workspace-snapshot.json` continues to record the
+complete configured target list. Newly configured unselected targets are not
+materialized until they are selected or a full download is run. Pruning is skipped even
+when `--prune` or a prune default is enabled, because other targets may still depend on
+existing bundle objects. Paused targets use the same preservation behavior during a
+full download; unlike `--target`, they do not disable pruning because their objects
+remain referenced by the merged bundle documents.
 
 Failed downloads write diagnostic reports but do not replace the active
 `git-sources.json` or `workspace-snapshot.json`. Those files are activated only after

@@ -4,6 +4,7 @@ export const packageVersion = '0.1.0';
 export {
   createBundleDocuments,
   createFetchReport,
+  mergeBundleDocuments,
   readBundleManifest,
   readDistTagsManifest,
   readFetchReport,
@@ -312,6 +313,7 @@ export {
   resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
+  setWorkspaceTargetPaused,
   workspaceConfigFileName,
   workspaceConfigPath,
   workspaceConfigPythonPublicationBackupFileName,
@@ -454,6 +456,7 @@ export type {
   WorkspaceTarget,
   WorkspaceTargetEdit,
   WorkspaceTargetEditableField,
+  WorkspaceTargetState,
   WorkspaceTargetSnapshot,
   SelectWorkspaceTargetsResult,
 } from './core/workspace.js';

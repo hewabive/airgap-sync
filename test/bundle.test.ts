@@ -3,6 +3,7 @@ import {
   createBundleDocuments,
   createFetchReport,
   dependencySpecsFromManifest,
+  mergeBundleDocuments,
   packageFileName,
 } from '../src/index.js';
 import type { PackageManifest, ResolvedRootPackage } from '../src/types.js';
@@ -187,6 +188,78 @@ describe('createBundleDocuments', () => {
         requiredBy: 'root',
         tag: 'latest',
         version: '1.2.3',
+      },
+    ]);
+  });
+});
+
+describe('mergeBundleDocuments', () => {
+  it('retains the previous graph while current packages and tag mappings win', () => {
+    const retained = createBundleDocuments({
+      createdAt: '2026-05-20T00:00:00.000Z',
+      outputDir: './airgap-bundle',
+      resolved: [
+        resolvedPackage,
+        {
+          ...resolvedPackage,
+          name: 'retained-dependency',
+          raw: 'retained-dependency@^1.0.0',
+          requiredBy: '@scope/demo@1.2.3',
+          resolvedVia: 'range',
+          specifier: '^1.0.0',
+          type: 'range',
+          version: '1.0.0',
+        },
+      ],
+      sourceRegistry: 'https://registry.example',
+      tagRequirements: [
+        {
+          name: '@scope/demo',
+          requiredBy: 'root',
+          tag: 'latest',
+          version: '1.2.3',
+        },
+      ],
+    });
+    const current = createBundleDocuments({
+      createdAt: '2026-05-21T00:00:00.000Z',
+      outputDir: './airgap-bundle',
+      resolved: [
+        {
+          ...resolvedPackage,
+          raw: '@scope/demo@next',
+          specifier: 'next',
+          version: '2.0.0',
+        },
+      ],
+      sourceRegistry: 'https://registry.example',
+      tagRequirements: [
+        {
+          name: '@scope/demo',
+          requiredBy: 'root',
+          tag: 'latest',
+          version: '2.0.0',
+        },
+      ],
+    });
+
+    const merged = mergeBundleDocuments(current, retained);
+
+    expect(merged.manifest.createdAt).toBe('2026-05-21T00:00:00.000Z');
+    expect(merged.manifest.packages.map(({ name, version }) => `${name}@${version}`)).toEqual([
+      '@scope/demo@1.2.3',
+      '@scope/demo@2.0.0',
+      'retained-dependency@1.0.0',
+    ]);
+    expect(merged.distTagsManifest.tags).toEqual({
+      '@scope/demo': { latest: '2.0.0' },
+    });
+    expect(merged.distTagsManifest.requirements).toEqual([
+      {
+        name: '@scope/demo',
+        requiredBy: 'root',
+        tag: 'latest',
+        version: '2.0.0',
       },
     ]);
   });

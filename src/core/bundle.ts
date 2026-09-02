@@ -42,6 +42,18 @@ export interface BundleDocuments {
   manifest: BundleManifest;
 }
 
+function packageIdentity(value: { name: string; version: string }): string {
+  return `${value.name}\0${value.version}`;
+}
+
+function resolutionReasonIdentity(value: ResolvedPackage['resolvedFrom'][number]): string {
+  return [value.requiredBy, value.raw, value.specifier, value.type].join('\0');
+}
+
+function tagRequirementIdentity(value: TagRequirement): string {
+  return [value.name, value.tag, value.version, value.requiredBy].join('\0');
+}
+
 export interface FetchReportOptions {
   downloaded: number;
   downloadedPackages?: FetchPackageAction[];
@@ -117,6 +129,84 @@ export function createBundleDocuments(options: BundleDocumentsOptions): BundleDo
       sourceRegistry: options.sourceRegistry,
       tags,
       requirements: tagRequirements,
+    },
+  };
+}
+
+/**
+ * Preserve the previously active npm graph while replacing everything refreshed by the
+ * current collection. This is used by partial and paused-target downloads so pruning can
+ * continue to rely on the active bundle documents. Retention is deliberately conservative
+ * because legacy manifests do not carry complete per-target ownership.
+ */
+export function mergeBundleDocuments(
+  current: BundleDocuments,
+  retained: BundleDocuments | undefined
+): BundleDocuments {
+  if (!retained) return current;
+
+  const packages = new Map(
+    retained.manifest.packages.map((pkg) => [packageIdentity(pkg), pkg] as const)
+  );
+  for (const pkg of current.manifest.packages) {
+    const previous = packages.get(packageIdentity(pkg));
+    if (!previous) {
+      packages.set(packageIdentity(pkg), pkg);
+      continue;
+    }
+    const reasons = new Map(
+      [...previous.resolvedFrom, ...pkg.resolvedFrom].map((reason) => [
+        resolutionReasonIdentity(reason),
+        reason,
+      ])
+    );
+    packages.set(packageIdentity(pkg), {
+      ...pkg,
+      resolvedFrom: [...reasons.values()].sort((left, right) =>
+        resolutionReasonIdentity(left).localeCompare(resolutionReasonIdentity(right))
+      ),
+    });
+  }
+  const mergedPackages = [...packages.values()].sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) || left.version.localeCompare(right.version)
+  );
+
+  const tags: DistTagsManifest['tags'] = {};
+  for (const [name, packageTags] of Object.entries(retained.distTagsManifest.tags)) {
+    tags[name] = { ...packageTags };
+  }
+  for (const [name, packageTags] of Object.entries(current.distTagsManifest.tags)) {
+    tags[name] = { ...(tags[name] ?? {}), ...packageTags };
+  }
+  const requirements = new Map<string, TagRequirement>();
+  for (const requirement of [
+    ...retained.distTagsManifest.requirements,
+    ...current.distTagsManifest.requirements,
+  ]) {
+    if (tags[requirement.name]?.[requirement.tag] === requirement.version) {
+      requirements.set(tagRequirementIdentity(requirement), requirement);
+    }
+  }
+
+  return {
+    distTagsManifest: {
+      schemaVersion: 1,
+      createdAt: current.distTagsManifest.createdAt,
+      sourceRegistry: current.distTagsManifest.sourceRegistry,
+      tags,
+      requirements: [...requirements.values()].sort((left, right) =>
+        tagRequirementIdentity(left).localeCompare(tagRequirementIdentity(right))
+      ),
+    },
+    manifest: {
+      schemaVersion:
+        mergedPackages.length === 0 || mergedPackages.every((pkg) => pkg.sha256 !== undefined)
+          ? 2
+          : 1,
+      createdAt: current.manifest.createdAt,
+      sourceRegistry: current.manifest.sourceRegistry,
+      packages: mergedPackages,
     },
   };
 }

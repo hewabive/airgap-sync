@@ -59,18 +59,22 @@ const defaultWorkspacePythonApplicationArtifactOwner = 'python-apps';
 const defaultWorkspacePythonPublishOwner = 'pypi';
 export const workspacePythonPlannerVersion = '0.11.16';
 
-export interface WorkspaceGitTarget {
+export interface WorkspaceTargetState {
+  paused?: boolean;
+}
+
+export interface WorkspaceGitTarget extends WorkspaceTargetState {
   branch?: string;
   type: 'git';
   url: string;
 }
 
-export interface WorkspaceNpmTarget {
+export interface WorkspaceNpmTarget extends WorkspaceTargetState {
   spec: string;
   type: 'npm';
 }
 
-export interface WorkspaceCpythonDistributionsTarget {
+export interface WorkspaceCpythonDistributionsTarget extends WorkspaceTargetState {
   builds: {
     windowDays: number;
   };
@@ -87,7 +91,7 @@ export interface WorkspaceCpythonDistributionsTarget {
   type: 'cpython-distributions';
 }
 
-export interface WorkspacePythonApplicationTarget {
+export interface WorkspacePythonApplicationTarget extends WorkspaceTargetState {
   application: {
     extras: string[];
     features: Record<string, string>;
@@ -198,7 +202,7 @@ export interface WorkspaceSecrets {
   schemaVersion: 1;
 }
 
-interface WorkspaceGitTargetSnapshot {
+interface WorkspaceGitTargetSnapshot extends WorkspaceTargetState {
   branch?: string;
   localMirrorPath: string;
   sourceId: string;
@@ -206,7 +210,7 @@ interface WorkspaceGitTargetSnapshot {
   url: string;
 }
 
-interface WorkspaceNpmTargetSnapshot {
+interface WorkspaceNpmTargetSnapshot extends WorkspaceTargetState {
   spec: string;
   type: 'npm';
 }
@@ -510,10 +514,18 @@ function normalizePythonApplicationTarget(
       ...(versionSelection ? { versionSelection } : {}),
     },
     ...(coverage ? { coverage } : {}),
+    ...normalizeWorkspaceTargetState(value),
     ...(value.python !== undefined ? { python: normalizePythonRuntimePolicy(value.python) } : {}),
     spec: parsed.requirement.normalizedName,
     type: 'python-app',
   };
+}
+
+function normalizeWorkspaceTargetState(value: Record<string, unknown>): WorkspaceTargetState {
+  if (value.paused !== undefined && typeof value.paused !== 'boolean') {
+    throw new Error('Workspace target paused must be a boolean');
+  }
+  return value.paused === true ? { paused: true } : {};
 }
 
 function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
@@ -530,6 +542,7 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
       ...(typeof value.branch === 'string' && value.branch.trim().length > 0
         ? { branch: value.branch.trim() }
         : {}),
+      ...normalizeWorkspaceTargetState(value),
       type: 'git',
       url: value.url.trim(),
     };
@@ -539,7 +552,11 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
     if (typeof value.spec !== 'string' || value.spec.trim().length === 0) {
       throw new Error('npm target must include a non-empty spec');
     }
-    return { spec: value.spec.trim(), type: 'npm' };
+    return {
+      ...normalizeWorkspaceTargetState(value),
+      spec: value.spec.trim(),
+      type: 'npm',
+    };
   }
 
   if (value.type === 'python-app') {
@@ -589,6 +606,7 @@ function normalizeWorkspaceTarget(value: unknown): WorkspaceTarget {
       builds: { windowDays: value.builds.windowDays as number },
       patches: { latest: value.patches.latest as number },
       platforms: platforms.sort(),
+      ...normalizeWorkspaceTargetState(value),
       provider: 'python-build-standalone',
       series: {
         from: value.series.from.trim(),
@@ -1395,7 +1413,16 @@ export async function clearWorkspaceGiteaToken(workspaceDir: string): Promise<Wo
 
 function targetKey(target: WorkspaceTarget): string {
   return target.type === 'cpython-distributions'
-    ? [target.type, semanticDigest(target)].join('\0')
+    ? [
+        target.type,
+        semanticDigest({
+          builds: target.builds,
+          patches: target.patches,
+          platforms: target.platforms,
+          provider: target.provider,
+          series: target.series,
+        }),
+      ].join('\0')
     : target.type === 'git'
       ? ['git', target.url, target.branch ?? ''].join('\0')
       : target.type === 'python-app'
@@ -1617,6 +1644,32 @@ export async function removeWorkspaceTarget(
   return { config, removed };
 }
 
+export async function setWorkspaceTargetPaused(
+  workspaceDir: string,
+  index: number,
+  paused: boolean
+): Promise<{ changed: boolean; config: WorkspaceConfig; target: WorkspaceTarget }> {
+  const config = await readWorkspaceConfig(workspaceDir);
+  if (!Number.isInteger(index) || index < 1 || index > config.targets.length) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+  const current = config.targets[index - 1];
+  if (!current) {
+    throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+  }
+
+  const target: WorkspaceTarget = { ...current, ...(paused ? { paused: true } : {}) };
+  if (!paused) {
+    delete target.paused;
+  }
+  const changed = (current.paused === true) !== paused;
+  if (changed) {
+    config.targets[index - 1] = target;
+    await writeWorkspaceConfig(workspaceDir, config);
+  }
+  return { changed, config, target };
+}
+
 export function selectWorkspaceTargets(
   config: WorkspaceConfig,
   indexes: number[]
@@ -1688,6 +1741,7 @@ export function createWorkspaceSnapshot(
           builds: target.builds,
           patches: target.patches,
           platforms: target.platforms,
+          ...(target.paused ? { paused: true } : {}),
           provider: target.provider,
           series: target.series,
           type: target.type,
@@ -1696,6 +1750,7 @@ export function createWorkspaceSnapshot(
 
       if (target.type === 'npm') {
         return {
+          ...(target.paused ? { paused: true } : {}),
           spec: target.spec,
           type: target.type,
         };
@@ -1705,6 +1760,7 @@ export function createWorkspaceSnapshot(
         return {
           application: target.application,
           ...(target.coverage ? { coverage: target.coverage } : {}),
+          ...(target.paused ? { paused: true } : {}),
           ...(target.python ? { python: target.python } : {}),
           spec: target.spec,
           type: target.type,
@@ -1719,6 +1775,7 @@ export function createWorkspaceSnapshot(
       return {
         ...(target.branch ? { branch: target.branch } : {}),
         localMirrorPath: source.localMirrorPath,
+        ...(target.paused ? { paused: true } : {}),
         sourceId: source.id,
         type: 'git',
         url: target.url,

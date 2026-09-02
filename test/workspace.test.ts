@@ -18,6 +18,7 @@ import {
   resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
+  setWorkspaceTargetPaused,
   setWorkspacePythonApplicationVersionSelection,
   workspaceConfigPythonPublicationBackupFileName,
   workspaceConfigPythonPublicationProfileBackupFileName,
@@ -147,6 +148,62 @@ describe('workspace config', () => {
         type: 'npm',
       },
     ]);
+  });
+
+  it('pauses and resumes any workspace target without changing its identity', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      branch: 'main',
+      type: 'git',
+      url: 'https://github.com/acme/app.git',
+    });
+
+    await expect(setWorkspaceTargetPaused(tempDir, 1, true)).resolves.toMatchObject({
+      changed: true,
+      target: {
+        branch: 'main',
+        paused: true,
+        type: 'git',
+        url: 'https://github.com/acme/app.git',
+      },
+    });
+    const duplicate = await addWorkspaceTarget(tempDir, {
+      branch: 'main',
+      type: 'git',
+      url: 'https://github.com/acme/app.git',
+    });
+    expect(duplicate.added).toBe(false);
+    await expect(setWorkspaceTargetPaused(tempDir, 1, true)).resolves.toMatchObject({
+      changed: false,
+    });
+    await expect(setWorkspaceTargetPaused(tempDir, 1, false)).resolves.toMatchObject({
+      changed: true,
+      target: {
+        branch: 'main',
+        type: 'git',
+        url: 'https://github.com/acme/app.git',
+      },
+    });
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).not.toHaveProperty('paused');
+  });
+
+  it('validates and normalizes the optional paused state', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.targets.push({ paused: false, spec: 'eslint@latest', type: 'npm' });
+    await writeWorkspaceConfig(tempDir, config);
+
+    expect((await readWorkspaceConfig(tempDir)).targets).toEqual([
+      { spec: 'eslint@latest', type: 'npm' },
+    ]);
+
+    const stored = await fs.readJson<Record<string, unknown>>(
+      path.join(tempDir, 'airgap-sync.json')
+    );
+    (stored.targets as Record<string, unknown>[])[0]!.paused = 'yes';
+    await fs.writeJson(path.join(tempDir, 'airgap-sync.json'), stored, { spaces: 2 });
+    await expect(readWorkspaceConfig(tempDir)).rejects.toThrow(
+      'Workspace target paused must be a boolean'
+    );
   });
 
   it('normalizes a rolling CPython distribution target', async () => {
@@ -757,6 +814,7 @@ describe('workspace config', () => {
         url: 'https://github.com/acme/app.git',
       },
       {
+        paused: true,
         spec: 'eslint@latest',
         type: 'npm',
       },
@@ -771,6 +829,7 @@ describe('workspace config', () => {
         ...config,
         targets: [
           {
+            paused: true,
             spec: 'eslint@latest',
             type: 'npm',
           },
@@ -784,6 +843,7 @@ describe('workspace config', () => {
       selectedIndexes: [2, 1],
       selectedTargets: [
         {
+          paused: true,
           spec: 'eslint@latest',
           type: 'npm',
         },
@@ -817,6 +877,7 @@ describe('workspace config', () => {
         url: 'https://github.com/acme/app.git',
       },
       {
+        paused: true,
         spec: 'eslint@latest',
         type: 'npm',
       }
@@ -843,6 +904,7 @@ describe('workspace config', () => {
           url: 'https://github.com/acme/app.git',
         },
         {
+          paused: true,
           spec: 'eslint@latest',
           type: 'npm',
         },

@@ -52,6 +52,19 @@ airgap-sync target add cpython-distributions --from-minor 3.10 \
 airgap-sync target list
 ```
 
+Temporarily suspend upstream refresh without removing the target or its current bundle
+closure:
+
+```bash
+airgap-sync target pause 2
+airgap-sync download --prune
+airgap-sync target resume 2
+```
+
+The pause is universal across Git, npm, Python applications, and CPython distributions.
+It preserves only state that was materialized by an earlier successful download; a
+never-downloaded paused target remains configuration-only.
+
 The examples below use `airgap-sync` directly. In a local npm install on removable
 media, prefix the same commands with `npm exec --`.
 
@@ -123,6 +136,9 @@ airgap-sync download --target 2
 
 Partial target downloads update the shared bundle but skip pruning, even if pruning is
 enabled in defaults, so dependencies for other configured targets are not removed.
+Normal downloads likewise skip paused targets, but keep their previously active bundle
+documents and indexes merged into the new state so pruning cannot remove their
+dependency closure.
 
 For a one-time transfer, remove the application target after a successful publish. A
 later full download plus prune removes its locally unreferenced wheels while preserving

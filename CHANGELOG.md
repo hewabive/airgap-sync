@@ -2,6 +2,10 @@
 
 ## 0.1.0
 
+- Added universal target pause/resume state. Paused targets stay in workspace and
+  portable snapshot metadata, are omitted from normal download acquisition, and retain
+  the previously active npm, Git, Python application, and CPython bundle state so prune
+  does not remove their dependency closure.
 - Added elapsed-time breakdowns for the high-level download and publish commands. The
   summaries attribute time to concrete progress phases, aggregate repeated fixed-point
   iterations, retain preparation/finalization time, and keep JSON stdout machine-readable.

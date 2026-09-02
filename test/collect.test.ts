@@ -1067,6 +1067,67 @@ describe('collectBundle', () => {
     });
   });
 
+  it('retains the active npm graph during a partial download', async () => {
+    const outputDir = path.join(tempDir, 'airgap-bundle');
+    await fs.writeJson(
+      path.join(outputDir, 'seed-manifest.json'),
+      {
+        createdAt: '2026-05-20T00:00:00.000Z',
+        packages: [
+          {
+            file: 'packages/retained-1.0.0.tgz',
+            name: 'retained',
+            resolvedFrom: [
+              {
+                raw: 'retained@latest',
+                requiredBy: 'root',
+                specifier: 'latest',
+                type: 'tag',
+              },
+            ],
+            tarball: 'https://registry.example/retained/-/retained-1.0.0.tgz',
+            version: '1.0.0',
+          },
+        ],
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.example',
+      },
+      { spaces: 2 }
+    );
+    await fs.writeJson(
+      path.join(outputDir, 'dist-tags.json'),
+      {
+        createdAt: '2026-05-20T00:00:00.000Z',
+        requirements: [{ name: 'retained', requiredBy: 'root', tag: 'latest', version: '1.0.0' }],
+        schemaVersion: 1,
+        sourceRegistry: 'https://registry.example',
+        tags: { retained: { latest: '1.0.0' } },
+      },
+      { spaces: 2 }
+    );
+
+    const report = await collectBundle({
+      generatedAt: '2026-05-21T00:00:00.000Z',
+      outputDir,
+      partial: true,
+      registry: {
+        getPackageMetadata(name) {
+          throw new Error(`Unexpected registry lookup for ${name}`);
+        },
+      },
+      registryUrl: 'https://registry.example',
+    });
+
+    expect(report.wroteBundle).toBe(true);
+    await expect(fs.readJson(path.join(outputDir, 'seed-manifest.json'))).resolves.toMatchObject({
+      createdAt: '2026-05-21T00:00:00.000Z',
+      packages: [{ name: 'retained', version: '1.0.0' }],
+    });
+    await expect(fs.readJson(path.join(outputDir, 'dist-tags.json'))).resolves.toMatchObject({
+      tags: { retained: { latest: '1.0.0' } },
+    });
+  });
+
   it('can defer activation of a successful Git sources manifest to a workspace orchestrator', async () => {
     const outputDir = path.join(tempDir, 'airgap-bundle');
     const activeManifest = {

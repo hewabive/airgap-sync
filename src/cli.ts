@@ -99,6 +99,7 @@ import {
   resolveWorkspacePythonApplication,
   saveWorkspaceGiteaToken,
   selectWorkspaceTargets,
+  setWorkspaceTargetPaused,
   setWorkspacePythonApplicationVersionSelection,
   updateRepositories,
   UvApplicationResolver,
@@ -1283,7 +1284,7 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
           ? `latest (${target.application.version})`
           : 'latest'
       : undefined;
-  return `${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationCoverage ? ` [coverage: ${pythonApplicationCoverage}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
+  return `${target.paused === true ? '[paused] ' : ''}${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationCoverage ? ` [coverage: ${pythonApplicationCoverage}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
@@ -3292,7 +3293,8 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
     console.log('5. Add CPython distributions');
     console.log('6. Edit target');
     console.log('7. Remove target');
-    console.log('8. Download selected target');
+    console.log('8. Pause or resume target');
+    console.log('9. Download selected target');
     console.log('0. Back');
 
     const choice = await ask(rl, 'Choose an action', '0');
@@ -3386,6 +3388,23 @@ async function configureTargetsMenu(workspaceDir: string, rl: ReadlineInterface)
         break;
       }
       case '8': {
+        const config = await readWorkspaceConfig(workspaceDir);
+        console.log(formatTargetList(config.targets));
+        const indexValue = await ask(rl, 'Target index to pause or resume');
+        if (indexValue) {
+          const index = parsePositiveInteger(indexValue);
+          const target = config.targets[index - 1];
+          if (!target) {
+            throw new Error(`Target index must be between 1 and ${String(config.targets.length)}`);
+          }
+          await runSelfCommand(
+            ['target', target.paused === true ? 'resume' : 'pause', indexValue, workspaceDir],
+            workspaceDir
+          );
+        }
+        break;
+      }
+      case '9': {
         await runSelfCommand(['target', 'list', workspaceDir], workspaceDir);
         const index = await ask(rl, 'Target index to download');
         if (index) {
@@ -4528,6 +4547,40 @@ targetCommand
     }
   });
 
+targetCommand
+  .command('pause')
+  .description('Pause downloads for a target while retaining its active bundle objects')
+  .argument('<index>', 'Target index from target list')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (index: string, workspace: string) => {
+    try {
+      const result = await setWorkspaceTargetPaused(workspace, parsePositiveInteger(index), true);
+      console.log(
+        `${result.changed ? 'Paused' : 'Already paused'} target: ${formatTargetValue(result.target)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+targetCommand
+  .command('resume')
+  .description('Resume downloads for a paused target')
+  .argument('<index>', 'Target index from target list')
+  .argument('[workspace]', 'Workspace directory', '.')
+  .action(async (index: string, workspace: string) => {
+    try {
+      const result = await setWorkspaceTargetPaused(workspace, parsePositiveInteger(index), false);
+      console.log(
+        `${result.changed ? 'Resumed' : 'Already active'} target: ${formatTargetValue(result.target)}`
+      );
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
 program
   .command('download')
   .description('Download updates into an airgap bundle')
@@ -4616,7 +4669,42 @@ program
           options.target && options.target.length > 0
             ? selectWorkspaceTargets(config, options.target)
             : undefined;
-        const activeConfig = targetSelection?.config ?? config;
+        const requestedTargetIndexes =
+          targetSelection?.selectedIndexes ?? config.targets.map((_, index) => index + 1);
+        const pausedTargetIndexes = requestedTargetIndexes.filter(
+          (index) => config.targets[index - 1]?.paused === true
+        );
+        const activeTargetIndexes = requestedTargetIndexes.filter(
+          (index) => config.targets[index - 1]?.paused !== true
+        );
+        const activeConfig: WorkspaceConfig = {
+          ...config,
+          targets: activeTargetIndexes.flatMap((index) => {
+            const target = config.targets[index - 1];
+            return target ? [target] : [];
+          }),
+        };
+        const preserveExistingTargets =
+          targetSelection !== undefined || pausedTargetIndexes.length > 0;
+        if (pausedTargetIndexes.length > 0) {
+          console.error(`[download] paused targets skipped: ${pausedTargetIndexes.join(', ')}`);
+        }
+        if (requestedTargetIndexes.length > 0 && activeTargetIndexes.length === 0) {
+          if (options.json === true) {
+            console.log(
+              JSON.stringify(
+                { pausedTargetIndexes, skipped: true, reason: 'all-selected-targets-paused' },
+                null,
+                2
+              )
+            );
+          } else {
+            console.log(
+              'No active targets to download; existing bundle objects were left unchanged.'
+            );
+          }
+          return;
+        }
         const outputDir = path.resolve(workspaceDir, options.output ?? config.output);
         const lastSuccessfulDownload = await reportDownloadWatermark(outputDir);
         await confirmCpythonWindowGap({
@@ -4625,7 +4713,7 @@ program
             : { allowWindowGap: options.allowWindowGap }),
           config: activeConfig,
           lastSuccessfulDownload,
-          ...(targetSelection ? { targetIndexes: targetSelection.selectedIndexes } : {}),
+          ...(preserveExistingTargets ? { targetIndexes: activeTargetIndexes } : {}),
         });
         if (targetSelection) {
           console.error(
@@ -4678,7 +4766,7 @@ program
             }
           },
           readRecipe: async (target) => await readWorkspacePythonRecipe(workspaceDir, target),
-          ...(targetSelection ? { targetIndexes: targetSelection.selectedIndexes } : {}),
+          ...(preserveExistingTargets ? { targetIndexes: activeTargetIndexes } : {}),
           workspaceDir,
         });
         timing.switchTo('Preparation');
@@ -4730,7 +4818,7 @@ program
         const beforeState =
           options.dryRun === true ? undefined : await captureBundleState(outputDir);
         const retainedGitSources =
-          targetSelection && (await fileExists(path.join(outputDir, 'git-sources.json')))
+          preserveExistingTargets && (await fileExists(path.join(outputDir, 'git-sources.json')))
             ? (await readGitSourcesManifest(outputDir)).sources
             : undefined;
         const onDownloadProgress = createTimedDownloadProgressLogger(timing);
@@ -4753,6 +4841,7 @@ program
           ...(options.tarballTimeoutMs ? { tarballTimeoutMs: options.tarballTimeoutMs } : {}),
           onProgress: onDownloadProgress,
           outputDir,
+          partial: preserveExistingTargets,
           registry,
           registryUrl,
           security: {
@@ -4763,7 +4852,7 @@ program
           },
           ...(retainedGitSources ? { retainedGitSources } : {}),
         });
-        if (pythonApplicationPlans.length > 0 || targetSelection === undefined) {
+        if (pythonApplicationPlans.length > 0 || !preserveExistingTargets) {
           report.pythonApplications = await downloadPythonApplicationPlans({
             bundleDir: outputDir,
             concurrency: options.concurrency,
@@ -4773,7 +4862,7 @@ program
             onProgress: (event) => {
               onDownloadProgress({ ...event, phase: 'python-application-fetch' });
             },
-            partial: targetSelection !== undefined,
+            partial: preserveExistingTargets,
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             targets: pythonApplicationPlans,
             validateCandidate: async ({ manifest: candidateManifest }) => {
@@ -4803,7 +4892,7 @@ program
         }
         if (
           cpythonTargets.length > 0 ||
-          (targetSelection === undefined &&
+          (!preserveExistingTargets &&
             (await fileExists(path.join(outputDir, cpythonDistributionIndexPath))))
         ) {
           timing.switchTo('Download CPython distributions');
@@ -4824,7 +4913,7 @@ program
                 `[download] CPython discovery ${event.phase}${event.page === undefined ? '' : ` page ${String(event.page)}`} attempt ${String(event.attempt)} failed: ${reason}; retrying with attempt ${String(event.nextAttempt)} in ${String(event.delayMs)}ms`
               );
             },
-            partial: targetSelection !== undefined,
+            partial: preserveExistingTargets,
             ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
             targets: cpythonTargets,
           });
@@ -4858,7 +4947,7 @@ program
           pruneReport = await pruneAfterSuccessfulDownload(report);
           timing.switchTo('Finalize download');
         }
-        if (pruneReport?.errors.length === 0) {
+        if (pruneReport?.errors.length === 0 && pausedTargetIndexes.length === 0) {
           const removedPlans = await pruneInactivePythonApplicationPlans(
             workspaceDir,
             pythonApplicationPreflight.targets.map(({ activePlan }) => activePlan.manifest.targetId)
@@ -4877,8 +4966,8 @@ program
             report,
             securityDeltas,
             ...(pruneReport ? { pruneReport } : {}),
-            scope: targetSelection ? 'partial' : 'full',
-            ...(targetSelection ? { selectedTargetIndexes: targetSelection.selectedIndexes } : {}),
+            scope: preserveExistingTargets ? 'partial' : 'full',
+            ...(preserveExistingTargets ? { selectedTargetIndexes: activeTargetIndexes } : {}),
             tagResolutionPolicy,
             workspaceSnapshot,
           });

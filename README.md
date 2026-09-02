@@ -123,6 +123,10 @@ npm exec -- airgap-sync target edit 4 \
   --platform linux-glibc-x86_64 --platform windows-x86_64 \
   --latest 2 --window-days 30
 
+# Temporarily keep a target and its current bundle closure without refreshing it.
+npm exec -- airgap-sync target pause 1
+npm exec -- airgap-sync target resume 1
+
 # Online machine.
 npm exec -- airgap-sync download --prune
 npm exec -- airgap-sync download --target 2
@@ -304,6 +308,18 @@ defaults for download, publish, and install verification. It is meant to move wi
 bundle between machines. Git repository provisioning defaults to
 `defaults.publish.provisionGit: true`; set it to `false` when repositories are managed
 externally, or to `"ask"` to prompt on each interactive publish.
+
+Every target type supports an optional `paused: true` state, managed with
+`airgap-sync target pause INDEX` and `airgap-sync target resume INDEX`. A normal
+`download` skips network acquisition and planning for paused targets. Their previously
+active npm dependency graph, Git sources, Python application artifacts, and CPython
+distributions remain referenced by the bundle, so `download --prune` and later
+`bundle prune` keep them. Pausing a target before its first successful download does
+not materialize it, and `download --target INDEX` does not override a pause.
+Because npm and Git dependency objects can be shared across roots, retention is
+conservative while a pause exists: objects from the previous active bundle may remain
+even after another target stops requiring them. The first successful full download
+after all targets are resumed restores normal exact pruning.
 
 The optional top-level `npmSecurity` object persists npm policy. Defaults are a
 three-day release quarantine and a 72-hour security-report lifetime:
