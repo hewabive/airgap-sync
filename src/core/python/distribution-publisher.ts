@@ -51,6 +51,8 @@ export interface PublishCpythonDistributionsOptions {
   fetch?: typeof globalThis.fetch;
   generatedAt?: string;
   giteaBaseUrl: string;
+  /** Artifact identities allowed to publish from the validated bundle index. */
+  artifactIds?: ReadonlySet<string>;
   onProgress?: (event: PythonPublishProgressEvent) => void;
   owner: string;
   timeoutMs?: number;
@@ -81,11 +83,13 @@ export async function publishCpythonDistributions(
     return report;
   }
 
-  const artifacts = [...index.artifacts].sort(
-    (left, right) =>
-      left.providerBuild.localeCompare(right.providerBuild) ||
-      left.filename.localeCompare(right.filename)
-  );
+  const artifacts = index.artifacts
+    .filter((artifact) => !options.artifactIds || options.artifactIds.has(artifact.id))
+    .sort(
+      (left, right) =>
+        left.providerBuild.localeCompare(right.providerBuild) ||
+        left.filename.localeCompare(right.filename)
+    );
   let completed = 0;
   const baseUrl = normalizeGiteaGenericBaseUrl(options.giteaBaseUrl);
   const fetch = options.fetch ?? globalThis.fetch;

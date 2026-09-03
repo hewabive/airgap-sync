@@ -6,6 +6,10 @@
   portable snapshot metadata, are omitted from normal download acquisition, and retain
   the previously active npm, Git, Python application, and CPython bundle state so prune
   does not remove their dependency closure.
+- Publish now honors paused workspace targets. Direct Git targets are removed before
+  Gitea migration, provisioning, push, and rewrite configuration; npm and Python
+  publication scopes omit paused target closures while retaining shared objects needed
+  by active targets. Git pushes are non-interactive and have a configurable timeout.
 - Added elapsed-time breakdowns for the high-level download and publish commands. The
   summaries attribute time to concrete progress phases, aggregate repeated fixed-point
   iterations, retain preparation/finalization time, and keep JSON stdout machine-readable.

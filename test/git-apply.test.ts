@@ -155,6 +155,7 @@ describe('applyGitSources', () => {
       giteaBaseUrl: 'http://gitea.local',
       manifest,
       onProgress: (event) => progress.push(event),
+      pushTimeoutMs: 123,
       runner: (invocation) => {
         calls.push(invocation);
         return Promise.resolve();
@@ -174,6 +175,11 @@ describe('applyGitSources', () => {
           '+refs/heads/*:refs/heads/*',
           '+refs/tags/*:refs/tags/*',
         ],
+        env: {
+          GCM_INTERACTIVE: 'never',
+          GIT_TERMINAL_PROMPT: '0',
+        },
+        timeoutMs: 123,
       },
     ]);
     expect(report).toMatchObject({
@@ -284,6 +290,11 @@ describe('applyGitSources', () => {
           '+refs/heads/*:refs/heads/*',
           '+refs/tags/*:refs/tags/*',
         ],
+        env: {
+          GCM_INTERACTIVE: 'never',
+          GIT_TERMINAL_PROMPT: '0',
+        },
+        timeoutMs: 900_000,
       },
     ]);
     expect(defaultBranchCalls).toEqual([
@@ -477,6 +488,7 @@ describe('applyGitSources', () => {
           GCM_INTERACTIVE: 'never',
           GIT_TERMINAL_PROMPT: '0',
         },
+        timeoutMs: 900_000,
       },
     ]);
     expect(report).toMatchObject({

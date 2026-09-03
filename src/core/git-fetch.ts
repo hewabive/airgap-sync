@@ -14,6 +14,7 @@ export interface GitCommandInvocation {
   sshCommand?: string;
   sshTransport?: boolean;
   sshVariant?: string;
+  timeoutMs?: number;
 }
 
 export interface GitCommandResult {
@@ -155,6 +156,21 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<G
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let timedOut = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+    const timeout = invocation.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+          forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 5_000);
+          forceKillTimer.unref();
+        }, invocation.timeoutMs)
+      : undefined;
+    timeout?.unref();
+    const clearTimers = () => {
+      if (timeout) clearTimeout(timeout);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+    };
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout.push(chunk);
@@ -165,8 +181,20 @@ export async function runGitCommand(invocation: GitCommandInvocation): Promise<G
         process.stderr.write(chunk);
       }
     });
-    child.on('error', reject);
+    child.on('error', (error) => {
+      clearTimers();
+      reject(error);
+    });
     child.on('close', (code) => {
+      clearTimers();
+      if (timedOut) {
+        reject(
+          new Error(
+            `git ${invocation.args.map(redactGitArg).join(' ')} timed out after ${String(invocation.timeoutMs)}ms`
+          )
+        );
+        return;
+      }
       if (code === 0) {
         resolve({
           stderr: Buffer.concat(stderr).toString('utf8'),

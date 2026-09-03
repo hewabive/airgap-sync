@@ -311,7 +311,10 @@ externally, or to `"ask"` to prompt on each interactive publish.
 
 Every target type supports an optional `paused: true` state, managed with
 `airgap-sync target pause INDEX` and `airgap-sync target resume INDEX`. A normal
-`download` skips network acquisition and planning for paused targets. Their previously
+`download` skips network acquisition and planning for paused targets, and `publish`
+omits their materialized publication scope. Paused direct Git targets are excluded
+before repository migration or provisioning, so no push or import is started for them.
+Their previously
 active npm dependency graph, Git sources, Python application artifacts, and CPython
 distributions remain referenced by the bundle, so `download --prune` and later
 `bundle prune` keep them. Pausing a target before its first successful download does
@@ -320,6 +323,9 @@ Because npm and Git dependency objects can be shared across roots, retention is
 conservative while a pause exists: objects from the previous active bundle may remain
 even after another target stops requiring them. The first successful full download
 after all targets are resumed restores normal exact pruning.
+When npm or Git objects have incomplete legacy ownership metadata, publication retains
+an object if it may still be shared by an active target. If every configured target is
+paused, publication performs no package upload, repository import, or Git push.
 
 The optional top-level `npmSecurity` object persists npm policy. Defaults are a
 three-day release quarantine and a 72-hour security-report lifetime:

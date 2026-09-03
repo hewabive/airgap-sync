@@ -207,6 +207,7 @@ export type {
   PythonPublicationManifest,
 } from './core/python/publication-manifest.js';
 export { configureGitRewrites } from './core/git-config.js';
+export { defaultGitPushTimeoutMs } from './core/git-apply.js';
 export { fetchSeedBundle } from './core/fetcher.js';
 export { packageFileName } from './core/files.js';
 export { readGitSourceManifestRequirements } from './core/git-manifests.js';
@@ -666,6 +667,7 @@ export type {
   ParseRootSpecsResult,
   PackageIdentity,
   PackageSecurityAdvisoryFinding,
+  PausedPublicationReport,
   ProjectPackageManifest,
   ProjectPackageManagerEngine,
   PublishActionResult,

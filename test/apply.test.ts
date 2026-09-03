@@ -16,6 +16,10 @@ import type { PythonApplicationBundleIndex } from '../src/core/python/applicatio
 import { normalizePlatformCoveragePolicy } from '../src/core/python/coverage-policy.js';
 import { createPythonEnvironmentPlan } from '../src/core/python/environment-plan.js';
 import type { PythonSeedManifest } from '../src/core/python/bundle.js';
+import type {
+  WorkspaceCpythonDistributionsTarget,
+  WorkspaceSnapshot,
+} from '../src/core/workspace.js';
 import {
   scanPythonBundleSecurity,
   writePythonSecurityReport,
@@ -99,6 +103,20 @@ async function writeCleanPythonSecurityReport(
       generatedAt,
       manifest: pythonManifest,
     })
+  );
+}
+
+async function writeWorkspaceSnapshot(targets: WorkspaceSnapshot['targets']): Promise<void> {
+  await fs.writeJson(
+    path.join(bundleDir, 'workspace-snapshot.json'),
+    {
+      createdAt: '2026-09-03T00:00:00.000Z',
+      output: './airgap-bundle',
+      schemaVersion: 2,
+      sourceRegistry: 'https://registry.npmjs.org',
+      targets,
+    } satisfies WorkspaceSnapshot,
+    { spaces: 2 }
   );
 }
 
@@ -212,6 +230,101 @@ describe('applyBundle', () => {
     expect(await fs.pathExists(path.join(bundleDir, 'publish-dry-run-report.json'))).toBe(true);
   });
 
+  it('does not publish a paused npm target', async () => {
+    await writeWorkspaceSnapshot([
+      {
+        paused: true,
+        spec: 'demo@latest',
+        type: 'npm',
+      },
+    ]);
+
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.publish).toMatchObject({
+      published: 0,
+      restoredTags: 0,
+      totalPackages: 0,
+    });
+    expect(report.pausedPublication).toEqual({
+      skipped: {
+        cpythonArtifacts: 0,
+        gitRepositories: 0,
+        npmPackages: 1,
+        pythonApplications: 0,
+        pythonArtifacts: 0,
+      },
+      targetIndexes: [1],
+    });
+  });
+
+  it('retains npm dependencies shared with an active target', async () => {
+    const packages: BundleManifest['packages'] = [
+      {
+        file: 'packages/a-1.0.0.tgz',
+        name: 'a',
+        resolvedFrom: [{ raw: 'a@latest', requiredBy: 'root', specifier: 'latest', type: 'tag' }],
+        tarball: 'https://registry.example/a/-/a-1.0.0.tgz',
+        version: '1.0.0',
+      },
+      {
+        file: 'packages/b-1.0.0.tgz',
+        name: 'b',
+        resolvedFrom: [{ raw: 'b@latest', requiredBy: 'root', specifier: 'latest', type: 'tag' }],
+        tarball: 'https://registry.example/b/-/b-1.0.0.tgz',
+        version: '1.0.0',
+      },
+      {
+        file: 'packages/shared-1.0.0.tgz',
+        name: 'shared',
+        resolvedFrom: [
+          { raw: 'shared@^1', requiredBy: 'a@1.0.0', specifier: '^1', type: 'range' },
+          { raw: 'shared@^1', requiredBy: 'b@1.0.0', specifier: '^1', type: 'range' },
+        ],
+        tarball: 'https://registry.example/shared/-/shared-1.0.0.tgz',
+        version: '1.0.0',
+      },
+    ];
+    await fs.writeJson(
+      path.join(bundleDir, 'seed-manifest.json'),
+      { ...manifest, packages },
+      {
+        spaces: 2,
+      }
+    );
+    await fs.writeJson(
+      path.join(bundleDir, 'dist-tags.json'),
+      { ...distTags, requirements: [], tags: {} },
+      { spaces: 2 }
+    );
+    await Promise.all(packages.map((pkg) => fs.writeFile(path.join(bundleDir, pkg.file), '')));
+    await writeWorkspaceSnapshot([
+      { paused: true, spec: 'a@latest', type: 'npm' },
+      { spec: 'b@latest', type: 'npm' },
+    ]);
+
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-09-03T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.publish.totalPackages).toBe(2);
+    expect(report.pausedPublication?.skipped.npmPackages).toBe(1);
+  });
+
   it('derives the Gitea npm URL and provisions its owner with other package owners', async () => {
     const report = await applyBundle({
       allowLegacyNpmBundle: true,
@@ -280,6 +393,14 @@ describe('applyBundle', () => {
     const content = Buffer.from('cpython archive');
     const filename =
       'cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
+    const target: WorkspaceCpythonDistributionsTarget = {
+      builds: { windowDays: 30 },
+      patches: { latest: 1 },
+      platforms: ['linux-glibc-x86_64'],
+      provider: 'python-build-standalone',
+      series: { from: '3.12', major: 3, through: 'latest-stable' },
+      type: 'cpython-distributions',
+    };
     await downloadCpythonDistributionBundle({
       bundleDir,
       candidates: [
@@ -300,16 +421,7 @@ describe('applyBundle', () => {
           new Response(content, { headers: { 'content-length': String(content.length) } })
         ),
       generatedAt: '2026-08-06T00:00:00.000Z',
-      targets: [
-        {
-          builds: { windowDays: 30 },
-          patches: { latest: 1 },
-          platforms: ['linux-glibc-x86_64'],
-          provider: 'python-build-standalone',
-          series: { from: '3.12', major: 3, through: 'latest-stable' },
-          type: 'cpython-distributions',
-        },
-      ],
+      targets: [target],
     });
 
     const report = await applyBundle({
@@ -332,6 +444,19 @@ describe('applyBundle', () => {
       expect.objectContaining({ owner: 'airgap-packages', status: 'planned' })
     );
     expect(report.succeeded).toBe(true);
+
+    await writeWorkspaceSnapshot([{ ...target, paused: true }]);
+    const pausedReport = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+    expect(pausedReport.cpythonDistributions).toBeUndefined();
+    expect(pausedReport.pausedPublication?.skipped.cpythonArtifacts).toBe(1);
   });
 
   it('rejects a legacy Python seed manifest without an application index', async () => {
@@ -414,6 +539,37 @@ describe('applyBundle', () => {
     });
     expect(report.pythonApplications?.publicationId).toMatch(/^[a-f0-9]{64}$/u);
     expect(await fs.pathExists(path.join(bundleDir, 'python/publications'))).toBe(false);
+  });
+
+  it('does not publish a paused Python application', async () => {
+    await writePythonApplicationBundle();
+    await writeWorkspaceSnapshot([
+      {
+        application: { extras: [], features: {} },
+        coverage: 'windows',
+        paused: true,
+        spec: 'demo-python',
+        type: 'python-app',
+      },
+    ]);
+
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      dryRun: true,
+      generatedAt: '2026-07-28T00:00:00.000Z',
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      pythonPublicationProfile: {
+        ...defaultPythonPublicationProfile(),
+        publishEvidence: true,
+      },
+      registryUrl: 'http://verdaccio.local:4873',
+    });
+
+    expect(report.python).toBeUndefined();
+    expect(report.pythonApplications).toBeUndefined();
+    expect(report.pausedPublication?.skipped.pythonApplications).toBe(1);
   });
 
   it('blocks Python uploads when the package organization cannot be provisioned', async () => {
@@ -530,6 +686,52 @@ describe('applyBundle', () => {
       status: 'done',
       total: 1,
     });
+  });
+
+  it('filters paused Git targets before provisioning, migration, push, and rewrites', async () => {
+    await fs.writeJson(path.join(bundleDir, 'git-sources.json'), gitSources, { spaces: 2 });
+    await writeWorkspaceSnapshot([
+      {
+        localMirrorPath: 'git-mirrors/github.com/acme/app.git',
+        sourceId: 'github.com/acme/app',
+        type: 'git',
+        url: 'https://github.com/acme/app.git',
+      },
+      { spec: 'demo@latest', type: 'npm' },
+    ]);
+
+    const report = await applyBundle({
+      allowLegacyNpmBundle: true,
+      bundleDir,
+      configureGitGlobal: true,
+      dryRun: true,
+      generatedAt: '2026-09-03T00:00:00.000Z',
+      gitMigration: {},
+      giteaBaseUrl: 'http://gitea.local',
+      giteaClient: noopClient,
+      registryUrl: 'http://verdaccio.local:4873',
+      workspaceSnapshot: {
+        createdAt: '2026-09-03T00:00:00.000Z',
+        output: './airgap-bundle',
+        schemaVersion: 2,
+        sourceRegistry: 'https://registry.npmjs.org',
+        targets: [
+          {
+            localMirrorPath: 'git-mirrors/github.com/acme/renamed.git',
+            paused: true,
+            sourceId: 'github.com/acme/renamed',
+            type: 'git',
+            url: 'https://github.com/acme/renamed.git',
+          },
+          { spec: 'demo@latest', type: 'npm' },
+        ],
+      },
+    });
+
+    expect(report.gitea.totalRepositories).toBe(0);
+    expect(report.gitApply.totalRepositories).toBe(0);
+    expect(report.gitConfig?.totalRules).toBe(0);
+    expect(report.pausedPublication?.skipped.gitRepositories).toBe(1);
   });
 
   it('passes Gitea token auth to mirror push', async () => {

@@ -21,6 +21,8 @@ import {
 import { assertUniqueGitPublishTargets } from './git-publish-targets.js';
 import { mapConcurrent } from './concurrency.js';
 
+export const defaultGitPushTimeoutMs = 900_000;
+
 export interface ApplyGitSourcesOptions {
   bundleDir: string;
   concurrency?: number;
@@ -32,6 +34,7 @@ export interface ApplyGitSourcesOptions {
   manifest: GitSourcesManifest;
   mirrorsDir?: string;
   onProgress?: (event: GitApplyProgressEvent) => void;
+  pushTimeoutMs?: number;
   runner?: GitCommandRunner;
 }
 
@@ -265,14 +268,16 @@ async function applyRepository(
       if (initialState.empty) {
         await runner({
           args: pushDefaultBranchArgs(mirrorPath, targetUrl, defaultBranch, options.gitAuth),
-          ...(options.gitAuth ? { env: pushEnv() } : {}),
+          env: pushEnv(),
+          timeoutMs: options.pushTimeoutMs ?? defaultGitPushTimeoutMs,
         });
         await waitForRepositoryReady(options.giteaClient, repository);
       }
     }
     await runner({
       args: pushArgs(mirrorPath, targetUrl, options.gitAuth),
-      ...(options.gitAuth ? { env: pushEnv() } : {}),
+      env: pushEnv(),
+      timeoutMs: options.pushTimeoutMs ?? defaultGitPushTimeoutMs,
     });
     if (setRepositoryDefaultBranch && defaultBranch) {
       try {

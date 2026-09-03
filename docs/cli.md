@@ -91,13 +91,19 @@ requirements; no separate npm target is needed.
 
 `target pause` is available for every target type. It records `paused: true` in the
 workspace and `target list` marks the entry as `[paused]`. Normal and explicitly
-selected downloads skip that target without refreshing its upstream data. If it has
+selected downloads skip that target without refreshing its upstream data. High-level
+`publish` also skips its materialized packages and repositories. Direct Git targets
+are filtered before Gitea migration and provisioning, not merely before `git push`.
+If it has
 already been downloaded, its active dependency closure remains referenced and safe
 from pruning; pausing a new target does not materialize it. `target resume` removes the
 flag so the next applicable download refreshes it normally.
 Retention is conservative for shared npm and Git graphs: while any target is paused,
 some previously active objects belonging to other roots may also remain. A successful
 full download after all targets are resumed makes the bundle exactly prunable again.
+Publication is likewise conservative for legacy shared objects: an object that may be
+needed by an active target remains publishable. Pausing every target makes `publish` a
+no-op for package uploads, Git imports, and pushes.
 
 `python-app` is the normal Python target. By default it inherits both coverage and the
 Python runtime matrix from `python.applicationDefaults`. `--coverage` references a named
@@ -686,6 +692,9 @@ force-updating only branches and tags: `refs/heads/*` and `refs/tags/*`.
 Provider-specific refs such as GitHub pull-request refs are intentionally not pushed.
 Independent repositories are pushed concurrently (2 workers by default); use
 `--concurrency` to tune the load on the Git host.
+Credential prompts are disabled for every push. Each push is terminated after 900000ms
+(15 minutes) by default; use `--git-push-timeout-ms` to choose a different absolute
+limit for unusually large repositories.
 Target URLs preserve upstream owner/repository paths: for example
 `https://github.com/antvis/G2.git` maps to `http://gitea.local/antvis/G2.git`.
 The target repositories must already exist unless the Gitea instance is configured to
@@ -750,11 +759,11 @@ are skipped from Gitea's compact package-file metadata when the filename, size w
 recorded, and SHA-256 match. An unavailable or inconclusive metadata response retains
 the full-content verification fallback.
 
-Before provisioning Gitea owners or publishing collected wheels or Python application
-evidence, `publish` requires a fresh passing `python-security-report.json` bound to the
-exact `python-seed-manifest.json`. Missing, failed, stale, or mismatched evidence stops
-the operation before network-side changes. A bundle containing only portable CPython
-distribution archives has no PyPI package manifest and does not use this gate.
+Before publishing any active collected wheels, `publish` requires a fresh passing
+`python-security-report.json` bound to the exact `python-seed-manifest.json`. Missing,
+failed, stale, or mismatched evidence stops the operation before network-side changes.
+A bundle containing only portable CPython distribution archives, or only paused Python
+applications, has no wheel upload to authorize and does not use this gate.
 
 When `python/distributions/index.json` exists, `publish` independently uploads its
 portable CPython archives as Gitea Generic Packages. Matching remote files are skipped,
@@ -836,6 +845,7 @@ Supported options:
 --git-password <token>    Git HTTP password/token for non-Gitea push authentication
 --git-initial-import <mode> auto (default) or push
 --git-concurrency <n>     Concurrent Git imports/pushes, default 2
+--git-push-timeout-ms <ms> Per-repository Git push timeout, default 900000
 --git-migration-listen-host <host> Interface for temporary import source, default 127.0.0.1
 --git-migration-advertised-host <host> Host/address Gitea uses for the import source
 --git-migration-port <port> Temporary import source port, default 0 (select a free port)

@@ -97,6 +97,15 @@ describe('fetchGitSources', () => {
     ]);
   });
 
+  it('terminates Git commands that exceed their configured timeout', async () => {
+    await expect(
+      runGitCommand({
+        args: ['-c', 'alias.wait=!node -e "setTimeout(() => {}, 1000)"', 'wait'],
+        timeoutMs: 20,
+      })
+    ).rejects.toThrow('timed out after 20ms');
+  });
+
   it('plans source mirror fetches without running git in dry-run mode', async () => {
     const calls: GitCommandInvocation[] = [];
     const report = await fetchGitSources({

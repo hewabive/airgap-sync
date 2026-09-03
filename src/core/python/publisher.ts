@@ -50,6 +50,8 @@ export interface PublishPythonBundleOptions {
   dryRun?: boolean;
   generatedAt?: string;
   giteaBaseUrl: string;
+  /** Bundle-relative wheel paths allowed to publish after full-manifest security validation. */
+  filePaths?: ReadonlySet<string>;
   onProgress?: (event: PythonPublishProgressEvent) => void;
   owner: string;
   timeoutMs?: number;
@@ -528,7 +530,9 @@ export async function publishPythonBundle(
   const uploadUrl = `${baseUrl}/api/packages/${encodeURIComponent(owner)}/pypi`;
   const indexUrl = `${uploadUrl}/simple`;
   const files: PythonPublishEntry[] = manifest.packages.flatMap((pkg) =>
-    pkg.files.map((file) => ({ file, package: `${pkg.name}@${pkg.version}` }))
+    pkg.files
+      .filter((file) => !options.filePaths || options.filePaths.has(file.file))
+      .map((file) => ({ file, package: `${pkg.name}@${pkg.version}` }))
   );
   const fileGroups = new Map<string, IndexedPythonPublishEntry[]>();
   for (const [index, entry] of files.entries()) {

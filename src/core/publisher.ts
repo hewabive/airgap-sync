@@ -47,6 +47,8 @@ export interface PublishBundleOptions {
   distTagConcurrency?: number;
   dryRun?: boolean;
   onProgress?: (event: PublishProgressEvent) => void;
+  /** Package identities allowed to publish after validating the complete bundle. */
+  packageIds?: ReadonlySet<string>;
   publishConcurrency?: number;
   registryAuthToken?: string;
   registryType?: 'gitea' | 'verdaccio';
@@ -141,6 +143,32 @@ function normalizeConcurrency(value: number | undefined, fallback: number): numb
 
 function packageId(pkg: { name: string; version: string }): string {
   return `${pkg.name}@${pkg.version}`;
+}
+
+function publicationDocuments(
+  manifest: BundleManifest,
+  distTags: DistTagsManifest,
+  packageIds: ReadonlySet<string> | undefined
+): { distTags: DistTagsManifest; manifest: BundleManifest } {
+  if (!packageIds) return { distTags, manifest };
+  const packages = manifest.packages.filter((pkg) => packageIds.has(packageId(pkg)));
+  const tags: DistTagsManifest['tags'] = {};
+  for (const [name, packageTags] of Object.entries(distTags.tags)) {
+    const includedTags = Object.fromEntries(
+      Object.entries(packageTags).filter(([, version]) => packageIds.has(`${name}@${version}`))
+    );
+    if (Object.keys(includedTags).length > 0) tags[name] = includedTags;
+  }
+  return {
+    distTags: {
+      ...distTags,
+      requirements: distTags.requirements.filter((requirement) =>
+        packageIds.has(packageId(requirement))
+      ),
+      tags,
+    },
+    manifest: { ...manifest, packages },
+  };
 }
 
 function compareVersions(left: string, right: string): number {
@@ -733,7 +761,8 @@ async function publishBundleWithPreparedAuth(
   const timings = createPublishTimings();
 
   const validatePreflightStart = performance.now();
-  if (options.allowLegacyBundle !== true) {
+  const publication = publicationDocuments(manifest, distTags, options.packageIds);
+  if (options.allowLegacyBundle !== true && publication.manifest.packages.length > 0) {
     await assertNpmSecurityGate(options.bundleDir, manifest);
   }
   throwIfInvalidBundle(validateBundleStructure(manifest, distTags));
@@ -775,14 +804,14 @@ async function publishBundleWithPreparedAuth(
   let skipped = 0;
   let restoredTags = 0;
   const tagRequirements = [
-    ...distTags.requirements,
-    ...bundledLatestRequirements(manifest, distTags),
+    ...publication.distTags.requirements,
+    ...bundledLatestRequirements(publication.manifest, publication.distTags),
   ];
 
   if (options.dryRun) {
-    await validatePublishTarballs(manifest.packages);
+    await validatePublishTarballs(publication.manifest.packages);
     const dryRunStart = performance.now();
-    const plan = createPublishPlan(manifest, distTags);
+    const plan = createPublishPlan(publication.manifest, publication.distTags);
     options.onProgress?.({
       current: plan.length,
       phase: 'dry-run',
@@ -800,7 +829,7 @@ async function publishBundleWithPreparedAuth(
       restoredTags: plan.filter((item) => item.action === 'dist-tag').length,
       skipped: 0,
       timings,
-      totalPackages: manifest.packages.length,
+      totalPackages: publication.manifest.packages.length,
     };
   }
 
@@ -809,8 +838,8 @@ async function publishBundleWithPreparedAuth(
     options.skipExisting === false
       ? new Map<string, PackageRegistrySnapshot>()
       : await lookupPackageSnapshots(
-          manifest,
-          distTags,
+          publication.manifest,
+          publication.distTags,
           options.registryUrl,
           options.runNpm,
           options.onProgress,
@@ -825,7 +854,7 @@ async function publishBundleWithPreparedAuth(
   const publishedPackageNames = new Set<string>();
   timings.lookupMetadataMs = elapsedMs(lookupMetadataStart);
 
-  const packagesToPublish = manifest.packages.filter(
+  const packagesToPublish = publication.manifest.packages.filter(
     (pkg) => !existingVersionsByPackage.get(pkg.name)?.has(pkg.version)
   );
   const packagesToPublishIds = new Set(packagesToPublish.map(packageId));
@@ -863,7 +892,7 @@ async function publishBundleWithPreparedAuth(
         restoredTags: 0,
         skipped: 0,
         timings,
-        totalPackages: manifest.packages.length,
+        totalPackages: publication.manifest.packages.length,
       };
     }
   }
@@ -880,7 +909,7 @@ async function publishBundleWithPreparedAuth(
     current: publishProgress,
     phase: 'publish',
     status: 'start',
-    total: manifest.packages.length,
+    total: publication.manifest.packages.length,
   });
 
   async function publishPackage(pkg: ManifestPackage): Promise<PublishPackageResult> {
@@ -893,7 +922,7 @@ async function publishBundleWithPreparedAuth(
         package: id,
         phase: 'publish',
         status: 'skipped',
-        total: manifest.packages.length,
+        total: publication.manifest.packages.length,
       });
       return {
         package: id,
@@ -910,7 +939,7 @@ async function publishBundleWithPreparedAuth(
         package: id,
         phase: 'publish',
         status: 'published',
-        total: manifest.packages.length,
+        total: publication.manifest.packages.length,
       });
       return {
         package: id,
@@ -925,7 +954,7 @@ async function publishBundleWithPreparedAuth(
           package: id,
           phase: 'publish',
           status: 'skipped',
-          total: manifest.packages.length,
+          total: publication.manifest.packages.length,
         });
         return {
           package: id,
@@ -951,7 +980,7 @@ async function publishBundleWithPreparedAuth(
               package: id,
               phase: 'publish',
               status: 'skipped',
-              total: manifest.packages.length,
+              total: publication.manifest.packages.length,
             });
             return {
               package: id,
@@ -970,7 +999,7 @@ async function publishBundleWithPreparedAuth(
         package: id,
         phase: 'publish',
         status: 'error',
-        total: manifest.packages.length,
+        total: publication.manifest.packages.length,
       });
       return {
         error: errorSummary(error),
@@ -982,7 +1011,7 @@ async function publishBundleWithPreparedAuth(
   }
 
   const publishResultGroups = await mapWithConcurrency(
-    groupByPackageName(manifest.packages),
+    groupByPackageName(publication.manifest.packages),
     publishConcurrency,
     async (group) => {
       const results: PublishPackageResult[] = [];
@@ -1012,7 +1041,7 @@ async function publishBundleWithPreparedAuth(
     current: publishProgress,
     phase: 'publish',
     status: 'done',
-    total: manifest.packages.length,
+    total: publication.manifest.packages.length,
   });
   timings.publishMs = elapsedMs(publishStart);
 
@@ -1163,6 +1192,6 @@ async function publishBundleWithPreparedAuth(
     restoredTags,
     skipped,
     timings,
-    totalPackages: manifest.packages.length,
+    totalPackages: publication.manifest.packages.length,
   };
 }

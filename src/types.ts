@@ -572,11 +572,23 @@ export interface ApplyBundleReport {
   gitConfig?: GitConfigReport;
   gitea: GiteaRepositoryProvisionReport;
   publish: PublishReport;
+  pausedPublication?: PausedPublicationReport;
   python?: PythonPublishReport;
   pythonApplications?: PythonGenericPublishReport;
   cpythonDistributions?: CpythonDistributionPublishReport;
   registryUrl: string;
   succeeded: boolean;
+}
+
+export interface PausedPublicationReport {
+  skipped: {
+    cpythonArtifacts: number;
+    gitRepositories: number;
+    npmPackages: number;
+    pythonApplications: number;
+    pythonArtifacts: number;
+  };
+  targetIndexes: number[];
 }
 
 export type BundlePruneObjectType =

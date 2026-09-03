@@ -64,6 +64,11 @@ airgap-sync target resume 2
 The pause is universal across Git, npm, Python applications, and CPython distributions.
 It preserves only state that was materialized by an earlier successful download; a
 never-downloaded paused target remains configuration-only.
+On the closed-network side, `publish` reads the same pause state and excludes paused
+direct Git repositories before migration/provisioning as well as push. A publish run
+started from the workspace uses the current `airgap-sync.json`, so pausing after the
+last download takes effect without refreshing the target first. Detached bundles fall
+back to the pause state stored in `workspace-snapshot.json`.
 
 The examples below use `airgap-sync` directly. In a local npm install on removable
 media, prefix the same commands with `npm exec --`.

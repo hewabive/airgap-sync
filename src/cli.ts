@@ -33,6 +33,7 @@ import {
   createWorkspaceSnapshot,
   defaultPythonPublicationProfile,
   defaultGiteaNpmOwner,
+  defaultGitPushTimeoutMs,
   defaultNpmRegistryTarget,
   defaultVerdaccioRegistryUrl,
   defaultNpmSecurityPolicy,
@@ -236,6 +237,7 @@ interface ApplyOptions {
   gitOwnerStrategy?: GitOwnerStrategy;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
+  gitPushTimeoutMs: number;
   gitUsername?: string;
   json?: boolean;
   mirrorsDir?: string;
@@ -1031,6 +1033,11 @@ function formatPublishSummary(report: ApplyBundleReport, bundle: string): string
   const gitAction = report.dryRun ? 'planned' : 'pushed';
   const lines = [
     status,
+    ...(report.pausedPublication
+      ? [
+          `Paused targets: ${report.pausedPublication.targetIndexes.join(', ')}; skipped ${String(report.pausedPublication.skipped.gitRepositories)} Git repositories, ${String(report.pausedPublication.skipped.npmPackages)} npm packages, ${String(report.pausedPublication.skipped.pythonApplications)} Python applications, ${String(report.pausedPublication.skipped.pythonArtifacts)} Python artifacts, and ${String(report.pausedPublication.skipped.cpythonArtifacts)} CPython artifacts.`,
+        ]
+      : []),
     ...(npmAuthErrors.length > 0
       ? [
           red(`NPM auth: failed for ${report.registryUrl}.`),
@@ -1659,6 +1666,7 @@ interface GitApplyOptions {
   concurrency: number;
   dryRun?: boolean;
   gitea: string;
+  gitPushTimeoutMs: number;
   password?: string;
   token?: string;
   mirrorsDir?: string;
@@ -2467,6 +2475,7 @@ async function resolvePublishWorkspaceDefaults(options: {
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
   npmRegistryTarget: NpmRegistryTarget;
+  workspaceConfig?: WorkspaceConfig;
   workspaceDir: string;
 }> {
   if (
@@ -2497,20 +2506,18 @@ async function resolvePublishWorkspaceDefaults(options: {
     !options.gitea ||
     (!options.registry && options.npmRegistryType === undefined && !options.npmOwner);
   let config: WorkspaceConfig | undefined;
-  if (needsConfig || options.pythonOwner === undefined || options.gitOwnerStrategy === undefined) {
-    try {
-      config = await readWorkspaceConfig(workspaceDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        if (needsConfig) {
-          throw new Error(
-            `provide <bundle>, an npm registry target, and --gitea, or run from a workspace with ${workspaceConfigFileName}`
-          );
-        }
-        config = undefined;
-      } else {
-        throw error;
+  try {
+    config = await readWorkspaceConfig(workspaceDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (needsConfig) {
+        throw new Error(
+          `provide <bundle>, an npm registry target, and --gitea, or run from a workspace with ${workspaceConfigFileName}`
+        );
       }
+      config = undefined;
+    } else {
+      throw error;
     }
   }
   const bundle = options.bundle ?? config?.output;
@@ -2575,6 +2582,7 @@ async function resolvePublishWorkspaceDefaults(options: {
     ...(pythonOwner ? { pythonOwner } : {}),
     pythonPublicationProfile,
     npmRegistryTarget,
+    ...(config ? { workspaceConfig: config } : {}),
     workspaceDir,
   };
 }
@@ -5612,6 +5620,12 @@ gitCommand
   .option('--password <token>', 'Git HTTP password/token for non-Gitea push authentication')
   .option('--mirrors-dir <dir>', 'Directory containing bare Git mirrors')
   .option('--concurrency <count>', 'Parallel Git push workers', parsePositiveInteger, 2)
+  .option(
+    '--git-push-timeout-ms <ms>',
+    'Maximum time for one Git push before it is terminated',
+    parsePositiveInteger,
+    defaultGitPushTimeoutMs
+  )
   .option('--dry-run', 'Print planned mirror push operations without running Git')
   .action(async (bundle: string, options: GitApplyOptions) => {
     try {
@@ -5644,6 +5658,7 @@ gitCommand
         ...(httpClient ? { giteaClient: httpClient } : {}),
         manifest,
         onProgress: createGitApplyProgressLogger(),
+        pushTimeoutMs: options.gitPushTimeoutMs,
         ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
       });
 
@@ -5758,6 +5773,12 @@ addNpmPublishOptions(
       2
     )
     .option(
+      '--git-push-timeout-ms <ms>',
+      'Maximum time for one Git push before it is terminated',
+      parsePositiveInteger,
+      defaultGitPushTimeoutMs
+    )
+    .option(
       '--git-migration-listen-host <host>',
       'Interface for the temporary authenticated Git migration server',
       '127.0.0.1'
@@ -5819,9 +5840,20 @@ addNpmPublishOptions(
       const configureGitGlobal =
         options.configureGitGlobal === true || resolved.configureGitGlobal === true;
       const skipGitProvision = options.skipGitProvision === true || resolved.provisionGit === false;
+      const workspaceSnapshot =
+        resolved.workspaceConfig &&
+        path.resolve(resolved.workspaceDir, resolved.workspaceConfig.output) ===
+          path.resolve(resolved.bundle)
+          ? createWorkspaceSnapshot({ config: resolved.workspaceConfig })
+          : undefined;
+      const allTargetsPaused =
+        workspaceSnapshot !== undefined &&
+        workspaceSnapshot.targets.length > 0 &&
+        workspaceSnapshot.targets.every((target) => target.paused === true);
       const needsAuthenticatedGitOwner =
-        resolved.gitOwnerStrategy === 'authenticated-user' ||
-        (resolved.gitOwnerStrategy === 'fixed-owner' && resolved.gitPublishOwnerKind === 'user');
+        !allTargetsPaused &&
+        (resolved.gitOwnerStrategy === 'authenticated-user' ||
+          (resolved.gitOwnerStrategy === 'fixed-owner' && resolved.gitPublishOwnerKind === 'user'));
       const pythonIndex = await readPythonApplicationBundleIndex(resolved.bundle);
       const hasPythonSeed = await fileExists(
         path.join(path.resolve(resolved.bundle), 'python-seed-manifest.json')
@@ -5833,17 +5865,21 @@ addNpmPublishOptions(
         resolved.pythonPublicationProfile.genericOwner,
       ].filter((owner) => owner !== undefined);
       const needsAuthenticatedPythonOwner =
+        !allTargetsPaused &&
         hasPythonPublication &&
         pythonOwnerTargets.some((owner) =>
           owner.strategy === 'authenticated-user' ? true : owner.kind === 'user'
         );
       const needsAuthenticatedNpmOwner =
+        !allTargetsPaused &&
         resolved.npmRegistryTarget.type === 'gitea' &&
         (resolved.npmRegistryTarget.owner.strategy === 'authenticated-user' ||
           resolved.npmRegistryTarget.owner.kind === 'user');
       const requiresGiteaToken =
-        (options.dryRun !== true && hasPythonPublication) ||
-        (options.dryRun !== true && resolved.npmRegistryTarget.type === 'gitea') ||
+        (!allTargetsPaused && options.dryRun !== true && hasPythonPublication) ||
+        (!allTargetsPaused &&
+          options.dryRun !== true &&
+          resolved.npmRegistryTarget.type === 'gitea') ||
         needsAuthenticatedGitOwner ||
         needsAuthenticatedNpmOwner ||
         needsAuthenticatedPythonOwner;
@@ -5854,7 +5890,7 @@ addNpmPublishOptions(
             optionName: '--gitea-token <token>',
             workspaceDir: resolved.workspaceDir,
           })
-        : options.dryRun === true
+        : allTargetsPaused || options.dryRun === true
           ? undefined
           : skipGitProvision || providedGitAuth
             ? await resolveGiteaToken({
@@ -5896,6 +5932,7 @@ addNpmPublishOptions(
             }
           : {}),
         gitOwnerStrategy: resolved.gitOwnerStrategy,
+        gitPushTimeoutMs: options.gitPushTimeoutMs,
         ...(resolved.gitPublishOwner ? { gitPublishOwner: resolved.gitPublishOwner } : {}),
         ...(resolved.gitPublishOwnerKind
           ? { gitPublishOwnerKind: resolved.gitPublishOwnerKind }
@@ -5916,6 +5953,7 @@ addNpmPublishOptions(
         publishConcurrency: options.publishConcurrency,
         skipExisting: options.skipExisting !== false,
         skipGitProvision,
+        ...(workspaceSnapshot ? { workspaceSnapshot } : {}),
       });
       timing.switchTo('Finalize publish');
       await writePublishRunHistory({

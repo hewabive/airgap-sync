@@ -75,6 +75,12 @@ import {
   type NpmRegistryTarget,
   type ResolvedNpmRegistryTarget,
 } from './npm-publication-targets.js';
+import {
+  applyCurrentWorkspacePauses,
+  createPausedPublicationScope,
+  readOptionalWorkspaceSnapshot,
+} from './publication-pause.js';
+import type { WorkspaceSnapshot } from './workspace.js';
 
 export interface ApplyBundleOptions {
   /** Explicit compatibility escape hatch for schemaVersion 1 npm bundles. */
@@ -92,6 +98,7 @@ export interface ApplyBundleOptions {
     'advertisedHost' | 'listenHost' | 'port'
   >;
   gitOwnerStrategy?: GitOwnerStrategy;
+  gitPushTimeoutMs?: number;
   gitPublishOwner?: string;
   gitPublishOwnerKind?: GitPublishOwnerKind;
   giteaBaseUrl: string;
@@ -110,6 +117,8 @@ export interface ApplyBundleOptions {
   runGitCommand?: GitCommandRunner;
   skipExisting?: boolean;
   skipGitProvision?: boolean;
+  /** Current workspace state; the bundle snapshot is used when omitted. */
+  workspaceSnapshot?: WorkspaceSnapshot;
 }
 
 export type ApplyProgressPhase =
@@ -184,16 +193,19 @@ function blockedPythonPublishReport(
     giteaBaseUrl: string;
     owner: string;
     reason: string;
+    filePaths?: ReadonlySet<string>;
   }
 ): PythonPublishReport {
   const baseUrl = options.giteaBaseUrl.replace(/\/+$/u, '');
   const actions = manifest.packages.flatMap((pkg) =>
-    pkg.files.map((file) => ({
-      error: options.reason,
-      file: file.file,
-      package: `${pkg.name}==${pkg.version}`,
-      status: 'error' as const,
-    }))
+    pkg.files
+      .filter((file) => !options.filePaths || options.filePaths.has(file.file))
+      .map((file) => ({
+        error: options.reason,
+        file: file.file,
+        package: `${pkg.name}==${pkg.version}`,
+        status: 'error' as const,
+      }))
   );
   return {
     actions,
@@ -359,13 +371,6 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const manifest = await readBundleManifest(bundleDir);
   const distTags = await readDistTagsManifest(bundleDir);
   const sourceGitSources = await readOptionalGitSourcesManifest(bundleDir, generatedAt);
-  const gitSources = resolveGitPublishTargets({
-    ...(options.gitAuthenticatedUser ? { authenticatedUser: options.gitAuthenticatedUser } : {}),
-    ...(options.gitPublishOwner ? { fixedOwner: options.gitPublishOwner } : {}),
-    ...(options.gitPublishOwnerKind ? { fixedOwnerKind: options.gitPublishOwnerKind } : {}),
-    manifest: sourceGitSources,
-    ...(options.gitOwnerStrategy ? { strategy: options.gitOwnerStrategy } : {}),
-  });
   const pythonManifest = (await fs.pathExists(path.join(bundleDir, 'python-seed-manifest.json')))
     ? await readPythonSeedManifest(bundleDir)
     : undefined;
@@ -391,15 +396,49 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
       );
     }
   }
-  if (pythonManifest) {
+  const cpythonDistributionIndex = await readCpythonDistributionBundleIndex(bundleDir);
+  const workspaceSnapshot = applyCurrentWorkspacePauses(
+    await readOptionalWorkspaceSnapshot(bundleDir),
+    options.workspaceSnapshot
+  );
+  const publicationScope = createPausedPublicationScope({
+    ...(cpythonDistributionIndex ? { cpythonIndex: cpythonDistributionIndex } : {}),
+    gitSources: sourceGitSources,
+    manifest,
+    ...(pythonApplicationIndex ? { pythonApplicationIndex } : {}),
+    ...(workspaceSnapshot ? { snapshot: workspaceSnapshot } : {}),
+  });
+  const gitSources = resolveGitPublishTargets({
+    ...(options.gitAuthenticatedUser ? { authenticatedUser: options.gitAuthenticatedUser } : {}),
+    ...(options.gitPublishOwner ? { fixedOwner: options.gitPublishOwner } : {}),
+    ...(options.gitPublishOwnerKind ? { fixedOwnerKind: options.gitPublishOwnerKind } : {}),
+    manifest: publicationScope.gitSources,
+    ...(options.gitOwnerStrategy ? { strategy: options.gitOwnerStrategy } : {}),
+  });
+  const publicationPythonApplicationIndex = publicationScope.pythonApplicationIndex;
+  const publicationCpythonDistributionIndex = publicationScope.cpythonIndex;
+  const hasNpmPublication = (publicationScope.npmPackageIds?.size ?? manifest.packages.length) > 0;
+  const hasPythonApplications = (publicationPythonApplicationIndex?.applications.length ?? 0) > 0;
+  const hasPythonWheelPublication =
+    hasPythonApplications &&
+    (publicationScope.pythonFilePaths?.size ??
+      pythonManifest?.packages.reduce((total, pkg) => total + pkg.files.length, 0) ??
+      0) > 0;
+  const hasPythonPublication =
+    hasPythonApplications || (publicationCpythonDistributionIndex?.artifacts.length ?? 0) > 0;
+  if (pythonManifest && hasPythonWheelPublication) {
     await assertPythonSecurityGate(bundleDir, pythonManifest, {
       now: new Date(generatedAt),
     });
   }
-  const cpythonDistributionIndex = await readCpythonDistributionBundleIndex(bundleDir);
-  const hasPythonPublication = Boolean(
-    pythonManifest ?? pythonApplicationIndex ?? cpythonDistributionIndex
-  );
+  const npmPublicationManifest = publicationScope.npmPackageIds
+    ? {
+        ...manifest,
+        packages: manifest.packages.filter((pkg) =>
+          publicationScope.npmPackageIds?.has(`${pkg.name}@${pkg.version}`)
+        ),
+      }
+    : manifest;
   const configuredPythonProfile =
     options.pythonPublicationProfile ?? defaultPythonPublicationProfile();
   const pythonProfile = hasPythonPublication
@@ -418,13 +457,15 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
       )
     : undefined;
   const ownerRequirements = mergeGiteaOwnerRequirements([
-    ...(npmRegistry.type === 'gitea' ? [npmRegistry.ownerRequirement] : []),
+    ...(npmRegistry.type === 'gitea' && hasNpmPublication ? [npmRegistry.ownerRequirement] : []),
     ...(pythonProfile?.ownerRequirements.filter(
       (requirement) =>
-        (pythonManifest !== undefined && requirement.purposes.includes('pypi')) ||
-        (pythonApplicationIndex !== undefined && requirement.purposes.includes('generic'))
+        (pythonManifest !== undefined &&
+          hasPythonWheelPublication &&
+          requirement.purposes.includes('pypi')) ||
+        (hasPythonApplications && requirement.purposes.includes('generic'))
     ) ?? []),
-    ...(cpythonDistributionIndex && pythonProfile
+    ...(publicationCpythonDistributionIndex?.artifacts.length && pythonProfile
       ? [
           {
             ...pythonProfile.genericOwner,
@@ -536,7 +577,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   const npmOwnerBlocked =
     npmRegistry.type === 'gitea' && packageOwnerErrors.has(npmRegistry.owner.name);
   const publish = npmOwnerBlocked
-    ? blockedNpmPublishReport(manifest, {
+    ? blockedNpmPublishReport(npmPublicationManifest, {
         dryRun,
         generatedAt,
         reason: `Gitea owner ${npmRegistry.owner.name} could not be provisioned`,
@@ -556,13 +597,14 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
         registryType: npmRegistry.type,
         registryUrl: npmRegistry.registryUrl,
         ...(options.onPublishProgress ? { onProgress: options.onPublishProgress } : {}),
+        ...(publicationScope.npmPackageIds ? { packageIds: publicationScope.npmPackageIds } : {}),
         ...(options.skipExisting === undefined ? {} : { skipExisting: options.skipExisting }),
       });
   await writePublishReport(bundleDir, publish);
   options.onProgress?.({ phase: 'publish', status: 'done' });
 
   let python: PythonPublishReport | undefined;
-  if (pythonManifest) {
+  if (pythonManifest && hasPythonWheelPublication) {
     const owner = pythonProfile!.pypiOwner.name;
     python = packageOwnerErrors.has(owner)
       ? blockedPythonPublishReport(pythonManifest, {
@@ -571,6 +613,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
           giteaBaseUrl: options.giteaBaseUrl,
           owner,
           reason: `Gitea owner ${owner} could not be provisioned`,
+          ...(publicationScope.pythonFilePaths
+            ? { filePaths: publicationScope.pythonFilePaths }
+            : {}),
         })
       : await publishPythonBundle(pythonManifest, {
           ...(options.pythonAuth ? { auth: options.pythonAuth } : {}),
@@ -578,6 +623,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
           dryRun,
           generatedAt,
           giteaBaseUrl: options.giteaBaseUrl,
+          ...(publicationScope.pythonFilePaths
+            ? { filePaths: publicationScope.pythonFilePaths }
+            : {}),
           ...(options.onProgress
             ? {
                 onProgress: (event) => {
@@ -595,7 +643,11 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
 
   let publicationManifest: PythonPublicationManifest | undefined;
   let pythonApplications: PythonGenericPublishReport;
-  if (pythonApplicationIndex && pythonProfile?.publishEvidence) {
+  if (
+    hasPythonApplications &&
+    publicationPythonApplicationIndex &&
+    pythonProfile?.publishEvidence
+  ) {
     const owner = pythonProfile.genericOwner.name;
     if (packageOwnerErrors.has(owner)) {
       pythonApplications = blockedPythonGenericPublishReport({
@@ -617,7 +669,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     } else {
       publicationManifest = await materializePythonPublication(options.giteaBaseUrl, {
         bundleDir,
-        index: pythonApplicationIndex,
+        index: publicationPythonApplicationIndex,
         profile: pythonProfile,
         write: !dryRun,
       });
@@ -654,15 +706,21 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
   }
 
   let cpythonDistributions: CpythonDistributionPublishReport;
-  if (cpythonDistributionIndex) {
+  if (
+    publicationCpythonDistributionIndex &&
+    publicationCpythonDistributionIndex.artifacts.length > 0
+  ) {
     const owner = pythonProfile!.genericOwner.name;
     if (packageOwnerErrors.has(owner)) {
-      cpythonDistributions = blockedCpythonDistributionPublishReport(cpythonDistributionIndex, {
-        dryRun,
-        generatedAt,
-        owner,
-        reason: `Gitea owner ${owner} could not be provisioned`,
-      });
+      cpythonDistributions = blockedCpythonDistributionPublishReport(
+        publicationCpythonDistributionIndex,
+        {
+          dryRun,
+          generatedAt,
+          owner,
+          reason: `Gitea owner ${owner} could not be provisioned`,
+        }
+      );
       await fs.writeJsonAtomic(
         path.join(
           bundleDir,
@@ -678,6 +736,9 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
         dryRun,
         generatedAt,
         giteaBaseUrl: options.giteaBaseUrl,
+        ...(publicationScope.cpythonArtifactIds
+          ? { artifactIds: publicationScope.cpythonArtifactIds }
+          : {}),
         ...(options.onProgress
           ? {
               onProgress: (event) => {
@@ -713,6 +774,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     giteaBaseUrl: options.giteaBaseUrl,
     giteaClient: options.giteaClient,
     manifest: gitSources,
+    ...(options.gitPushTimeoutMs === undefined ? {} : { pushTimeoutMs: options.gitPushTimeoutMs }),
     ...(options.mirrorsDir ? { mirrorsDir: options.mirrorsDir } : {}),
     ...(options.onProgress
       ? {
@@ -757,6 +819,7 @@ export async function applyBundle(options: ApplyBundleOptions): Promise<ApplyBun
     ...(gitConfig ? { gitConfig } : {}),
     gitea,
     publish,
+    ...(publicationScope.report ? { pausedPublication: publicationScope.report } : {}),
     ...(python ? { python } : {}),
     ...(pythonApplications.enabled ? { pythonApplications } : {}),
     ...(cpythonDistributions.enabled ? { cpythonDistributions } : {}),
