@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
+import { formatPythonPlanningWarnings } from './core/python/planning-diagnostics.js';
 import {
   addWorkspaceTarget,
   addPythonRuntimeContract,
@@ -1575,6 +1576,12 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
     ...(configuredUv ? { uvBin: configuredUv } : {}),
   });
   const plannerWorkDir = await mkdtemp(path.join(os.tmpdir(), 'airgap-sync-plan-'));
+  let progress = '';
+  let progressKey = '';
+  const progressTimer = setInterval(() => {
+    if (progress) console.error(`[python-plan] still resolving ${progress}`);
+  }, 15_000);
+  progressTimer.unref();
   try {
     const resolver = new UvApplicationResolver();
     const results = [];
@@ -1594,6 +1601,14 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
             createdAt,
             cutoff,
             index: indexClient,
+            onProgress: (candidate) => {
+              const key = `${intent.application.name}==${candidate.applicationVersion} / Python ${candidate.pythonMinor} / ${candidate.platformFamilyId}`;
+              progress = `${key}${candidate.glibc ? ` / glibc ${candidate.glibc}` : ''}`;
+              if (key !== progressKey) {
+                console.error(`[python-plan] checking ${progress}`);
+                progressKey = key;
+              }
+            },
             intent,
             ...(recipe ? { recipe } : {}),
             resolver,
@@ -1610,6 +1625,7 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
           }
           throw error;
         }
+        progress = '';
         const plan = addPythonRuntimeContract(result.plan, {
           ...(recipe ? { recipe } : {}),
         });
@@ -1639,6 +1655,18 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
           targetIndex: index,
           workspaceDir: options.workspaceDir,
         });
+        for (const warning of formatPythonPlanningWarnings(
+          item.result,
+          path.join(
+            options.workspaceDir,
+            '.airgap-sync',
+            'python-plans',
+            item.storageTargetId,
+            'environment-plan.json'
+          )
+        )) {
+          console.error(`[python-plan] WARNING: ${warning}`);
+        }
         results.push({
           diff: stored.diff,
           index,
@@ -1652,6 +1680,7 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
     }
     return results;
   } finally {
+    clearInterval(progressTimer);
     await rm(plannerWorkDir, { force: true, recursive: true });
   }
 }

@@ -93,6 +93,13 @@ Project metadata such as `Requires-Python`, recipe policy, dependency resolution
 wheel availability may narrow them, with every omission recorded in the plan and final
 download report.
 
+Planning prints the application version and Python/platform candidate being checked,
+with a status message every 15 seconds while resolution is running. If newer candidate
+versions are rejected or requested Python minors are omitted, both `plan` and `download`
+print warnings and the path to the saved environment plan. Its
+`presentation.rejectedCandidateSummaries` preserves resolver stderr, including the
+specific dependency conflict or missing wheel; terminal warnings show a bounded summary.
+
 Each normal download refreshes `latest-compatible` selectors (including constrained
 selectors) against the source index. Exact selectors reuse current plans. A dry run
 uses existing planning evidence and does not check for newer releases.

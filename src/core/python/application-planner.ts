@@ -76,6 +76,12 @@ export interface PlanPythonApplicationOptions {
   createdAt?: string;
   cutoff?: string;
   index: PythonIndexClient;
+  onProgress?: (candidate: {
+    applicationVersion: string;
+    pythonMinor: string;
+    platformFamilyId: BuiltInPlatformFamilyId;
+    glibc?: string;
+  }) => void;
   intent: PythonApplicationIntent;
   plannerPolicy?: PythonPlannerPolicy;
   recipe?: PythonApplicationRecipe;
@@ -660,6 +666,12 @@ async function resolveCandidate(
       try {
         const branchName = `${applicationVersion}--py${pythonMinor.replace('.', '')}--${platformFamilyId}${glibc ? `--glibc-${glibc}` : ''}`;
         const requirements = exactRequirements(options.intent, applicationVersion, options.recipe);
+        options.onProgress?.({
+          applicationVersion,
+          pythonMinor,
+          platformFamilyId,
+          ...(glibc ? { glibc } : {}),
+        });
         const evidence = await options.resolver.resolve({
           ...(requirements.additionalRequirements.length > 0
             ? { additionalRequirements: requirements.additionalRequirements }
@@ -704,7 +716,9 @@ async function resolveCandidate(
           throw error;
         }
         const detail =
-          error instanceof UvResolutionError ? `${error.kind}: ${error.message}` : error.message;
+          error instanceof UvResolutionError
+            ? `${error.kind}: ${error.message}${error.stderr.trim() ? `\n${error.stderr.trim()}` : ''}`
+            : error.message;
         baselineFailures.push(`${glibc ? `glibc ${glibc}: ` : ''}${detail}`);
       }
     }

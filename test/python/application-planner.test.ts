@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { formatPythonPlanningWarnings } from '../../src/core/python/planning-diagnostics.js';
 import { addPythonRuntimeContract } from '../../src/core/python/runtime-contract.js';
 import {
   generatePythonPlannerCandidates,
@@ -262,14 +263,13 @@ describe('Python application planner', () => {
       workDir: '/work',
     });
     expect(result.plan.application.version).toBe('1.0.0');
-    expect(result.rejectedCandidates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          applicationVersion: '2.0.0',
-          reason: expect.stringContaining('selected features require a recipe'),
-        }),
-      ])
-    );
+    expect(
+      result.rejectedCandidates.some(
+        (candidate) =>
+          candidate.applicationVersion === '2.0.0' &&
+          candidate.reason.includes('selected features require a recipe')
+      )
+    ).toBe(true);
   });
 
   it('selects complete coverage, searches glibc floors, and keeps a minimum wheel cover', async () => {
@@ -584,6 +584,68 @@ describe('Python application planner', () => {
         reason.includes('no-wheel')
       )
     ).toBe(true);
+  });
+
+  it('reports progress, preserves resolver details, and warns on fallback and skipped Python', async () => {
+    const progress: string[] = [];
+    const detail =
+      'No solution found: native-dep has no usable wheels.\nBuilding from source is disabled.';
+    const result = await planPythonApplication({
+      cacheDir: '/cache',
+      coveragePolicy: normalizePlatformCoveragePolicy({
+        id: 'desktop-x64',
+        platforms: ['linux-glibc-x86_64'],
+      }),
+      index: new FixtureIndex(),
+      intent: { ...intent, python: { policy: 'selected', versions: ['3.11', '3.12'] } },
+      onProgress: (candidate) =>
+        progress.push(
+          `${candidate.applicationVersion}/${candidate.pythonMinor}/${candidate.glibc ?? 'none'}`
+        ),
+      plannerPolicy,
+      resolver: {
+        resolve: (request) => {
+          expect(progress.at(-1)).toContain(`/${request.pythonMinor}/${request.glibc ?? 'none'}`);
+          if (request.requirement.includes('2.0.0') || request.pythonMinor === '3.12') {
+            return Promise.reject(
+              new UvResolutionError('no-solution', 'Resolution failed', detail)
+            );
+          }
+          return Promise.resolve(lockEvidence('1.0.0'));
+        },
+      },
+      uvPath: '/tools/uv',
+      workDir: '/work',
+    });
+    expect(progress[0]).toBe('2.0.0/3.11/2.17');
+    expect(result.plan.presentation?.rejectedCandidateSummaries?.[0]).toContain(detail);
+    expect(result.rejectedCandidates[0]?.reason).toContain(detail);
+    const warnings = formatPythonPlanningWarnings(result, '/report/environment-plan.json').join(
+      '\n'
+    );
+    expect(warnings).toContain('selected 1.0.0; rejected 1 newer version(s), newest 2.0.0');
+    expect(warnings).toContain('native-dep has no usable wheels');
+    expect(warnings).toContain('skipped requested Python 3.12');
+    expect(warnings).toContain('/report/environment-plan.json');
+    expect(
+      formatPythonPlanningWarnings(
+        {
+          plan: { ...result.plan, presentation: { skippedPythonMinors: [] } },
+          rejectedCandidates: [],
+        },
+        '/report'
+      )
+    ).toEqual([]);
+    const longWarnings = formatPythonPlanningWarnings(
+      {
+        ...result,
+        rejectedCandidates: [
+          { applicationVersion: '2.0.0', pythonMinor: '3.11', reason: 'x'.repeat(5000) },
+        ],
+      },
+      '/report'
+    );
+    expect(longWarnings[1]!.length).toBeLessThan(550);
   });
 
   it('does not treat a planner tool failure as Python incompatibility', async () => {
