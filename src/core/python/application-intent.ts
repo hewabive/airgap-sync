@@ -1,3 +1,4 @@
+import type { PythonResolutionPolicy } from './source-policy.js';
 import type { InlinePlatformCoveragePolicy, PlatformCoveragePolicy } from './coverage-policy.js';
 
 export const initialPythonApplicationMinors = ['3.10', '3.11', '3.12', '3.13'];
@@ -29,6 +30,7 @@ export interface PythonApplicationIntent {
   python: PythonRuntimePolicy;
   source: {
     indexUrl?: string;
+    resolution?: PythonResolutionPolicy;
     type: 'pypi';
   };
   updatePolicy: 'manual';

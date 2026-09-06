@@ -51,7 +51,7 @@ describe('HttpPythonIndexClient', () => {
     let metadataRequests = 0;
     const { baseUrl } = await startServer((request, response) => {
       if (request.url === '/simple/demo/') {
-        expect(request.headers.accept).toBe('application/vnd.pypi.simple.v1+json');
+        expect(request.headers.accept).toContain('application/vnd.pypi.simple.v1+json');
         response.setHeader('content-type', 'application/vnd.pypi.simple.v1+json; charset=utf-8');
         response.end(
           JSON.stringify({
@@ -123,11 +123,33 @@ describe('HttpPythonIndexClient', () => {
     });
   });
 
-  it('rejects HTML indexes, unsupported API versions, and metadata hash mismatches', async () => {
+  it('reads HTML indexes including hashes, escaped attributes, metadata, and empty yanked reasons', async () => {
+    const { baseUrl } = await startServer((_request, response) => {
+      response.setHeader('content-type', 'text/html');
+      response.end(`<html><head><meta name="pypi:repository-version" content="1.0"></head><body>
+        <a href="../../files/demo-1.0-py3-none-any.whl#sha256=${'ab'.repeat(32)}"
+           data-requires-python="&gt;=3.11" data-yanked=""
+           data-core-metadata="sha256=${'cd'.repeat(32)}">demo-1.0-py3-none-any.whl</a>
+      </body></html>`);
+    });
+    const result = await new HttpPythonIndexClient(`${baseUrl}/simple`).getProject('Demo');
+    expect(result.files).toEqual([
+      {
+        filename: 'demo-1.0-py3-none-any.whl',
+        hashes: { sha256: 'ab'.repeat(32) },
+        coreMetadata: { sha256: 'cd'.repeat(32) },
+        requiresPython: '>=3.11',
+        yanked: true,
+        url: `${baseUrl}/files/demo-1.0-py3-none-any.whl#sha256=${'ab'.repeat(32)}`,
+      },
+    ]);
+  });
+
+  it('rejects unsupported content types, API versions, and metadata hash mismatches', async () => {
     const { baseUrl } = await startServer((request, response) => {
       if (request.url === '/html/demo/') {
-        response.setHeader('content-type', 'text/html');
-        response.end('<html></html>');
+        response.setHeader('content-type', 'text/plain');
+        response.end('invalid');
         return;
       }
       if (request.url === '/v2/demo/') {

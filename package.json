@@ -42,7 +42,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
-    "update:run": "node ./scripts/update-and-run.mjs"
+    "update:run": "node ./scripts/update-and-run.mjs",
+    "verify:python-offline": "node ./scripts/verify-python-offline.mjs"
   },
   "keywords": [
     "npm",
@@ -74,6 +75,7 @@
     "@renovatebot/pep440": "^5.0.0",
     "commander": "^14.0.2",
     "npm-package-arg": "^13.0.0",
+    "parse5": "^8.0.1",
     "semver": "^7.7.3",
     "smol-toml": "^1.7.0",
     "tar": "^7.5.22",

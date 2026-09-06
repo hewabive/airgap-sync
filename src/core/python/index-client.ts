@@ -1,3 +1,4 @@
+import { parse as parseHtml, type DefaultTreeAdapterMap } from 'parse5';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -167,6 +168,56 @@ function parseIndexFile(value: unknown, responseUrl: string): PythonIndexFile {
   };
 }
 
+function parseHtmlProject(html: string, responseUrl: string, name: string): PythonProjectIndex {
+  const files: PythonIndexFile[] = [];
+  let apiVersion = '1.0';
+  function visit(node: DefaultTreeAdapterMap['node']): void {
+    if ('tagName' in node) {
+      const attrs = Object.fromEntries(node.attrs.map((attr) => [attr.name, attr.value]));
+      if (node.tagName === 'meta' && attrs.name === 'pypi:repository-version')
+        apiVersion = attrs.content ?? '1.0';
+      if (node.tagName === 'a' && attrs.href) {
+        const url = new URL(attrs.href, responseUrl);
+        const filename = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+        if (
+          filename.endsWith('.whl') ||
+          filename.endsWith('.tar.gz') ||
+          filename.endsWith('.zip')
+        ) {
+          const metadata = attrs['data-core-metadata'] ?? attrs['data-dist-info-metadata'];
+          const separator = metadata?.indexOf('=') ?? -1;
+          files.push(
+            parseIndexFile(
+              {
+                filename,
+                url: url.toString(),
+                ...(attrs['data-requires-python']
+                  ? { 'requires-python': attrs['data-requires-python'] }
+                  : {}),
+                ...('data-yanked' in attrs ? { yanked: attrs['data-yanked'] || true } : {}),
+                ...(metadata
+                  ? {
+                      'core-metadata':
+                        separator > 0
+                          ? { [metadata.slice(0, separator)]: metadata.slice(separator + 1) }
+                          : metadata === 'true',
+                    }
+                  : {}),
+              },
+              responseUrl
+            )
+          );
+        }
+      }
+    }
+    if ('childNodes' in node) for (const child of node.childNodes) visit(child);
+  }
+  visit(parseHtml(html));
+  if (Number.parseInt(apiVersion.split('.')[0] ?? '', 10) !== 1)
+    throw new Error(`Unsupported Python Simple API version: ${apiVersion}`);
+  return { apiVersion, files, name };
+}
+
 function artifactIdentity(sourceIndex: string, file: PythonIndexFile): PythonArtifactIdentity {
   return {
     hashes: file.hashes,
@@ -233,9 +284,12 @@ export class HttpPythonIndexClient implements PythonIndexClient {
     const normalizedName = normalizePackageName(name);
     const response = await this.#fetch(
       `${this.#sourceIndex}/${encodeURIComponent(normalizedName)}/`,
-      simpleJsonContentType
+      `${simpleJsonContentType}, application/vnd.pypi.simple.v1+html;q=0.9, text/html;q=0.8`
     );
     const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
+    if (contentType === 'text/html' || contentType === 'application/vnd.pypi.simple.v1+html') {
+      return parseHtmlProject(await response.text(), response.url, normalizedName);
+    }
     if (contentType !== simpleJsonContentType) {
       throw new Error(
         `Python source index did not return the PEP 691 JSON content type for ${normalizedName}: ${contentType ?? 'missing'}`

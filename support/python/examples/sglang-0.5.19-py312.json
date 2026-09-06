@@ -1,0 +1,125 @@
+{
+  "defaults": {
+    "download": {
+      "includeDev": true,
+      "includePeer": false,
+      "latestPolicy": "bundled",
+      "prune": true,
+      "rangeResolutionPolicy": "reuse-stable",
+      "tagResolutionPolicy": "reuse-stable"
+    },
+    "publish": {
+      "configureGitGlobal": "ask",
+      "provisionGit": true,
+      "publicRepositories": true
+    },
+    "verifyInstall": {
+      "ignoreScripts": true
+    }
+  },
+  "giteaUrl": "http://gitea.local:3000",
+  "gitOwnerStrategy": "preserve",
+  "npmRegistry": {
+    "type": "verdaccio",
+    "url": "http://verdaccio.local:4873"
+  },
+  "output": "./airgap-bundle",
+  "python": {
+    "applicationDefaults": {
+      "coverage": "desktop-x64",
+      "runtime": {
+        "policy": "selected",
+        "versions": ["3.10", "3.11", "3.12", "3.13"]
+      }
+    },
+    "planner": {
+      "engine": "uv",
+      "version": "0.11.16"
+    },
+    "publication": {
+      "owner": {
+        "kind": "organization",
+        "name": "airgap-packages",
+        "strategy": "fixed-owner"
+      },
+      "visibility": "public"
+    },
+    "sourceIndex": "https://pypi.org/simple/"
+  },
+  "coveragePolicies": [
+    {
+      "id": "desktop-x64",
+      "platforms": ["linux-glibc-x86_64"],
+      "linux": {
+        "oldestSupportedGlibc": "2.39"
+      },
+      "version": 1,
+      "wheelStrategy": "minimum-cover"
+    }
+  ],
+  "schemaVersion": 2,
+  "sourceRegistry": "https://registry.npmjs.org",
+  "targets": [
+    {
+      "application": {
+        "extras": [],
+        "features": {},
+        "versionSelection": {
+          "selectors": [
+            {
+              "type": "exact",
+              "version": "0.5.19"
+            }
+          ]
+        }
+      },
+      "spec": "sglang",
+      "type": "python-app",
+      "python": {
+        "policy": "selected",
+        "versions": ["3.12"]
+      },
+      "resolution": {
+        "packageIndexes": [
+          {
+            "indexUrl": "https://pypi.nvidia.com/",
+            "packages": [
+              "cuda-tile",
+              "cuda-toolkit",
+              "nccl4py",
+              "nvidia-cublas",
+              "nvidia-cuda-cccl",
+              "nvidia-cuda-crt",
+              "nvidia-cuda-cupti",
+              "nvidia-cuda-nvcc",
+              "nvidia-cuda-nvdisasm",
+              "nvidia-cuda-nvrtc",
+              "nvidia-cuda-runtime",
+              "nvidia-cudnn-cu13",
+              "nvidia-cudnn-frontend",
+              "nvidia-cufft",
+              "nvidia-cufile",
+              "nvidia-curand",
+              "nvidia-cusolver",
+              "nvidia-cusparse",
+              "nvidia-cusparselt-cu13",
+              "nvidia-cutlass-dsl",
+              "nvidia-cutlass-dsl-libs-base",
+              "nvidia-cutlass-dsl-libs-core",
+              "nvidia-cutlass-dsl-libs-cu12",
+              "nvidia-cutlass-dsl-libs-cu13",
+              "nvidia-mathdx",
+              "nvidia-nccl-cu13",
+              "nvidia-nvjitlink",
+              "nvidia-nvshmem-cu13",
+              "nvidia-nvtx",
+              "nvidia-nvvm"
+            ],
+            "missingUploadTime": "allow"
+          }
+        ],
+        "prereleasePackages": ["cuda-tile", "flash-attn-4"]
+      }
+    }
+  ]
+}

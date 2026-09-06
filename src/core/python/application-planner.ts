@@ -683,6 +683,9 @@ async function resolveCandidate(
           pythonMinor,
           requirement: requirements.requirement,
           sourceIndex: options.index.sourceIndex,
+          ...(options.intent.source.resolution?.prerelease
+            ? { prerelease: options.intent.source.resolution.prerelease }
+            : {}),
           uvPath: options.uvPath,
           workDir: path.join(options.workDir, branchName),
         });

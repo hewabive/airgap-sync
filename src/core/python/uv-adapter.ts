@@ -1,3 +1,4 @@
+import type { PythonResolutionPolicy } from './source-policy.js';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
@@ -46,6 +47,7 @@ export interface UvResolveRequest {
   pythonMinor: string;
   requirement: string;
   sourceIndex: string;
+  prerelease?: PythonResolutionPolicy['prerelease'];
   uvPath: string;
   workDir: string;
 }
@@ -118,6 +120,24 @@ export function createUvCompileInvocation(
   commandRunnerEnvironment: NodeJS.ProcessEnv = process.env
 ): UvCommandInvocation {
   const platformTarget = uvPlatformTarget(request.platformFamilyId, request.glibc);
+  const sourceEnvironmentKeys = new Set([
+    'UV_INDEX',
+    'UV_DEFAULT_INDEX',
+    'UV_INDEX_URL',
+    'UV_EXTRA_INDEX_URL',
+    'UV_FIND_LINKS',
+    'UV_NO_INDEX',
+    'UV_PRERELEASE',
+    'UV_EXCLUDE_NEWER',
+    'UV_EXCLUDE_NEWER_PACKAGE',
+    'PIP_INDEX_URL',
+    'PIP_EXTRA_INDEX_URL',
+    'PIP_FIND_LINKS',
+    'PIP_NO_INDEX',
+  ]);
+  const environment = Object.fromEntries(
+    Object.entries(commandRunnerEnvironment).filter(([key]) => !sourceEnvironmentKeys.has(key))
+  );
   return {
     args: [
       'pip',
@@ -135,13 +155,14 @@ export function createUvCompileInvocation(
       '--index-url',
       request.sourceIndex,
       ...(request.cutoff ? ['--exclude-newer', request.cutoff] : []),
+      ...(request.prerelease ? ['--prerelease', request.prerelease] : []),
       '--output-file',
       outputPath,
     ],
     command: request.uvPath,
     cwd: request.workDir,
     env: {
-      ...commandRunnerEnvironment,
+      ...environment,
       UV_CACHE_DIR: path.resolve(request.cacheDir),
       UV_NO_CONFIG: '1',
       UV_NO_PROGRESS: '1',

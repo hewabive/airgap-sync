@@ -1,3 +1,7 @@
+import {
+  normalizePythonResolutionPolicy,
+  type PythonResolutionPolicy,
+} from './python/source-policy.js';
 import path from 'node:path';
 import * as fs from './fs.js';
 import { semanticDigest } from './canonical-json.js';
@@ -92,6 +96,7 @@ export interface WorkspaceCpythonDistributionsTarget extends WorkspaceTargetStat
 }
 
 export interface WorkspacePythonApplicationTarget extends WorkspaceTargetState {
+  resolution?: PythonResolutionPolicy;
   application: {
     extras: string[];
     features: Record<string, string>;
@@ -154,6 +159,7 @@ export interface WorkspaceDefaults {
 }
 
 export interface WorkspacePythonConfig {
+  resolution?: PythonResolutionPolicy;
   applicationDefaults?: {
     coverage: InlinePlatformCoveragePolicy | string;
     runtime: PythonRuntimePolicy;
@@ -500,6 +506,7 @@ function normalizePythonApplicationTarget(
   }
   extras = [...new Set(extras)].sort();
 
+  const resolution = normalizePythonResolutionPolicy(value.resolution);
   const coverage =
     value.coverage === undefined ? undefined : normalizePythonApplicationCoverage(value.coverage);
 
@@ -514,6 +521,7 @@ function normalizePythonApplicationTarget(
       ...(versionSelection ? { versionSelection } : {}),
     },
     ...(coverage ? { coverage } : {}),
+    ...(resolution ? { resolution } : {}),
     ...normalizeWorkspaceTargetState(value),
     ...(value.python !== undefined ? { python: normalizePythonRuntimePolicy(value.python) } : {}),
     spec: parsed.requirement.normalizedName,
@@ -863,6 +871,7 @@ function normalizeWorkspacePythonConfig(
   if (!applicationDefaults) {
     throw new Error('python.applicationDefaults must be an object');
   }
+  const resolution = normalizePythonResolutionPolicy(value.resolution);
   const sourceIndex = normalizeHttpUrl(
     optionalString(value.sourceIndex) ?? defaultWorkspacePythonSourceIndex,
     'python.sourceIndex'
@@ -906,6 +915,7 @@ function normalizeWorkspacePythonConfig(
     ...(publication ? { publication } : {}),
     ...(publishOwner ? { publishOwner } : {}),
     sourceIndex,
+    ...(resolution ? { resolution } : {}),
   };
 }
 
@@ -1127,6 +1137,7 @@ export function resolveWorkspacePythonApplication(
       policy: 'selected' as const,
       versions: [...initialPythonApplicationMinors],
     };
+  const resolution = target.resolution ?? config.python?.resolution;
   const versionSelection = target.application.versionSelection ?? {
     selectors: [
       {
@@ -1149,6 +1160,7 @@ export function resolveWorkspacePythonApplication(
       python,
       source: {
         ...(config.python?.sourceIndex ? { indexUrl: config.python.sourceIndex } : {}),
+        ...(resolution ? { resolution } : {}),
         type: 'pypi',
       },
       updatePolicy: 'manual',

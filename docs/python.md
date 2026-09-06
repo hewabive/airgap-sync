@@ -51,8 +51,9 @@ The envelope must never silently expand. Adding another Python minor, architectu
 operating-system family, libc family, application extra, or accelerator-specific
 artifact source can materially increase bundle size and must be visible in the plan.
 
-Future support may add ARM64, musl, macOS, more Python versions, private indexes, and
-additional artifact sources without changing the Gitea PyPI consumer contract.
+Explicit package assignments can use additional public Simple API indexes (HTML or
+JSON) without changing the Gitea PyPI consumer contract. Future support may add ARM64,
+musl, macOS, more Python versions, and authenticated private sources.
 
 ## Guarantee Boundary
 
@@ -103,6 +104,74 @@ specific dependency conflict or missing wheel; terminal warnings show a bounded 
 Each normal download refreshes `latest-compatible` selectors (including constrained
 selectors) against the source index. Exact selectors reuse current plans. A dry run
 uses existing planning evidence and does not check for newer releases.
+
+### Additional package sources and prerelease dependencies
+
+`python.resolution` sets workspace defaults; a target's `resolution` replaces that
+policy as a whole. These settings are part of the planning intent, so a change
+invalidates existing plans. They do not change npm resolution or publication settings.
+
+```json
+{
+  "resolution": {
+    "prereleasePackages": ["cuda-tile", "flash-attn-4"],
+    "packageIndexes": [
+      {
+        "indexUrl": "https://pypi.nvidia.com/",
+        "packages": ["cuda-tile"],
+        "missingUploadTime": "allow"
+      }
+    ]
+  }
+}
+```
+
+Each package is read only from its assigned index, including when that index has no
+matching version. Unassigned packages use `python.sourceIndex`. Assignments use exact,
+normalized package names; overlapping assignments are rejected. No arbitrary build
+backend is executed to discover additional sources. For example, a PyPI `wheel-stub`
+archive can refer to a vendor index, but the operator must configure that index.
+
+`prereleasePackages` allows prerelease dependency wheels only for named packages;
+other packages are restricted to stable releases. Alternatively, `prerelease` can be
+`allow`, `disallow`, or uv's `if-necessary-or-explicit`. The two settings cannot be used
+together. Without either, uv's default applies. This policy does not enable prerelease
+application candidates. A globally allowed prerelease policy can also select preview
+versions of otherwise ordinary dependencies.
+
+When package assignments or a scoped prerelease policy are present, uv and the wheel
+enumerator share a lazily captured, immutable project view through a temporary
+loopback index. Files with upload dates after the planning cutoff are excluded.
+Files without upload dates are excluded unless their assigned index explicitly uses
+`missingUploadTime: "allow"`. This permits artifacts observed now; it does **not**
+claim that they existed at a historical cutoff. Invalid dates and yanked files are
+excluded. The workspace plan directory also receives `source-snapshot.json` with
+source URLs, observation times, hashes and eligible project files. Plans and bundle
+manifests retain original artifact URLs and hashes, never the loopback file URLs.
+
+Source settings inherited from the collector's uv/pip environment cannot add another
+index or override the configured prerelease/cutoff policy. Source network failures
+abort planning rather than being treated as package incompatibility.
+
+The [SGLang example](../support/python/examples/sglang-0.5.19-py312.json) provides a
+complete workspace for SGLang 0.5.19, Python 3.12, Linux x86-64 and glibc 2.39, with
+the NVIDIA package assignments needed for its CUDA 13 dependency family. Copy it to
+an isolated directory as `airgap-sync.json`, then run `plan .` and `download --target 1`
+from that directory. Additional dependencies or different releases may require new
+explicit assignments. CUDA drivers, GPU hardware and model files are separate runtime
+requirements; selecting this profile is not a claim of GPU compatibility.
+
+After building the CLI, verify wheel integrity and a fresh installation using only
+local artifacts (an appropriate Python interpreter and uv must already be installed):
+
+```sh
+UV_BIN=/path/to/uv node scripts/verify-python-offline.mjs /path/to/airgap-bundle 'sglang==0.5.19' 3.12
+```
+
+The script uses `uv --offline`, disables source builds and remote indexes, installs
+into a temporary environment, runs `uv pip check`, emits a JSON result, and removes
+the environment. Allow disk space for the uncompressed installation in addition to
+the wheel bundle. It does not launch SGLang or test a GPU.
 
 Recipe `compatibility.applicationVersions` scopes the versions to which the recipe
 applies; it does not pin the target. Versions outside that scope use the generic

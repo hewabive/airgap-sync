@@ -32,6 +32,35 @@ import {
 let tempDir: string;
 
 describe('workspace config', () => {
+  it('round-trips source policies and includes target overrides in planning intent', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    config.python!.resolution = { prerelease: 'disallow' };
+    config.targets = [
+      {
+        type: 'python-app',
+        spec: 'demo',
+        application: { extras: [], features: {} },
+        resolution: {
+          prerelease: 'allow',
+          packageIndexes: [
+            { indexUrl: 'https://vendor.test/', packages: ['demo'], missingUploadTime: 'allow' },
+          ],
+        },
+      },
+    ];
+    await writeWorkspaceConfig(tempDir, config);
+    const restored = await readWorkspaceConfig(tempDir);
+    const target = restored.targets[0]!;
+    if (target.type !== 'python-app') throw new Error('wrong target');
+    expect(resolveWorkspacePythonApplication(restored, target).intent.source.resolution).toEqual(
+      target.resolution
+    );
+    delete target.resolution;
+    expect(resolveWorkspacePythonApplication(restored, target).intent.source.resolution).toEqual({
+      prerelease: 'disallow',
+    });
+  });
+
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-workspace-'));
   });

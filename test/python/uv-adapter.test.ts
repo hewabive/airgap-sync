@@ -74,6 +74,26 @@ describe('uv application resolver adapter', () => {
     expect(uvPlatformTarget('windows-x86_64')).toBe('x86_64-pc-windows-msvc');
   });
 
+  it('uses the requested prerelease policy and removes ambient source overrides', () => {
+    const invocation = createUvCompileInvocation(
+      { ...request(), prerelease: 'allow' },
+      '/in',
+      '/out',
+      {
+        UV_INDEX: 'https://unconfigured.test/',
+        UV_FIND_LINKS: '/other-wheels',
+        UV_PRERELEASE: 'disallow',
+        PATH: '/bin',
+      }
+    );
+    expect(invocation.args).toContain('--prerelease');
+    expect(invocation.args[invocation.args.indexOf('--prerelease') + 1]).toBe('allow');
+    expect(invocation.env.UV_INDEX).toBeUndefined();
+    expect(invocation.env.UV_FIND_LINKS).toBeUndefined();
+    expect(invocation.env.UV_PRERELEASE).toBeUndefined();
+    expect(invocation.env.PATH).toBe('/bin');
+  });
+
   it('maps uv failures to stable planner error kinds', () => {
     expect(classifyUvResolutionFailure('No solution found when resolving')).toBe('no-solution');
     expect(

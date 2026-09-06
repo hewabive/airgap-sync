@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises';
 import { Command } from 'commander';
+import { createPythonPlanningSource } from './core/python/planning-source.js';
 import { formatPythonPlanningWarnings } from './core/python/planning-diagnostics.js';
 import {
   addWorkspaceTarget,
@@ -1589,93 +1590,125 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
       const application = resolveWorkspacePythonApplication(options.config, target);
       const sourceIndex = application.intent.source.indexUrl ?? 'https://pypi.org/simple/';
       const recipe = await readWorkspacePythonRecipe(options.workspaceDir, target);
-      const indexClient = new MemoizedPythonIndexClient(new HttpPythonIndexClient(sourceIndex));
-      const planned = [];
-      for (const [selectorIndex, selector] of application.versionSelection.selectors.entries()) {
-        const intent = pythonApplicationIntentForVersionSelector(application, selector);
-        let result;
-        try {
-          result = await planPythonApplication({
-            cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'uv-cache'),
-            coveragePolicy: application.coveragePolicy,
-            createdAt,
-            cutoff,
-            index: indexClient,
-            onProgress: (candidate) => {
-              const key = `${intent.application.name}==${candidate.applicationVersion} / Python ${candidate.pythonMinor} / ${candidate.platformFamilyId}`;
-              progress = `${key}${candidate.glibc ? ` / glibc ${candidate.glibc}` : ''}`;
-              if (key !== progressKey) {
-                console.error(`[python-plan] checking ${progress}`);
-                progressKey = key;
-              }
-            },
-            intent,
+      const source =
+        application.intent.source.resolution?.packageIndexes?.length ||
+        application.intent.source.resolution?.prereleasePackages !== undefined
+          ? await createPythonPlanningSource({
+              sourceIndex,
+              resolution: application.intent.source.resolution,
+              cutoff,
+              resolver,
+            })
+          : undefined;
+      try {
+        const indexClient =
+          source?.index ?? new MemoizedPythonIndexClient(new HttpPythonIndexClient(sourceIndex));
+        for (const route of application.intent.source.resolution?.packageIndexes ?? []) {
+          console.error(
+            `[python-plan] source ${route.indexUrl}: ${route.packages.join(', ')}${route.missingUploadTime === 'allow' ? ' (files without upload dates are captured as observed now)' : ''}`
+          );
+        }
+        const planned = [];
+        for (const [selectorIndex, selector] of application.versionSelection.selectors.entries()) {
+          const intent = pythonApplicationIntentForVersionSelector(application, selector);
+          let result;
+          try {
+            result = await planPythonApplication({
+              cacheDir: path.join(options.workspaceDir, '.airgap-sync', 'uv-cache'),
+              coveragePolicy: application.coveragePolicy,
+              createdAt,
+              cutoff,
+              index: indexClient,
+              onProgress: (candidate) => {
+                const key = `${intent.application.name}==${candidate.applicationVersion} / Python ${candidate.pythonMinor} / ${candidate.platformFamilyId}`;
+                progress = `${key}${candidate.glibc ? ` / glibc ${candidate.glibc}` : ''}`;
+                if (key !== progressKey) {
+                  console.error(`[python-plan] checking ${progress}`);
+                  progressKey = key;
+                }
+              },
+              intent,
+              ...(recipe ? { recipe } : {}),
+              resolver: source?.resolver ?? resolver,
+              uvPath,
+              workDir: path.join(plannerWorkDir, String(index), String(selectorIndex)),
+            });
+          } catch (error) {
+            if (error instanceof PythonApplicationPlanningError) {
+              const label = selector.type === 'exact' ? selector.version : 'latest-compatible';
+              throw new PythonApplicationPlanningError(
+                `Version selector ${label} failed: ${error.message}`,
+                error.rejectedCandidates
+              );
+            }
+            throw error;
+          }
+          progress = '';
+          const plan = addPythonRuntimeContract(result.plan, {
             ...(recipe ? { recipe } : {}),
-            resolver,
-            uvPath,
-            workDir: path.join(plannerWorkDir, String(index), String(selectorIndex)),
           });
-        } catch (error) {
-          if (error instanceof PythonApplicationPlanningError) {
-            const label = selector.type === 'exact' ? selector.version : 'latest-compatible';
-            throw new PythonApplicationPlanningError(
-              `Version selector ${label} failed: ${error.message}`,
-              error.rejectedCandidates
+          planned.push({
+            plan,
+            result,
+            selector,
+            storageTargetId: pythonApplicationSelectorId(
+              plan.application.name,
+              plan.coverage.policy.id,
+              selector
+            ),
+            targetId: pythonApplicationVariantId(
+              plan.application.name,
+              plan.application.version,
+              plan.coverage.policy.id
+            ),
+          });
+        }
+
+        for (const item of planned) {
+          const stored = await writeActivePythonApplicationPlan({
+            evidence: item.result.evidence,
+            generatedAt: createdAt,
+            plan: item.plan,
+            targetId: item.storageTargetId,
+            targetIndex: index,
+            workspaceDir: options.workspaceDir,
+          });
+          if (source) {
+            await writeFile(
+              path.join(
+                options.workspaceDir,
+                '.airgap-sync',
+                'python-plans',
+                item.storageTargetId,
+                'source-snapshot.json'
+              ),
+              JSON.stringify(source.snapshot())
             );
           }
-          throw error;
+          for (const warning of formatPythonPlanningWarnings(
+            item.result,
+            path.join(
+              options.workspaceDir,
+              '.airgap-sync',
+              'python-plans',
+              item.storageTargetId,
+              'environment-plan.json'
+            )
+          )) {
+            console.error(`[python-plan] WARNING: ${warning}`);
+          }
+          results.push({
+            diff: stored.diff,
+            index,
+            plan: item.plan,
+            rejectedCandidates: item.result.rejectedCandidates,
+            selector: item.selector,
+            storageTargetId: item.storageTargetId,
+            targetId: item.targetId,
+          });
         }
-        progress = '';
-        const plan = addPythonRuntimeContract(result.plan, {
-          ...(recipe ? { recipe } : {}),
-        });
-        planned.push({
-          plan,
-          result,
-          selector,
-          storageTargetId: pythonApplicationSelectorId(
-            plan.application.name,
-            plan.coverage.policy.id,
-            selector
-          ),
-          targetId: pythonApplicationVariantId(
-            plan.application.name,
-            plan.application.version,
-            plan.coverage.policy.id
-          ),
-        });
-      }
-
-      for (const item of planned) {
-        const stored = await writeActivePythonApplicationPlan({
-          evidence: item.result.evidence,
-          generatedAt: createdAt,
-          plan: item.plan,
-          targetId: item.storageTargetId,
-          targetIndex: index,
-          workspaceDir: options.workspaceDir,
-        });
-        for (const warning of formatPythonPlanningWarnings(
-          item.result,
-          path.join(
-            options.workspaceDir,
-            '.airgap-sync',
-            'python-plans',
-            item.storageTargetId,
-            'environment-plan.json'
-          )
-        )) {
-          console.error(`[python-plan] WARNING: ${warning}`);
-        }
-        results.push({
-          diff: stored.diff,
-          index,
-          plan: item.plan,
-          rejectedCandidates: item.result.rejectedCandidates,
-          selector: item.selector,
-          storageTargetId: item.storageTargetId,
-          targetId: item.targetId,
-        });
+      } finally {
+        await source?.close();
       }
     }
     return results;
