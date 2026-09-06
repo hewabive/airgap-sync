@@ -1589,6 +1589,15 @@ async function planWorkspacePythonApplications(options: PlanWorkspacePythonAppli
     for (const { index, target } of targets) {
       const application = resolveWorkspacePythonApplication(options.config, target);
       const sourceIndex = application.intent.source.indexUrl ?? 'https://pypi.org/simple/';
+      if (
+        !target.resolution &&
+        !options.config.python?.resolution &&
+        application.intent.source.resolution
+      ) {
+        console.error(
+          `[python-plan] using maintained source profile for ${application.intent.application.name}`
+        );
+      }
       const recipe = await readWorkspacePythonRecipe(options.workspaceDir, target);
       const source =
         application.intent.source.resolution?.packageIndexes?.length ||

@@ -170,6 +170,29 @@ describe('workspace Python application plan preflight', () => {
     expect(result.targets[0]?.activePlan.plan.application.version).toBe('2.0.0');
   });
 
+  it('invalidates an old SGLang plan when maintained sources become available', async () => {
+    const target = applicationTarget('sglang');
+    config.targets = [target];
+    let stored = activePlanFor(config, target);
+    delete stored.plan.intent.source.resolution;
+    const reasons: string[] = [];
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      onPlanRequired: (requirements) => reasons.push(...requirements.map((item) => item.reason)),
+      planTargets: () => {
+        stored = activePlanFor(config, target, undefined, undefined, '0.5.19');
+        return Promise.resolve();
+      },
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+    expect(reasons).toEqual(['stale']);
+    expect(
+      result.targets[0]?.activePlan.plan.intent.source.resolution?.packageIndexes?.[0]?.packages
+    ).toContain('cuda-tile');
+  });
+
   it('can inspect the current latest plan without refreshing for a dry run', async () => {
     const stored = activePlanFor(config, config.targets[0] as WorkspacePythonApplicationTarget);
     const result = await ensureWorkspacePythonApplicationPlans({

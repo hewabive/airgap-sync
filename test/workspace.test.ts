@@ -61,6 +61,75 @@ describe('workspace config', () => {
     });
   });
 
+  it('automatically supplies SGLang sources to existing latest targets without modifying their config', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    const target = {
+      type: 'python-app' as const,
+      spec: 'SGLang',
+      application: { extras: [], features: {} },
+    };
+    config.targets = [target];
+    await writeWorkspaceConfig(tempDir, config);
+    const restored = await readWorkspaceConfig(tempDir);
+    const saved = restored.targets[0]!;
+    if (saved.type !== 'python-app') throw new Error('wrong target');
+    const resolved = resolveWorkspacePythonApplication(restored, saved);
+    expect(saved.resolution).toBeUndefined();
+    expect(resolved.versionSelection.selectors).toEqual([{ type: 'latest-compatible' }]);
+    expect(resolved.intent.application.version).toBeUndefined();
+    expect(resolved.intent.source.resolution?.prereleasePackages).toEqual([
+      'cuda-tile',
+      'flash-attn-4',
+    ]);
+    expect(resolved.intent.source.resolution?.packageIndexes?.[0]?.indexUrl).toBe(
+      'https://pypi.nvidia.com/'
+    );
+    expect(resolved.intent.source.resolution?.packageIndexes?.[0]?.packages).toContain('cuda-tile');
+    resolved.intent.source.resolution!.packageIndexes![0]!.packages.length = 0;
+    expect(
+      resolveWorkspacePythonApplication(restored, saved).intent.source.resolution
+        ?.packageIndexes?.[0]?.packages
+    ).toContain('cuda-tile');
+  });
+
+  it('respects explicit policies, custom primary indexes, exact selectors, and coverage with maintained sources', async () => {
+    const config = await initWorkspace({ workspaceDir: tempDir });
+    const target = {
+      type: 'python-app' as const,
+      spec: 'sglang',
+      application: {
+        extras: [],
+        features: {},
+        versionSelection: { selectors: [{ type: 'exact' as const, version: '0.5.19' }] },
+      },
+      python: { policy: 'selected' as const, versions: ['3.11'] },
+    };
+    const automatic = resolveWorkspacePythonApplication(config, target);
+    expect(automatic.versionSelection).toEqual(target.application.versionSelection);
+    expect(automatic.intent.python).toEqual(target.python);
+    expect(automatic.coveragePolicy).toEqual(
+      resolveWorkspacePythonApplication(config, { ...target, resolution: {} }).coveragePolicy
+    );
+    config.python!.resolution = { prerelease: 'disallow' };
+    expect(resolveWorkspacePythonApplication(config, target).intent.source.resolution).toEqual({
+      prerelease: 'disallow',
+    });
+    expect(
+      resolveWorkspacePythonApplication(config, { ...target, resolution: {} }).intent.source
+        .resolution
+    ).toEqual({});
+    delete config.python!.resolution;
+    config.python!.sourceIndex = 'https://mirror.test/simple/';
+    expect(
+      resolveWorkspacePythonApplication(config, target).intent.source.resolution
+    ).toBeUndefined();
+    config.python!.sourceIndex = 'https://pypi.org/simple/';
+    expect(
+      resolveWorkspacePythonApplication(config, { ...target, spec: 'other' }).intent.source
+        .resolution
+    ).toBeUndefined();
+  });
+
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'airgap-sync-workspace-'));
   });

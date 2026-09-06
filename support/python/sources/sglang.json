@@ -1,0 +1,41 @@
+{
+  "packageIndexes": [
+    {
+      "indexUrl": "https://pypi.nvidia.com/",
+      "packages": [
+        "cuda-tile",
+        "cuda-toolkit",
+        "nccl4py",
+        "nvidia-cublas",
+        "nvidia-cuda-cccl",
+        "nvidia-cuda-crt",
+        "nvidia-cuda-cupti",
+        "nvidia-cuda-nvcc",
+        "nvidia-cuda-nvdisasm",
+        "nvidia-cuda-nvrtc",
+        "nvidia-cuda-runtime",
+        "nvidia-cudnn-cu13",
+        "nvidia-cudnn-frontend",
+        "nvidia-cufft",
+        "nvidia-cufile",
+        "nvidia-curand",
+        "nvidia-cusolver",
+        "nvidia-cusparse",
+        "nvidia-cusparselt-cu13",
+        "nvidia-cutlass-dsl",
+        "nvidia-cutlass-dsl-libs-base",
+        "nvidia-cutlass-dsl-libs-core",
+        "nvidia-cutlass-dsl-libs-cu12",
+        "nvidia-cutlass-dsl-libs-cu13",
+        "nvidia-mathdx",
+        "nvidia-nccl-cu13",
+        "nvidia-nvjitlink",
+        "nvidia-nvshmem-cu13",
+        "nvidia-nvtx",
+        "nvidia-nvvm"
+      ],
+      "missingUploadTime": "allow"
+    }
+  ],
+  "prereleasePackages": ["cuda-tile", "flash-attn-4"]
+}

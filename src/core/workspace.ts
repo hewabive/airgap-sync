@@ -1,3 +1,4 @@
+import { maintainedPythonResolutionPolicy } from './python/maintained-source-policies.js';
 import {
   normalizePythonResolutionPolicy,
   type PythonResolutionPolicy,
@@ -1137,7 +1138,13 @@ export function resolveWorkspacePythonApplication(
       policy: 'selected' as const,
       versions: [...initialPythonApplicationMinors],
     };
-  const resolution = target.resolution ?? config.python?.resolution;
+  const resolution =
+    target.resolution ??
+    config.python?.resolution ??
+    maintainedPythonResolutionPolicy(
+      parsed.requirement.normalizedName,
+      config.python?.sourceIndex ?? defaultWorkspacePythonSourceIndex
+    );
   const versionSelection = target.application.versionSelection ?? {
     selectors: [
       {

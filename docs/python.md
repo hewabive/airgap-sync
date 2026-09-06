@@ -107,8 +107,31 @@ uses existing planning evidence and does not check for newer releases.
 
 ### Additional package sources and prerelease dependencies
 
-`python.resolution` sets workspace defaults; a target's `resolution` replaces that
-policy as a whole. These settings are part of the planning intent, so a change
+For supported public applications, maintained source profiles are applied automatically.
+Currently, a plain `sglang` target using PyPI receives the NVIDIA package assignments
+and scoped prerelease policy from `support/python/sources/sglang.json`. This applies to
+existing workspaces as well as newly added targets, without copying configuration.
+The CLI announces the maintained profile and its sources during planning.
+
+```json
+{
+  "type": "python-app",
+  "spec": "sglang",
+  "application": { "extras": [], "features": {} }
+}
+```
+
+With no version constraint, this target checks the latest compatible stable SGLang
+release on every download. A maintained source profile contains no application version
+pin and does not change Python versions, platform coverage, or glibc requirements.
+Changes to the maintained policy invalidate old plans automatically. If upstream adds
+new source requirements outside the maintained profile, the profile needs an airgap-sync
+update; normal incompatibility warnings still report any fallback.
+
+An explicit target `resolution` takes precedence over `python.resolution`, which takes
+precedence over the maintained profile. Policies replace one another as a whole. Use
+`resolution: {}` to disable the maintained profile. A custom primary index does not
+implicitly enable additional public sources; its source policy must be explicit. These settings are part of the planning intent, so a change
 invalidates existing plans. They do not change npm resolution or publication settings.
 
 ```json
@@ -130,7 +153,8 @@ Each package is read only from its assigned index, including when that index has
 matching version. Unassigned packages use `python.sourceIndex`. Assignments use exact,
 normalized package names; overlapping assignments are rejected. No arbitrary build
 backend is executed to discover additional sources. For example, a PyPI `wheel-stub`
-archive can refer to a vendor index, but the operator must configure that index.
+archive can refer to a vendor index, but that index must be declared in the maintained
+profile or in explicit resolution settings.
 
 `prereleasePackages` allows prerelease dependency wheels only for named packages;
 other packages are restricted to stable releases. Alternatively, `prerelease` can be
@@ -154,11 +178,12 @@ index or override the configured prerelease/cutoff policy. Source network failur
 abort planning rather than being treated as package incompatibility.
 
 The [SGLang example](../support/python/examples/sglang-0.5.19-py312.json) provides a
-complete workspace for SGLang 0.5.19, Python 3.12, Linux x86-64 and glibc 2.39, with
-the NVIDIA package assignments needed for its CUDA 13 dependency family. Copy it to
+complete workspace pinned to SGLang 0.5.19 for reproducible verification on Python
+3.12, Linux x86-64 and glibc 2.39. It uses the automatic source profile for the CUDA 13
+dependency family. For automatic application updates, omit its exact version selector
+or use `latest-compatible`. Copy it to
 an isolated directory as `airgap-sync.json`, then run `plan .` and `download --target 1`
-from that directory. Additional dependencies or different releases may require new
-explicit assignments. CUDA drivers, GPU hardware and model files are separate runtime
+from that directory. CUDA drivers, GPU hardware and model files are separate runtime
 requirements; selecting this profile is not a claim of GPU compatibility.
 
 After building the CLI, verify wheel integrity and a fresh installation using only
