@@ -16,6 +16,7 @@ import {
   assertPythonApplicationRecipeCurrent,
   pythonRecipeIncompatibilityReason,
   resolvePythonApplicationRecipe,
+  pythonApplicationRecipeForVersion,
   type PythonApplicationRecipe,
 } from './application-recipe.js';
 import { normalizePackageName } from './names.js';
@@ -129,7 +130,6 @@ function indexFileAllowed(file: PythonIndexFile, cutoff: string | undefined): bo
 function applicationVersions(
   project: PythonProjectIndex,
   intent: PythonApplicationIntent,
-  recipe: PythonApplicationRecipe | undefined,
   cutoff: string | undefined
 ): string[] {
   const versions = new Set<string>();
@@ -148,9 +148,7 @@ function applicationVersions(
   return [...versions]
     .filter(
       (version) =>
-        (!intent.application.version || versionSatisfies(version, intent.application.version)) &&
-        (!recipe?.compatibility?.applicationVersions ||
-          versionSatisfies(version, recipe.compatibility.applicationVersions))
+        !intent.application.version || versionSatisfies(version, intent.application.version)
     )
     .sort((left, right) => compareVersions(right, left));
 }
@@ -194,7 +192,11 @@ export function generatePythonPlannerCandidates(options: {
 }): PythonPlannerCandidate[] {
   const policy = options.plannerPolicy ?? defaultPythonPlannerPolicy;
   return options.applicationVersions.flatMap((applicationVersion) =>
-    orderedPythonMinors(policy, options.intent, options.recipe).map((pythonMinor) => {
+    orderedPythonMinors(
+      policy,
+      options.intent,
+      pythonApplicationRecipeForVersion(options.recipe, applicationVersion)
+    ).map((pythonMinor) => {
       const platforms: PythonPlannerCandidate['platforms'] = [];
       for (const platformFamilyId of options.coveragePolicy.platforms) {
         if (platformFamilyId === 'linux-glibc-x86_64') {
@@ -724,10 +726,9 @@ export async function planPythonApplication(
   options: PlanPythonApplicationOptions
 ): Promise<PlanPythonApplicationResult> {
   const createdAt = options.createdAt ?? new Date().toISOString();
-  assertPythonApplicationRecipeCurrent(options.recipe, createdAt);
   resolvePythonApplicationRecipe(options.recipe, options.intent);
   const rootProject = await options.index.getProject(options.intent.application.name);
-  const versions = applicationVersions(rootProject, options.intent, options.recipe, options.cutoff);
+  const versions = applicationVersions(rootProject, options.intent, options.cutoff);
   if (versions.length === 0) {
     throw new PythonApplicationPlanningError(
       `No stable application version satisfies ${options.intent.application.version ?? 'the requested policy'}`,
@@ -754,6 +755,13 @@ export async function planPythonApplication(
     ...new Set(uniqueCandidates.map((candidate) => candidate.applicationVersion)),
   ];
   for (const applicationVersion of applicationVersionCandidates) {
+    const recipe = pythonApplicationRecipeForVersion(options.recipe, applicationVersion);
+    assertPythonApplicationRecipeCurrent(recipe, createdAt);
+    const candidateOptions = { ...options };
+    if (!recipe) {
+      delete candidateOptions.recipe;
+    }
+
     const pythonMinors = uniqueCandidates
       .filter((candidate) => candidate.applicationVersion === applicationVersion)
       .map((candidate) => candidate.pythonMinor);
@@ -765,8 +773,20 @@ export async function planPythonApplication(
       pythonMinor: string;
     }[] = [];
     for (const pythonMinor of pythonMinors) {
+      if (
+        options.recipe &&
+        !recipe &&
+        Object.keys(options.intent.application.features).length > 0
+      ) {
+        rejectedCandidates.push({
+          applicationVersion,
+          pythonMinor,
+          reason: `recipe-incompatible: selected features require a recipe covering ${applicationVersion}`,
+        });
+        continue;
+      }
       const resolved = await resolveCandidate(
-        options,
+        candidateOptions,
         rootProject,
         applicationVersion,
         pythonMinor,

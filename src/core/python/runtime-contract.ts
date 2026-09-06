@@ -4,7 +4,10 @@ import {
   type PythonEnvironmentPlanInput,
   type PythonRuntimeContract,
 } from './environment-plan.js';
-import type { PythonApplicationRecipe } from './application-recipe.js';
+import {
+  pythonApplicationRecipeForVersion,
+  type PythonApplicationRecipe,
+} from './application-recipe.js';
 
 export interface AddPythonRuntimeContractOptions {
   recipe?: PythonApplicationRecipe;
@@ -42,6 +45,7 @@ export function addPythonRuntimeContract(
   plan: PythonEnvironmentPlan,
   options: AddPythonRuntimeContractOptions = {}
 ): PythonEnvironmentPlan {
+  const recipe = pythonApplicationRecipeForVersion(options.recipe, plan.application.version);
   const input: PythonEnvironmentPlanInput = {
     application: plan.application,
     coverage: plan.coverage,
@@ -52,12 +56,12 @@ export function addPythonRuntimeContract(
     ...(plan.presentation ? { presentation: plan.presentation } : {}),
     ...(plan.recipe ? { recipe: plan.recipe } : {}),
     resolver: plan.resolver,
-    runtimeContract: runtimeContract(plan, options.recipe),
+    runtimeContract: runtimeContract(plan, recipe),
     schemaVersion: plan.schemaVersion,
-    ...(options.recipe?.healthChecks?.length
+    ...(recipe?.healthChecks?.length
       ? {
           verification: {
-            healthChecks: options.recipe.healthChecks,
+            healthChecks: recipe.healthChecks,
           },
         }
       : plan.verification

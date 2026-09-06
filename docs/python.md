@@ -93,6 +93,17 @@ Project metadata such as `Requires-Python`, recipe policy, dependency resolution
 wheel availability may narrow them, with every omission recorded in the plan and final
 download report.
 
+Each normal download refreshes `latest-compatible` selectors (including constrained
+selectors) against the source index. Exact selectors reuse current plans. A dry run
+uses existing planning evidence and does not check for newer releases.
+
+Recipe `compatibility.applicationVersions` scopes the versions to which the recipe
+applies; it does not pin the target. Versions outside that scope use the generic
+planner without the recipe's extras, compatibility rules, prerequisites, or health
+checks. Explicitly selected recipe features require a recipe covering the candidate
+version; unsupported candidates are rejected with a reason. To pin an application,
+use an exact target version selector.
+
 An application-specific recipe may describe package-index choices, required extras,
 known incompatibilities, and diagnostic metadata. Recipes are policy adapters, not
 installers. The generic planner must remain useful for applications without recipes.

@@ -4745,12 +4745,13 @@ program
         timing.switchTo('Plan Python applications');
         const pythonApplicationPreflight = await ensureWorkspacePythonApplicationPlans({
           config,
+          refreshLatest: options.dryRun !== true,
           onPlanRequired: (requirements) => {
             console.error(
               `[download] planning Python applications: ${requirements
                 .map(
                   (requirement) =>
-                    `${requirement.targetId} (${requirement.reason === 'stale' ? 'configuration changed' : 'plan missing'})`
+                    `${requirement.targetId} (${requirement.reason === 'refresh-latest' ? 'checking latest compatible version' : requirement.reason === 'stale' ? 'configuration changed' : 'plan missing'})`
                 )
                 .join(', ')}`
             );

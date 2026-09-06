@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { addPythonRuntimeContract } from '../../src/core/python/runtime-contract.js';
 import {
   generatePythonPlannerCandidates,
   planPythonApplication,
@@ -187,6 +188,88 @@ describe('Python application planner', () => {
       ],
       pythonMinor: '3.11',
     });
+  });
+
+  it.each([undefined, '==2.0.0'])(
+    'does not pin a target %s through an older recipe',
+    async (version) => {
+      const recipe = {
+        application: 'demo-app',
+        compatibility: { applicationVersions: '==1.0.0', requiresPython: '<3.11' },
+        requiredExtras: ['old-extra'],
+        healthChecks: [{ command: 'old-command', args: [] }],
+        systemPrerequisites: ['old prerequisite'],
+        id: 'demo-old',
+        schemaVersion: 1 as const,
+        version: '1',
+      };
+      const result = await planPythonApplication({
+        cacheDir: '/cache',
+        coveragePolicy: normalizePlatformCoveragePolicy({
+          id: 'desktop-x64',
+          platforms: ['windows-x86_64'],
+        }),
+        index: new FixtureIndex(),
+        intent: {
+          ...intent,
+          application: { ...intent.application, ...(version ? { version } : {}) },
+        },
+        plannerPolicy,
+        recipe,
+        resolver: {
+          resolve: (request) => {
+            expect(request.requirement).toBe('demo-app==2.0.0');
+            return Promise.resolve(lockEvidence('2.0.0'));
+          },
+        },
+        uvPath: '/tools/uv',
+        workDir: '/work',
+      });
+      expect(result.plan.application.version).toBe('2.0.0');
+      const plan = addPythonRuntimeContract(result.plan, { recipe });
+      expect(plan.verification).toBeUndefined();
+      expect(plan.runtimeContract?.platforms[0]?.systemPrerequisites).not.toContain(
+        'old prerequisite'
+      );
+    }
+  );
+
+  it('keeps selected features within the recipe scope and explains rejected newer versions', async () => {
+    const result = await planPythonApplication({
+      cacheDir: '/cache',
+      coveragePolicy: normalizePlatformCoveragePolicy({
+        id: 'desktop-x64',
+        platforms: ['windows-x86_64'],
+      }),
+      index: new FixtureIndex(),
+      intent: { ...intent, application: { ...intent.application, features: { mode: 'cpu' } } },
+      plannerPolicy,
+      recipe: {
+        application: 'demo-app',
+        compatibility: { applicationVersions: '==1.0.0' },
+        features: [{ name: 'mode', description: 'Mode', values: [{ value: 'cpu' }] }],
+        id: 'demo-old',
+        schemaVersion: 1,
+        version: '1',
+      },
+      resolver: {
+        resolve: (request) => {
+          expect(request.requirement).toBe('demo-app==1.0.0');
+          return Promise.resolve(lockEvidence('1.0.0'));
+        },
+      },
+      uvPath: '/tools/uv',
+      workDir: '/work',
+    });
+    expect(result.plan.application.version).toBe('1.0.0');
+    expect(result.rejectedCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          applicationVersion: '2.0.0',
+          reason: expect.stringContaining('selected features require a recipe'),
+        }),
+      ])
+    );
   });
 
   it('selects complete coverage, searches glibc floors, and keeps a minimum wheel cover', async () => {

@@ -119,7 +119,17 @@ describe('workspace Python application plan preflight', () => {
     ]);
   });
 
-  it('reuses a current plan without invoking the planner', async () => {
+  it('reuses a current exact plan without invoking the planner', async () => {
+    config.targets = [
+      {
+        ...applicationTarget(),
+        application: {
+          extras: [],
+          features: {},
+          versionSelection: { selectors: [{ type: 'exact', version: '1.0.0' }] },
+        },
+      },
+    ];
     const stored = activePlanFor(config, config.targets[0] as WorkspacePythonApplicationTarget);
     let plannerCalled = false;
 
@@ -137,6 +147,40 @@ describe('workspace Python application plan preflight', () => {
     expect(plannerCalled).toBe(false);
     expect(result.plannedTargetIndexes).toEqual([]);
     expect(result.targets[0]?.activePlan).toBe(stored);
+  });
+
+  it.each(['demo', 'demo>=1'])('refreshes a current moving selector %s', async (spec) => {
+    const target = applicationTarget(spec);
+    config.targets = [target];
+    let stored = activePlanFor(config, target);
+    const reasons: string[] = [];
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      onPlanRequired: (requirements) => reasons.push(...requirements.map((item) => item.reason)),
+      planTargets: () => {
+        stored = activePlanFor(config, target, undefined, undefined, '2.0.0');
+        return Promise.resolve();
+      },
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+    expect(reasons).toEqual(['refresh-latest']);
+    expect(result.plannedTargetIndexes).toEqual([1]);
+    expect(result.targets[0]?.activePlan.plan.application.version).toBe('2.0.0');
+  });
+
+  it('can inspect the current latest plan without refreshing for a dry run', async () => {
+    const stored = activePlanFor(config, config.targets[0] as WorkspacePythonApplicationTarget);
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      refreshLatest: false,
+      planTargets: () => Promise.reject(new Error('planner must not run')),
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+    expect(result.plannedTargetIndexes).toEqual([]);
   });
 
   it('replans an inherited target when workspace Python defaults change', async () => {
@@ -187,7 +231,17 @@ describe('workspace Python application plan preflight', () => {
     expect(result.targets[0]?.activePlan.plan.intent.application.extras).toEqual(['server']);
   });
 
-  it('keeps a current plan when publication coordinates changed', async () => {
+  it('keeps a current exact plan when publication coordinates changed', async () => {
+    config.targets = [
+      {
+        ...applicationTarget(),
+        application: {
+          extras: [],
+          features: {},
+          versionSelection: { selectors: [{ type: 'exact', version: '1.0.0' }] },
+        },
+      },
+    ];
     const target = config.targets[0] as WorkspacePythonApplicationTarget;
     const stored = activePlanFor(config, target);
     config.python!.publication = {

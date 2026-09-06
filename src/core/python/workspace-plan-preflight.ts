@@ -18,7 +18,7 @@ import {
   type WorkspacePythonApplicationTarget,
 } from '../workspace.js';
 
-export type WorkspacePythonPlanRequiredReason = 'missing-or-unusable' | 'stale';
+export type WorkspacePythonPlanRequiredReason = 'missing-or-unusable' | 'stale' | 'refresh-latest';
 
 export interface WorkspacePythonPlanRequirement {
   reason: WorkspacePythonPlanRequiredReason;
@@ -36,6 +36,7 @@ export interface CurrentWorkspacePythonApplicationPlan {
 
 export interface EnsureWorkspacePythonApplicationPlansOptions {
   config: WorkspaceConfig;
+  refreshLatest?: boolean;
   onPlanRequired?: (requirements: WorkspacePythonPlanRequirement[]) => void;
   planTargets: (targetIndexes: number[]) => Promise<void>;
   readActivePlan?: (workspaceDir: string, targetId: string) => Promise<ActivePythonApplicationPlan>;
@@ -132,6 +133,14 @@ export async function ensureWorkspacePythonApplicationPlans(
     try {
       const activePlan = await readActivePlan(options.workspaceDir, item.targetId);
       if (planIsCurrent(activePlan, item)) {
+        if (options.refreshLatest !== false && item.selector.type === 'latest-compatible') {
+          requirements.push({
+            reason: 'refresh-latest',
+            targetId: item.targetId,
+            targetIndex: item.targetIndex,
+          });
+          continue;
+        }
         current.set(item.targetId, currentPlan(item, activePlan));
       } else {
         requirements.push({

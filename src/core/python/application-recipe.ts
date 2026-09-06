@@ -331,3 +331,12 @@ export function pythonRecipeIncompatibilityReason(
   }
   return undefined;
 }
+
+/** Version bounds scope recipe policy; only target selectors constrain application versions. */
+export function pythonApplicationRecipeForVersion(
+  recipe: PythonApplicationRecipe | undefined,
+  applicationVersion: string
+): PythonApplicationRecipe | undefined {
+  const versions = recipe?.compatibility?.applicationVersions;
+  return !versions || versionSatisfies(applicationVersion, versions) ? recipe : undefined;
+}
