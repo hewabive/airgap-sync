@@ -120,6 +120,7 @@ export type WorkspaceTarget =
 export type WorkspaceTargetEditableField =
   | 'branch'
   | 'coverage'
+  | 'extras'
   | 'fromMinor'
   | 'latest'
   | 'platforms'
@@ -128,6 +129,7 @@ export type WorkspaceTargetEditableField =
   | 'windowDays';
 
 export interface WorkspaceTargetEdit {
+  extras?: string[];
   branch?: string | null;
   coverage?: InlinePlatformCoveragePolicy | string | null;
   fromMinor?: string;
@@ -1460,6 +1462,7 @@ function targetKey(target: WorkspaceTarget): string {
 const workspaceTargetEditFields: WorkspaceTargetEditableField[] = [
   'branch',
   'coverage',
+  'extras',
   'fromMinor',
   'latest',
   'platforms',
@@ -1479,7 +1482,7 @@ export function workspaceTargetEditableFields(
     case 'npm':
       return [];
     case 'python-app':
-      return ['coverage', 'python', 'versionSelection'];
+      return ['coverage', 'python', 'versionSelection', 'extras'];
   }
 }
 
@@ -1587,6 +1590,9 @@ export async function editWorkspaceTarget(
           ...current.application,
         },
       };
+      if (edit.extras !== undefined) {
+        applicationTarget.application.extras = edit.extras;
+      }
       if (edit.versionSelection !== undefined) {
         applicationTarget.application.versionSelection = edit.versionSelection;
         delete applicationTarget.application.version;

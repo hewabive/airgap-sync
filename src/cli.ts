@@ -323,6 +323,8 @@ interface TargetCpythonDistributionsOptions {
 }
 
 interface TargetEditOptions {
+  extra?: string[];
+  clearExtras?: boolean;
   branch?: string;
   clearBranch?: boolean;
   coverage?: string;
@@ -1293,7 +1295,7 @@ function formatTargetValue(target: WorkspaceConfig['targets'][number]): string {
           ? `latest (${target.application.version})`
           : 'latest'
       : undefined;
-  return `${target.paused === true ? '[paused] ' : ''}${value}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationCoverage ? ` [coverage: ${pythonApplicationCoverage}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
+  return `${target.paused === true ? '[paused] ' : ''}${value}${target.type === 'python-app' ? ` [extras: ${target.application.extras.join(', ') || 'none'}]` : ''}${pythonApplicationVersions ? ` [versions: ${pythonApplicationVersions}]` : ''}${pythonApplicationCoverage ? ` [coverage: ${pythonApplicationCoverage}]` : ''}${pythonApplicationRuntime ? ` [python: ${pythonApplicationRuntime}]` : ''}`;
 }
 
 function formatWorkspaceConfig(config: WorkspaceConfig): string {
@@ -3327,6 +3329,11 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
         rl,
         'Python override (comma-separated minors, empty keeps current, "-" inherits)'
       );
+      const extras = await ask(rl, 'Extras (comma-separated, empty keeps current, "-" clears)');
+      const extrasArgs =
+        extras === '-'
+          ? ['--clear-extras']
+          : splitMenuValues(extras).flatMap((extra) => ['--extra', extra]);
       const pythonVersions = splitMenuValues(python);
       const pythonArgs =
         python === '-'
@@ -3339,7 +3346,12 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
               : [];
       const coverageArgs =
         coverage === '-' ? ['--inherit-coverage'] : coverage ? ['--coverage', coverage] : [];
-      if (versions.length === 0 && coverageArgs.length === 0 && pythonArgs.length === 0) {
+      if (
+        versions.length === 0 &&
+        coverageArgs.length === 0 &&
+        pythonArgs.length === 0 &&
+        extrasArgs.length === 0
+      ) {
         console.log('No target changes requested.');
         return;
       }
@@ -3352,6 +3364,7 @@ async function editTargetFromMenu(workspaceDir: string, rl: ReadlineInterface): 
           ...versions.flatMap((version) => ['--include-version', version]),
           ...coverageArgs,
           ...pythonArgs,
+          ...extrasArgs,
         ],
         workspaceDir
       );
@@ -4506,6 +4519,12 @@ targetCommand
   .argument('[workspace]', 'Workspace directory', '.')
   .option('--branch <name>', 'Replace a Git target branch')
   .option('--clear-branch', 'Remove an explicit Git target branch')
+  .option(
+    '--extra <name>',
+    'Replace Python application extras; repeat for multiple extras',
+    collectOptionalStrings
+  )
+  .option('--clear-extras', 'Remove all Python application extras')
   .option('--coverage <id>', 'Override a Python application coverage policy')
   .option('--from-minor <version>', 'Replace the lowest CPython minor')
   .option('--inherit-coverage', 'Use workspace default coverage for a Python application')
@@ -4534,6 +4553,9 @@ targetCommand
   )
   .action(async (index: string, workspace: string, options: TargetEditOptions) => {
     try {
+      if (options.extra !== undefined && options.clearExtras === true) {
+        throw new Error('Use either --extra or --clear-extras, not both');
+      }
       if (options.branch !== undefined && options.clearBranch === true) {
         throw new Error('Use either --branch or --clear-branch, not both');
       }
@@ -4550,6 +4572,8 @@ targetCommand
         throw new Error('Use a Python override or --inherit-python, not both');
       }
       const edit: WorkspaceTargetEdit = {
+        ...(options.extra !== undefined ? { extras: options.extra } : {}),
+        ...(options.clearExtras === true ? { extras: [] } : {}),
         ...(options.branch !== undefined ? { branch: options.branch } : {}),
         ...(options.clearBranch === true ? { branch: null } : {}),
         ...(options.coverage !== undefined ? { coverage: options.coverage } : {}),

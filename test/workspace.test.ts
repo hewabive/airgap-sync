@@ -379,7 +379,7 @@ describe('workspace config', () => {
         spec: 'orjson',
         type: 'python-app',
       })
-    ).toEqual(['coverage', 'python', 'versionSelection']);
+    ).toEqual(['coverage', 'python', 'versionSelection', 'extras']);
 
     await initWorkspace({ workspaceDir: tempDir });
     await addWorkspaceTarget(tempDir, { spec: 'eslint@latest', type: 'npm' });
@@ -537,6 +537,41 @@ describe('workspace config', () => {
     target = (await readWorkspaceConfig(tempDir)).targets[0];
     expect(target).not.toHaveProperty('coverage');
     expect(target).not.toHaveProperty('python');
+  });
+
+  it('replaces, normalizes, preserves, and clears Python extras without changing other intent', async () => {
+    await initWorkspace({ workspaceDir: tempDir });
+    await addWorkspaceTarget(tempDir, {
+      type: 'python-app',
+      spec: 'sglang',
+      application: { extras: ['diffusion'], features: {} },
+    });
+    const edited = await editWorkspaceTarget(tempDir, 1, { extras: ['ALL', 'all', 'HTTP_2'] });
+    expect(edited.target).toMatchObject({
+      application: { extras: ['all', 'http-2'], features: {} },
+    });
+    expect(edited.changed).toBe(true);
+    const repeated = await editWorkspaceTarget(tempDir, 1, { extras: ['http-2', 'all'] });
+    expect(repeated.changed).toBe(false);
+    await editWorkspaceTarget(tempDir, 1, { python: { policy: 'selected', versions: ['3.12'] } });
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).toMatchObject({
+      application: { extras: ['all', 'http-2'] },
+    });
+    await expect(editWorkspaceTarget(tempDir, 1, { extras: ['bad/extra'] })).rejects.toThrow(
+      'extras'
+    );
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).toMatchObject({
+      application: { extras: ['all', 'http-2'] },
+    });
+    await editWorkspaceTarget(tempDir, 1, { extras: [] });
+    expect((await readWorkspaceConfig(tempDir)).targets[0]).toMatchObject({
+      application: { extras: [] },
+      python: { versions: ['3.12'] },
+    });
+    await addWorkspaceTarget(tempDir, { type: 'git', url: 'https://github.com/example/demo.git' });
+    await expect(editWorkspaceTarget(tempDir, 2, { extras: ['all'] })).rejects.toThrow(
+      'extras cannot be edited'
+    );
   });
 
   it('treats inherited and equivalent explicit coverage as the same application selection', async () => {

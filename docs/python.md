@@ -94,6 +94,21 @@ Project metadata such as `Requires-Python`, recipe policy, dependency resolution
 wheel availability may narrow them, with every omission recorded in the plan and final
 download report.
 
+Extras can be changed for existing applications in **Targets → Edit target**. The
+current list appears in the target summary. Enter comma-separated names to replace
+it, leave the input empty to keep it, or enter `-` to remove all extras. CLI equivalents:
+
+```sh
+airgap-sync target edit 1 . --extra all
+airgap-sync target edit 1 . --extra diffusion --extra tracing
+airgap-sync target edit 1 . --clear-extras
+```
+
+`--extra` replaces the list; it does not append to the previous selection. It cannot
+be combined with `--clear-extras`. Changing extras invalidates the application's
+plan, so the next download resolves the new dependency set. `all` is an extra defined
+by the upstream package, not a universal request for every extra.
+
 Planning prints the application version and Python/platform candidate being checked,
 with a status message every 15 seconds while resolution is running. If newer candidate
 versions are rejected or requested Python minors are omitted, both `plan` and `download`
