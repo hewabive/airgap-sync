@@ -4838,9 +4838,18 @@ program
           (target) => target.type === 'cpython-distributions'
         );
         timing.switchTo('Plan Python applications');
+        const pythonPlanningCutoff = new Date().toISOString();
         const pythonApplicationPreflight = await ensureWorkspacePythonApplicationPlans({
           config,
+          createIndexClient: (url) =>
+            new HttpPythonIndexClient(url, {
+              ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
+            }),
+          cutoff: pythonPlanningCutoff,
           refreshLatest: options.dryRun !== true,
+          onLatestCheck: (targetId) => {
+            console.error(`[download] checking Python application releases: ${targetId}`);
+          },
           onPlanRequired: (requirements) => {
             console.error(
               `[download] planning Python applications: ${requirements
@@ -4859,6 +4868,7 @@ program
             }
             const results = await planWorkspacePythonApplications({
               config,
+              cutoff: pythonPlanningCutoff,
               ...(options.retryDelaysMs ? { retryDelaysMs: options.retryDelaysMs } : {}),
               targetIndexes,
               workspaceDir,
@@ -4873,6 +4883,17 @@ program
           ...(preserveExistingTargets ? { targetIndexes: activeTargetIndexes } : {}),
           workspaceDir,
         });
+        for (const target of pythonApplicationPreflight.targets) {
+          if (
+            options.dryRun !== true &&
+            target.selector.type === 'latest-compatible' &&
+            !pythonApplicationPreflight.plannedTargetIndexes.includes(target.targetIndex)
+          ) {
+            console.error(
+              `[download] reusing Python application plan ${target.targetId}: ${target.activePlan.plan.application.version} (no newer matching release)`
+            );
+          }
+        }
         timing.switchTo('Preparation');
         const pythonApplicationPlans = pythonApplicationPreflight.targets.map(
           ({ activePlan, selectionId, targetId }) => ({ activePlan, selectionId, targetId })

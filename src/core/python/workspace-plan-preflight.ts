@@ -3,7 +3,12 @@ import {
   readActivePythonApplicationPlan,
   type ActivePythonApplicationPlan,
 } from './active-plan-store.js';
-import type { PythonApplicationRecipe } from './application-recipe.js';
+import {
+  assertPythonApplicationRecipeCurrent,
+  pythonApplicationRecipeForVersion,
+  type PythonApplicationRecipe,
+} from './application-recipe.js';
+import { pythonApplicationVersions } from './application-planner.js';
 import {
   pythonApplicationSelectorId,
   pythonApplicationTargetId,
@@ -11,6 +16,13 @@ import {
 } from './application-paths.js';
 import type { PythonApplicationVersionSelector } from './application-intent.js';
 import { platformCoveragePolicyDigest } from './coverage-policy.js';
+import {
+  HttpPythonIndexClient,
+  MemoizedPythonIndexClient,
+  type PythonIndexClient,
+} from './index-client.js';
+import { compareVersions } from './pep440.js';
+import { createPythonPlanningIndex } from './planning-source.js';
 import {
   pythonApplicationIntentForVersionSelector,
   resolveWorkspacePythonApplication,
@@ -36,7 +48,10 @@ export interface CurrentWorkspacePythonApplicationPlan {
 
 export interface EnsureWorkspacePythonApplicationPlansOptions {
   config: WorkspaceConfig;
+  createIndexClient?: (indexUrl: string) => PythonIndexClient;
+  cutoff?: string;
   refreshLatest?: boolean;
+  onLatestCheck?: (targetId: string) => void;
   onPlanRequired?: (requirements: WorkspacePythonPlanRequirement[]) => void;
   planTargets: (targetIndexes: number[]) => Promise<void>;
   readActivePlan?: (workspaceDir: string, targetId: string) => Promise<ActivePythonApplicationPlan>;
@@ -54,6 +69,7 @@ export interface EnsureWorkspacePythonApplicationPlansResult {
 
 interface ExpectedWorkspacePythonApplicationPlan {
   intent: ReturnType<typeof pythonApplicationIntentForVersionSelector>;
+  recipe?: PythonApplicationRecipe;
   recipeDigest?: string;
   resolved: ReturnType<typeof resolveWorkspacePythonApplication>;
   selector: PythonApplicationVersionSelector;
@@ -88,7 +104,7 @@ async function expectedPlans(
     expected.push(
       ...resolved.versionSelection.selectors.map((selector) => ({
         intent: pythonApplicationIntentForVersionSelector(resolved, selector),
-        ...(recipe ? { recipeDigest: semanticDigest(recipe) } : {}),
+        ...(recipe ? { recipe, recipeDigest: semanticDigest(recipe) } : {}),
         resolved,
         selector,
         targetId: pythonApplicationSelectorId(
@@ -107,9 +123,51 @@ export async function ensureWorkspacePythonApplicationPlans(
   options: EnsureWorkspacePythonApplicationPlansOptions
 ): Promise<EnsureWorkspacePythonApplicationPlansResult> {
   const readActivePlan = options.readActivePlan ?? readActivePythonApplicationPlan;
+  const cutoff = options.cutoff ?? new Date().toISOString();
+  const indexes = new Map<string, PythonIndexClient>();
+  const createClient = options.createIndexClient ?? ((url) => new HttpPythonIndexClient(url));
   const expected = await expectedPlans(options);
   const current = new Map<string, CurrentWorkspacePythonApplicationPlan>();
   const requirements: WorkspacePythonPlanRequirement[] = [];
+
+  const latestPlanIsReusable = async (
+    item: ExpectedWorkspacePythonApplicationPlan,
+    activePlan: ActivePythonApplicationPlan
+  ): Promise<boolean> => {
+    options.onLatestCheck?.(item.targetId);
+    const key = semanticDigest(item.intent.source);
+    let index = indexes.get(key);
+    if (!index) {
+      const sourceIndex = item.intent.source.indexUrl ?? 'https://pypi.org/simple/';
+      const resolution = item.intent.source.resolution;
+      index =
+        resolution?.packageIndexes?.length || resolution?.prereleasePackages !== undefined
+          ? createPythonPlanningIndex({ sourceIndex, resolution, cutoff, createClient }).index
+          : new MemoizedPythonIndexClient(createClient(sourceIndex));
+      indexes.set(key, index);
+    }
+    const project = await index.getProject(item.intent.application.name);
+    const latest = pythonApplicationVersions(project, item.intent, cutoff)[0];
+    if (!latest || compareVersions(latest, activePlan.plan.application.version) !== 0) {
+      return false;
+    }
+    assertPythonApplicationRecipeCurrent(
+      pythonApplicationRecipeForVersion(item.recipe, activePlan.plan.application.version),
+      cutoff
+    );
+    // A surviving wheel for the same release must not hide removed or yanked planned wheels.
+    return activePlan.plan.wheels
+      .filter((wheel) => wheel.package === activePlan.plan.application.name)
+      .every((wheel) =>
+        project.files.some(
+          (file) =>
+            file.filename === wheel.filename &&
+            file.hashes.sha256 === wheel.sha256 &&
+            file.yanked === undefined &&
+            (!file.uploadTime || Date.parse(file.uploadTime) <= Date.parse(cutoff))
+        )
+      );
+  };
 
   const currentPlan = (
     item: ExpectedWorkspacePythonApplicationPlan,
@@ -130,31 +188,37 @@ export async function ensureWorkspacePythonApplicationPlans(
   });
 
   for (const item of expected) {
+    let activePlan: ActivePythonApplicationPlan;
+    let isCurrent: boolean;
     try {
-      const activePlan = await readActivePlan(options.workspaceDir, item.targetId);
-      if (planIsCurrent(activePlan, item)) {
-        if (options.refreshLatest !== false && item.selector.type === 'latest-compatible') {
-          requirements.push({
-            reason: 'refresh-latest',
-            targetId: item.targetId,
-            targetIndex: item.targetIndex,
-          });
-          continue;
-        }
-        current.set(item.targetId, currentPlan(item, activePlan));
-      } else {
-        requirements.push({
-          reason: 'stale',
-          targetId: item.targetId,
-          targetIndex: item.targetIndex,
-        });
-      }
+      activePlan = await readActivePlan(options.workspaceDir, item.targetId);
+      isCurrent = planIsCurrent(activePlan, item);
     } catch {
       requirements.push({
         reason: 'missing-or-unusable',
         targetId: item.targetId,
         targetIndex: item.targetIndex,
       });
+      continue;
+    }
+    if (!isCurrent) {
+      requirements.push({
+        reason: 'stale',
+        targetId: item.targetId,
+        targetIndex: item.targetIndex,
+      });
+    } else if (
+      options.refreshLatest !== false &&
+      item.selector.type === 'latest-compatible' &&
+      !(await latestPlanIsReusable(item, activePlan))
+    ) {
+      requirements.push({
+        reason: 'refresh-latest',
+        targetId: item.targetId,
+        targetIndex: item.targetIndex,
+      });
+    } else {
+      current.set(item.targetId, currentPlan(item, activePlan));
     }
   }
 

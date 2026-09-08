@@ -12,12 +12,11 @@ import { isValidPackageName, normalizePackageName } from './names.js';
 import type { PythonResolutionPolicy } from './source-policy.js';
 import type { PythonApplicationResolver } from './uv-adapter.js';
 
-/** One immutable, lazily captured project view shared by uv and artifact enumeration. */
-export async function createPythonPlanningSource(options: {
+/** Capture project metadata without starting uv or the local planning server. */
+export function createPythonPlanningIndex(options: {
   sourceIndex: string;
   resolution: PythonResolutionPolicy;
   cutoff: string;
-  resolver: PythonApplicationResolver;
   createClient?: (url: string) => PythonIndexClient;
 }) {
   const clients = new Map<string, PythonIndexClient>();
@@ -73,6 +72,26 @@ export async function createPythonPlanningSource(options: {
       return project;
     },
   });
+  return {
+    index,
+    snapshot: () => ({
+      schemaVersion: 1,
+      cutoff: options.cutoff,
+      resolution: options.resolution,
+      projects: [...projects.values()],
+    }),
+  };
+}
+
+/** One immutable, lazily captured project view shared by uv and artifact enumeration. */
+export async function createPythonPlanningSource(options: {
+  sourceIndex: string;
+  resolution: PythonResolutionPolicy;
+  cutoff: string;
+  resolver: PythonApplicationResolver;
+  createClient?: (url: string) => PythonIndexClient;
+}) {
+  const { index, snapshot } = createPythonPlanningIndex(options);
   let failure: Error | undefined;
   const server = createServer((request, response) => {
     void (async () => {
@@ -143,12 +162,7 @@ export async function createPythonPlanningSource(options: {
   return {
     index,
     resolver,
-    snapshot: () => ({
-      schemaVersion: 1,
-      cutoff: options.cutoff,
-      resolution: options.resolution,
-      projects: [...projects.values()],
-    }),
+    snapshot,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.closeAllConnections();

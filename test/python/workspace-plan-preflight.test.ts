@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { semanticDigest } from '../../src/core/canonical-json.js';
 import * as fs from '../../src/core/fs.js';
 import type { ActivePythonApplicationPlan } from '../../src/core/python/active-plan-store.js';
@@ -12,6 +12,8 @@ import {
 } from '../../src/core/python/application-paths.js';
 import { platformCoveragePolicyDigest } from '../../src/core/python/coverage-policy.js';
 import { createPythonEnvironmentPlan } from '../../src/core/python/environment-plan.js';
+import type { PythonIndexClient, PythonIndexFile } from '../../src/core/python/index-client.js';
+import { parseRequirement } from '../../src/core/python/requirements.js';
 import { ensureWorkspacePythonApplicationPlans } from '../../src/core/python/workspace-plan-preflight.js';
 import {
   initWorkspace,
@@ -24,11 +26,32 @@ import {
 let workspaceDir: string;
 let config: WorkspaceConfig;
 
+function applicationFile(version = '1.0.0', name = 'demo'): PythonIndexFile {
+  const filename = `${name.replaceAll('-', '_')}-${version}-py3-none-any.whl`;
+  return {
+    filename,
+    hashes: { sha256: 'a'.repeat(64) },
+    uploadTime: '2026-07-01T00:00:00.000Z',
+    url: `https://example.test/${filename}`,
+  };
+}
+
+function fixtureIndex(files: PythonIndexFile[]) {
+  return {
+    sourceIndex: 'https://example.test/simple/',
+    getMetadata: () => Promise.reject(new Error('metadata must not be fetched')),
+    getProject: vi.fn((name: string) => Promise.resolve({ apiVersion: '1.0', files, name })),
+  } satisfies PythonIndexClient;
+}
+
 function applicationTarget(spec = 'demo'): WorkspacePythonApplicationTarget {
+  const parsed = parseRequirement(spec);
+  if (!parsed.ok) throw new Error(parsed.reason);
   return {
     application: {
       extras: [],
       features: {},
+      ...(parsed.requirement.specifier ? { version: parsed.requirement.specifier } : {}),
     },
     spec,
     type: 'python-app',
@@ -44,6 +67,7 @@ function activePlanFor(
 ): ActivePythonApplicationPlan {
   const resolved = resolveWorkspacePythonApplication(workspaceConfig, target);
   const selected = selector ?? resolved.versionSelection.selectors[0]!;
+  const file = applicationFile(applicationVersion, resolved.intent.application.name);
   const plan = createPythonEnvironmentPlan({
     application: {
       name: resolved.intent.application.name,
@@ -75,7 +99,16 @@ function activePlanFor(
       platforms: [],
     },
     schemaVersion: 2,
-    wheels: [],
+    wheels: [
+      {
+        filename: file.filename,
+        package: resolved.intent.application.name,
+        platforms: [],
+        sha256: file.hashes.sha256!,
+        url: file.url,
+        version: applicationVersion,
+      },
+    ],
   });
   return { plan } as ActivePythonApplicationPlan;
 }
@@ -135,6 +168,9 @@ describe('workspace Python application plan preflight', () => {
 
     const result = await ensureWorkspacePythonApplicationPlans({
       config,
+      createIndexClient: () => {
+        throw new Error('index must not be queried');
+      },
       planTargets: () => {
         plannerCalled = true;
         return Promise.resolve();
@@ -156,6 +192,7 @@ describe('workspace Python application plan preflight', () => {
     const reasons: string[] = [];
     const result = await ensureWorkspacePythonApplicationPlans({
       config,
+      createIndexClient: () => fixtureIndex([applicationFile(), applicationFile('2.0.0')]),
       onPlanRequired: (requirements) => reasons.push(...requirements.map((item) => item.reason)),
       planTargets: () => {
         stored = activePlanFor(config, target, undefined, undefined, '2.0.0');
@@ -168,6 +205,196 @@ describe('workspace Python application plan preflight', () => {
     expect(reasons).toEqual(['refresh-latest']);
     expect(result.plannedTargetIndexes).toEqual([1]);
     expect(result.targets[0]?.activePlan.plan.application.version).toBe('2.0.0');
+  });
+
+  it.each(['demo', 'demo>=1', 'demo<2'])(
+    'reuses the latest plan for %s without resolving dependencies',
+    async (spec) => {
+      const target = applicationTarget(spec);
+      config.targets = [target];
+      const stored = activePlanFor(config, target);
+      const index = fixtureIndex([
+        applicationFile(),
+        applicationFile('2.0.0rc1'),
+        { ...applicationFile('3.0.0'), yanked: true },
+        { ...applicationFile('4.0.0'), uploadTime: '2027-01-01T00:00:00.000Z' },
+        applicationFile('5.0.0', 'other'),
+        { ...applicationFile('6.0.0'), filename: 'demo-6.0.0.tar.gz' },
+        ...(spec === 'demo<2' ? [applicationFile('2.0.0')] : []),
+      ]);
+      const result = await ensureWorkspacePythonApplicationPlans({
+        config,
+        createIndexClient: () => index,
+        cutoff: '2026-09-08T00:00:00.000Z',
+        planTargets: () => Promise.reject(new Error('planner must not run')),
+        readActivePlan: () => Promise.resolve(stored),
+        readRecipe: () => Promise.resolve(undefined),
+        workspaceDir,
+      });
+      expect(index.getProject).toHaveBeenCalledExactlyOnceWith('demo');
+      expect(result.plannedTargetIndexes).toEqual([]);
+      expect(result.targets[0]?.activePlan).toBe(stored);
+    }
+  );
+
+  it('still resolves newer candidates when an earlier attempt found them incompatible', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    const stored = activePlanFor(config, target);
+    stored.plan.presentation = { rejectedCandidateSummaries: ['2.0.0 has no compatible wheels'] };
+    const planTargets = vi.fn(() => Promise.resolve());
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      createIndexClient: () => fixtureIndex([applicationFile(), applicationFile('2.0.0')]),
+      planTargets,
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+    expect(planTargets).toHaveBeenCalledExactlyOnceWith([1]);
+    expect(result.targets[0]?.activePlan.plan.application.version).toBe('1.0.0');
+  });
+
+  it.each(['removed', 'yanked', 'changed hash'])(
+    'replans when a planned application wheel is %s even if the version remains available',
+    async (change) => {
+      const target = config.targets[0] as WorkspacePythonApplicationTarget;
+      const stored = activePlanFor(config, target);
+      const files = [
+        { ...applicationFile(), filename: 'demo-1.0.0-cp312-cp312-win_amd64.whl' },
+        ...(change === 'removed'
+          ? []
+          : [
+              {
+                ...applicationFile(),
+                ...(change === 'yanked' ? { yanked: true as const } : {}),
+                ...(change === 'changed hash' ? { hashes: { sha256: 'b'.repeat(64) } } : {}),
+              },
+            ]),
+      ];
+      const planTargets = vi.fn(() => Promise.resolve());
+      await ensureWorkspacePythonApplicationPlans({
+        config,
+        createIndexClient: () => fixtureIndex(files),
+        planTargets,
+        readActivePlan: () => Promise.resolve(stored),
+        readRecipe: () => Promise.resolve(undefined),
+        workspaceDir,
+      });
+      expect(planTargets).toHaveBeenCalledExactlyOnceWith([1]);
+    }
+  );
+
+  it('replans when the selected release disappears from the index', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    let stored = activePlanFor(config, target);
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      createIndexClient: () => fixtureIndex([applicationFile('0.9.0')]),
+      planTargets: () => {
+        stored = activePlanFor(config, target, undefined, undefined, '0.9.0');
+        return Promise.resolve();
+      },
+      readActivePlan: () => Promise.resolve(stored),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+    expect(result.plannedTargetIndexes).toEqual([1]);
+    expect(result.targets[0]?.activePlan.plan.application.version).toBe('0.9.0');
+  });
+
+  it.each(['allow', 'reject'] as const)(
+    'checks the assigned source with its %s policy for missing upload times',
+    async (missingUploadTime) => {
+      const target = config.targets[0] as WorkspacePythonApplicationTarget;
+      target.resolution = {
+        packageIndexes: [
+          { indexUrl: 'https://vendor.test/simple/', packages: ['demo'], missingUploadTime },
+        ],
+      };
+      const stored = activePlanFor(config, target);
+      const undated = applicationFile('2.0.0');
+      delete undated.uploadTime;
+      const createIndexClient = vi.fn(() => fixtureIndex([applicationFile(), undated]));
+      const planTargets = vi.fn(() => Promise.resolve());
+      const result = await ensureWorkspacePythonApplicationPlans({
+        config,
+        createIndexClient,
+        planTargets,
+        readActivePlan: () => Promise.resolve(stored),
+        readRecipe: () => Promise.resolve(undefined),
+        workspaceDir,
+      });
+      expect(createIndexClient).toHaveBeenCalledExactlyOnceWith('https://vendor.test/simple/');
+      expect(result.plannedTargetIndexes).toEqual(missingUploadTime === 'allow' ? [1] : []);
+    }
+  );
+
+  it('shares one index request between moving selectors for the same application', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    target.application.versionSelection = {
+      selectors: [{ type: 'latest-compatible' }, { type: 'latest-compatible', constraint: '>=1' }],
+    };
+    const resolved = resolveWorkspacePythonApplication(config, target);
+    const stored = new Map(
+      resolved.versionSelection.selectors.map((selector) => [
+        pythonApplicationSelectorId('demo', resolved.coveragePolicy.id, selector),
+        activePlanFor(config, target, undefined, selector),
+      ])
+    );
+    const index = fixtureIndex([applicationFile()]);
+    const result = await ensureWorkspacePythonApplicationPlans({
+      config,
+      createIndexClient: () => index,
+      planTargets: () => Promise.reject(new Error('planner must not run')),
+      readActivePlan: (_workspace, targetId) => Promise.resolve(stored.get(targetId)!),
+      readRecipe: () => Promise.resolve(undefined),
+      workspaceDir,
+    });
+    expect(index.getProject).toHaveBeenCalledTimes(1);
+    expect(result.plannedTargetIndexes).toEqual([]);
+    expect(result.targets).toHaveLength(1);
+  });
+
+  it('reports index failures without invoking the planner or silently reusing the plan', async () => {
+    const stored = activePlanFor(config, config.targets[0] as WorkspacePythonApplicationTarget);
+    const planTargets = vi.fn(() => Promise.resolve());
+    await expect(
+      ensureWorkspacePythonApplicationPlans({
+        config,
+        createIndexClient: () => ({
+          ...fixtureIndex([]),
+          getProject: () => Promise.reject(new Error('index unavailable')),
+        }),
+        planTargets,
+        readActivePlan: () => Promise.resolve(stored),
+        readRecipe: () => Promise.resolve(undefined),
+        workspaceDir,
+      })
+    ).rejects.toThrow('index unavailable');
+    expect(planTargets).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a latest plan after its recipe expires', async () => {
+    const target = config.targets[0] as WorkspacePythonApplicationTarget;
+    const recipe: PythonApplicationRecipe = {
+      application: 'demo',
+      compatibility: { expiresAt: '2026-08-01T00:00:00.000Z' },
+      id: 'demo',
+      schemaVersion: 1,
+      version: '1',
+    };
+    const stored = activePlanFor(config, target, recipe);
+    await expect(
+      ensureWorkspacePythonApplicationPlans({
+        config,
+        createIndexClient: () => fixtureIndex([applicationFile()]),
+        cutoff: '2026-09-08T00:00:00.000Z',
+        planTargets: () => Promise.reject(new Error('planner must not run')),
+        readActivePlan: () => Promise.resolve(stored),
+        readRecipe: () => Promise.resolve(recipe),
+        workspaceDir,
+      })
+    ).rejects.toThrow('recipe demo expired');
   });
 
   it('invalidates an old SGLang plan when maintained sources become available', async () => {
@@ -197,6 +424,9 @@ describe('workspace Python application plan preflight', () => {
     const stored = activePlanFor(config, config.targets[0] as WorkspacePythonApplicationTarget);
     const result = await ensureWorkspacePythonApplicationPlans({
       config,
+      createIndexClient: () => {
+        throw new Error('index must not be queried');
+      },
       refreshLatest: false,
       planTargets: () => Promise.reject(new Error('planner must not run')),
       readActivePlan: () => Promise.resolve(stored),

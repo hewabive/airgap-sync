@@ -133,7 +133,7 @@ function indexFileAllowed(file: PythonIndexFile, cutoff: string | undefined): bo
   return Date.parse(file.uploadTime) <= Date.parse(cutoff);
 }
 
-function applicationVersions(
+export function pythonApplicationVersions(
   project: PythonProjectIndex,
   intent: PythonApplicationIntent,
   cutoff: string | undefined
@@ -745,7 +745,7 @@ export async function planPythonApplication(
   const createdAt = options.createdAt ?? new Date().toISOString();
   resolvePythonApplicationRecipe(options.recipe, options.intent);
   const rootProject = await options.index.getProject(options.intent.application.name);
-  const versions = applicationVersions(rootProject, options.intent, options.cutoff);
+  const versions = pythonApplicationVersions(rootProject, options.intent, options.cutoff);
   if (versions.length === 0) {
     throw new PythonApplicationPlanningError(
       `No stable application version satisfies ${options.intent.application.version ?? 'the requested policy'}`,

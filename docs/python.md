@@ -116,9 +116,15 @@ print warnings and the path to the saved environment plan. Its
 `presentation.rejectedCandidateSummaries` preserves resolver stderr, including the
 specific dependency conflict or missing wheel; terminal warnings show a bounded summary.
 
-Each normal download refreshes `latest-compatible` selectors (including constrained
-selectors) against the source index. Exact selectors reuse current plans. A dry run
-uses existing planning evidence and does not check for newer releases.
+Each normal download checks `latest-compatible` selectors (including constrained
+selectors) against the source index. When the selected version is still the newest
+stable candidate and its planned application wheels remain available, download reuses
+the current plan without running uv or resolving dependencies again. Newer candidates,
+removed or yanked application wheels, and configuration changes trigger planning.
+Newer candidates still require resolution to check compatibility, even if a previous
+attempt rejected them. Exact selectors reuse current plans. To refresh dependencies
+for an unchanged application version, run `airgap-sync plan --update <target>`.
+A dry run uses existing planning evidence and does not check for newer releases.
 
 ### Additional package sources and prerelease dependencies
 
